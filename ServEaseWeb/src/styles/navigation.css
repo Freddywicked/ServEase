@@ -1,0 +1,2 @@
+/* Keep each application header and its fixed sidebar visually joined while content scrolls. */
+.customer-header,.admin-header{position:sticky;top:0;z-index:20}.customer-sidebar,.admin-sidebar{z-index:15}.customer-content,.admin-content{min-height:calc(100vh - 100px)}
