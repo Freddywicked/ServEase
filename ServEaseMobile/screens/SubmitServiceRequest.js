@@ -3,6 +3,24 @@ import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'rea
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 
+/* ============================================================================
+ * BACKEND-READY — SubmitServiceRequest (step 4 of 4 — confirmation)
+ * ----------------------------------------------------------------------------
+ * This screen currently assumes the request was already sent (it's pure
+ * confirmation UI, no `route.params`/props are even read). Depending on where
+ * the actual POST /service-requests call ends up living (see the note in
+ * RecommendServiceProvider.js's "Request Quotation" button), this screen is
+ * either:
+ *   (a) just a static success message shown after that POST already
+ *       succeeded on the previous screen, or
+ *   (b) where the POST itself fires, using the fully assembled draft passed
+ *       in via route.params — in which case this needs a loading/error state
+ *       (the request could fail, the provider could be unavailable by the
+ *       time it's confirmed, etc.) rather than only ever showing success.
+ * Pick one; right now there's no `useState`/`useEffect` here to support
+ * either, so it silently assumes (a).
+ * ========================================================================== */
+
 const TOTAL_STEPS = 4;
 const CURRENT_STEP = 4;
 
@@ -13,6 +31,13 @@ const SubmitServiceRequest = ({ navigation }) => {
 
     const handleDone = () => {
         navigation.navigate('CustomerHome');
+        //
+        // BACKEND-READY: once request_id exists, this is a good point to
+        // start a Supabase Realtime subscription (or make sure one is
+        // already running app-wide) on that request's row, so
+        // CustomerDashboard's "Active Repair" card picks up the moment the
+        // provider responds with a QUOTATION — the provider is now the one
+        // this flow is waiting on.
     };
 
     return (

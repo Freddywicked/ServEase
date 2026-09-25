@@ -89,9 +89,6 @@ const LoginScreen = ({ navigation }) => {
                     <Text style={styles.signInButtonText}>Sign In</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity onPress={() => navigation.navigate('ServiceProviderDashboard')}>
-                    <Text style={styles.providerText}>Sign as Service Provider</Text>
-                </TouchableOpacity>
 
                 <View style={styles.dividerRow}>
                     <View style={styles.dividerLine} />

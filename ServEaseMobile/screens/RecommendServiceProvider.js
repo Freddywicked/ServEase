@@ -3,11 +3,37 @@ import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet, Animated, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 
+/* ============================================================================
+ * BACKEND-READY — RecommendServiceProvider (step 3 of 4)
+ * ----------------------------------------------------------------------------
+ * This is the first screen in the flow where the OTHER user (the service
+ * provider) enters the picture — picking a provider here and tapping
+ * "Request Quotation" is what should create their side of this transaction.
+ * See the note on the request button below for what that needs to trigger.
+ * ========================================================================== */
+
 const TOTAL_STEPS = 4;
 const CURRENT_STEP = 3;
 
 // Hardcoded per instructions for this round of frontend review — swap this
 // out for a backend fetch of matched providers once that API is ready.
+//
+// BACKEND-READY: GET /service-providers/recommended
+//   Query params:  category, latitude, longitude (from the draft request)
+//   Response fields map onto:
+//     name, specialty          → USER.name / SERVICE_PROVIDER_SPECIALIZATION
+//     verified                 → SERVICE_PROVIDER.verification_status === 'verified'
+//     available                → SERVICE_PROVIDER.availability
+//     rating, reviews          → aggregated from RATING (avg rating, count)
+//                                 where provider_id = this provider
+//     experienceYears          → SERVICE_PROVIDER.experience
+//     specialities             → SERVICE_PROVIDER_SPECIALIZATION.specialization_name (joined)
+//     location                 → distance computed server-side (or via Google
+//                                 Maps Platform) from SERVICE_PROVIDER.latitude/
+//                                 longitude vs. the customer's request location
+//     availability (schedule)  → SERVICE_PROVIDER.availability
+//   Sorting/matching should reflect the subtitle text below: specialization
+//   match, sentiment/rating, and distance.
 const SERVICE_PROVIDERS = [
     {
         id: 'mark-rivera',
@@ -85,6 +111,10 @@ const RecommendServiceProvider = ({ navigation, route }) => {
         // TEMPORARY: simulates re-searching for matched providers until the
         // real backend search endpoint is integrated. Shows the same
         // hardcoded providers again once the reload finishes.
+        //
+        // BACKEND-READY: re-call GET /service-providers/recommended with an
+        // `exclude` list of provider ids already shown (or a page/offset), so
+        // this doesn't just loop back to the same result set.
         setIsReloading(true);
         reloadTimeoutRef.current = setTimeout(() => {
             setSelectedProviderId(SERVICE_PROVIDERS[0].id);
@@ -189,6 +219,28 @@ const RecommendServiceProvider = ({ navigation, route }) => {
                     <>
                         {SERVICE_PROVIDERS.map(renderProviderCard)}
 
+                        {/*
+                         * BACKEND-READY — "Request Quotation" (customer → provider handoff)
+                         * This is the key moment this whole flow has been building the
+                         * draft request for. On press, before navigating:
+                         *   1. POST /service-requests with the full assembled draft
+                         *      (category, description, photo url, lat/long, ai_diagnosis)
+                         *      plus provider_id = selectedProviderId. This is the actual
+                         *      SERVICE_REQUEST row — request_status starts something like
+                         *      'pending_quotation'.
+                         *   2. Provider-side effect: the selected provider needs to see
+                         *      this as a new incoming request on their dashboard, and get
+                         *      an FCM push notification — they're the one who now has to
+                         *      act (submit a QUOTATION with labor_cost/parts_cost/remarks,
+                         *      or decline). Nothing else in this flow proceeds until they do.
+                         *   3. Subscribe the customer's app (Supabase Realtime, on
+                         *      request_id) so that when the provider's QUOTATION comes in,
+                         *      CustomerDashboard / RequestDetails update without polling.
+                         * Currently `selectedProviderId` isn't passed to SubmitServiceRequest
+                         * at all — the onPress below will need
+                         * `{ ...route.params, providerId: selectedProviderId }` added once
+                         * this is wired up.
+                         */}
                         <TouchableOpacity onPress={() => navigation.navigate('SubmitServiceRequest')}>
                             <LinearGradient
                                 colors={['#0255AF', '#04A5A5']}

@@ -5,7 +5,7 @@ const SplashScreen = ({ navigation }) => {
     return (
         <View style={styles.container}>
             <Image source={require('../assets/logo_servease.png')} style={styles.logo} />
-            <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('SignupScreen')}>
+            <TouchableOpacity style={styles.button} onPress={() => navigation.navigate('LoginScreen')}>
                 <View style={styles.buttonGradient}>
                     <Text style={styles.buttonText}>Get Started</Text>
                 </View>

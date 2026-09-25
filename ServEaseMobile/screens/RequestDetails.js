@@ -15,28 +15,34 @@ const TAB_ITEMS = [
     { key: 'CustomerProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
 ];
 
-const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
-const TIME_SLOTS = ['10:00 AM', '11:00 AM'];
-
-// Builds one grid of day numbers for a given month, padded with `null` for
-// the leading empty cells so the first real day lands under the right
-// weekday column. Purely a date calculation, not something that needs a
-// backend — the request-specific default date below is what's hardcoded.
-const getCalendarDays = (year, monthIndex) => {
-    const startWeekday = new Date(year, monthIndex, 1).getDay();
-    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-    const days = [];
-    for (let i = 0; i < startWeekday; i += 1) days.push(null);
-    for (let day = 1; day <= daysInMonth; day += 1) days.push(day);
-    return days;
-};
+/* ============================================================================
+ * BACKEND-READY — RequestDetails
+ * ----------------------------------------------------------------------------
+ * This is the screen where the QUOTATION a provider sent gets reviewed,
+ * approved/declined, and paid for. Every action here has a direct
+ * provider-side mirror — the provider needs to know the outcome of each step
+ * (accepted/declined, payment received) since they're the
+ * one fulfilling the request. See the per-handler notes below.
+ * ========================================================================== */
 
 // Hardcoded per instructions for this round of frontend review — the adviser
 // is checking the coded frontend before the backend exists. Once real
 // navigation params + a backend fetch are wired up, this should come from
 // route.params (e.g. route.params.requestNumber) instead, e.g.
 // fetchRequestDetail(route.params.requestNumber).then(setRequestDetail).
+// BACKEND-READY: GET /service-requests/:id (or /quotations/:id)
+//   requestNumber → SERVICE_REQUEST.request_id (display-formatted)
+//   providerName  → USER.name for the QUOTATION's provider_id
+//   reason        → QUOTATION.remarks
+//   lineItems     → derived from QUOTATION.labor_cost / parts_cost (split into
+//                   rows here, or the backend returns them pre-split)
+//   total         → QUOTATION.total_amount
+//   initialFeePercent → this is hardcoded to 20 here, but the minimum initial
+//                   payment discussed for the ERD was 50% of total_amount.
+//                   Reconcile these before wiring this up — if 50% is the
+//                   real business rule, this should either be a constant
+//                   shared with the backend or fetched, not hardcoded per
+//                   screen at a different value than intended.
 const REQUEST_DETAIL = {
     requestNumber: 'SR-0000',
     providerName: 'Mico Dominic',
@@ -44,18 +50,11 @@ const REQUEST_DETAIL = {
     lineItems: [{ label: 'Labor', amount: 850 }],
     total: 850,
     initialFeePercent: 20,
-    defaultAppointment: { year: 2026, monthIndex: 8, day: 9 }, // September 9, 2026
 };
 
 const RequestDetails = ({ navigation, route }) => {
-    // null | 'schedule' | 'approved' — which modal (if any) is on screen.
+    // null | 'approved' — which modal (if any) is on screen.
     const [modalStep, setModalStep] = useState(null);
-    const [calendarYear, setCalendarYear] = useState(REQUEST_DETAIL.defaultAppointment.year);
-    const [calendarMonth, setCalendarMonth] = useState(REQUEST_DETAIL.defaultAppointment.monthIndex);
-    const [selectedDate, setSelectedDate] = useState(REQUEST_DETAIL.defaultAppointment.day);
-    const [selectedTime, setSelectedTime] = useState(TIME_SLOTS[0]);
-
-    const calendarDays = getCalendarDays(calendarYear, calendarMonth);
 
     const handleClose = () => {
         navigation.goBack();
@@ -68,44 +67,38 @@ const RequestDetails = ({ navigation, route }) => {
     };
 
     const handleApprove = () => {
-        setModalStep('schedule');
+        setModalStep('approved');
+        //
+        // BACKEND-READY: PATCH the QUOTATION's status to 'accepted' here.
+        // Provider-side effect: the provider needs to be
+        // notified their quotation was accepted, since it's what unblocks
+        // them to start preparing for the job. SERVICE_REQUEST.request_status
+        // should also move forward at this point (e.g. to 'accepted').
     };
 
     const handleDecline = () => {
         // TODO: send the decline via the backend once the API is ready, e.g.
         // declineRequest(REQUEST_DETAIL.requestNumber).then(() => navigation.goBack());
+        //
+        // BACKEND-READY: PATCH QUOTATION.status to 'declined'. Provider-side
+        // effect: the provider needs to be notified the quotation was
+        // declined so it drops off their active list — otherwise they're left
+        // thinking a response is still pending.
         navigation.goBack();
-    };
-
-    const handlePrevMonth = () => {
-        setCalendarMonth((month) => {
-            if (month === 0) {
-                setCalendarYear((year) => year - 1);
-                return 11;
-            }
-            return month - 1;
-        });
-    };
-
-    const handleNextMonth = () => {
-        setCalendarMonth((month) => {
-            if (month === 11) {
-                setCalendarYear((year) => year + 1);
-                return 0;
-            }
-            return month + 1;
-        });
-    };
-
-    const handleConfirmSchedule = () => {
-        // TODO: submit `selectedDate`/`selectedTime` (plus calendarMonth/calendarYear)
-        // to the backend once the appointment-scheduling API is ready.
-        setModalStep('approved');
     };
 
     const handleProceedToPayment = () => {
         // TODO: navigate to the actual payment screen once it exists, e.g.
         // navigation.navigate('Payment', { requestNumber: REQUEST_DETAIL.requestNumber });
+        //
+        // BACKEND-READY: this is the initial-payment step — creates a
+        // PAYMENT row with payment_type = 'initial', request_id, and amount
+        // (validated as >= the required minimum of QUOTATION.total_amount —
+        // confirm the real percentage first, see the REQUEST_DETAIL note
+        // above) via PayMongo. On success: SERVICE_REQUEST.request_status
+        // moves to something like 'booked'/'confirmed', and the provider
+        // should be notified payment was received — this is what actually
+        // locks in the booking on their side.
         setModalStep(null);
     };
 
@@ -168,93 +161,7 @@ const RequestDetails = ({ navigation, route }) => {
                 })}
             </View>
 
-            {/* Modal 1 — pick an appointment date/time after approving the quotation. */}
-            <Modal visible={modalStep === 'schedule'} transparent animationType="fade" onRequestClose={() => setModalStep(null)}>
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalCard}>
-                        <TouchableOpacity style={styles.modalCloseButton} onPress={() => setModalStep(null)}>
-                            <Image source={require('../assets/icon_close.png')} style={styles.modalCloseIcon} />
-                        </TouchableOpacity>
-
-                        <Text style={styles.modalTitle}>Quotation Approved</Text>
-                        <Text style={styles.modalSubtitle}>
-                            You are required to settle the appointment schedule with your service provider.
-                        </Text>
-
-                        <Text style={styles.modalSectionLabel}>Select Date</Text>
-                        <View style={styles.calendarCard}>
-                            <View style={styles.calendarHeaderRow}>
-                                <TouchableOpacity onPress={handlePrevMonth} style={styles.calendarArrowButton}>
-                                    <Text style={styles.calendarArrow}>‹</Text>
-                                </TouchableOpacity>
-                                <Text style={styles.calendarMonthYear}>
-                                    {MONTH_NAMES[calendarMonth].slice(0, 3)} {calendarYear}
-                                </Text>
-                                <TouchableOpacity onPress={handleNextMonth} style={styles.calendarArrowButton}>
-                                    <Text style={styles.calendarArrow}>›</Text>
-                                </TouchableOpacity>
-                            </View>
-
-                            <View style={styles.weekdayRow}>
-                                {WEEKDAY_LABELS.map((label) => (
-                                    <Text key={label} style={styles.weekdayLabel}>{label}</Text>
-                                ))}
-                            </View>
-
-                            <View style={styles.daysGrid}>
-                                {calendarDays.map((day, index) => {
-                                    const isSelected = day !== null && day === selectedDate;
-                                    return (
-                                        <TouchableOpacity
-                                            key={`${index}-${day}`}
-                                            disabled={day === null}
-                                            style={[styles.dayCell, isSelected && styles.dayCellSelected]}
-                                            onPress={() => day !== null && setSelectedDate(day)}
-                                        >
-                                            {day !== null && (
-                                                <Text style={[styles.dayCellText, isSelected && styles.dayCellTextSelected]}>{day}</Text>
-                                            )}
-                                        </TouchableOpacity>
-                                    );
-                                })}
-                            </View>
-                        </View>
-
-                        <Text style={styles.modalSectionLabel}>Select Time</Text>
-                        <View style={styles.timeSlotRow}>
-                            {TIME_SLOTS.map((time) => {
-                                const isSelected = time === selectedTime;
-                                return (
-                                    <TouchableOpacity key={time} onPress={() => setSelectedTime(time)}>
-                                        {isSelected ? (
-                                            <LinearGradient
-                                                colors={['#0255AF', '#04A5A5']}
-                                                start={{ x: 0, y: 0 }}
-                                                end={{ x: 1, y: 0 }}
-                                                style={styles.timeSlotPill}
-                                            >
-                                                <Text style={styles.timeSlotTextSelected}>{time}</Text>
-                                            </LinearGradient>
-                                        ) : (
-                                            <View style={[styles.timeSlotPill, styles.timeSlotPillInactive]}>
-                                                <Text style={styles.timeSlotText}>{time}</Text>
-                                            </View>
-                                        )}
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </View>
-
-                        <TouchableOpacity onPress={handleConfirmSchedule} style={styles.confirmButtonWrap}>
-                            <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.confirmButton}>
-                                <Text style={styles.confirmButtonText}>Confirm</Text>
-                            </LinearGradient>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </Modal>
-
-            {/* Modal 2 — confirms the appointment and asks for the initial payment. */}
+            {/* Modal — asks for the initial payment after approving the quotation. */}
             <Modal visible={modalStep === 'approved'} transparent animationType="fade" onRequestClose={() => setModalStep(null)}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalCardCompact}>
@@ -422,13 +329,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: 20,
     },
-    modalCard: {
-        width: '100%',
-        maxWidth: 420,
-        backgroundColor: '#FFFFFF',
-        borderRadius: 16,
-        padding: 20,
-    },
     modalCardCompact: {
         width: '100%',
         maxWidth: 420,
@@ -459,112 +359,6 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         lineHeight: 17,
         marginBottom: 16,
-    },
-    modalSectionLabel: {
-        fontSize: 13,
-        fontWeight: '700',
-        color: '#333333',
-        marginBottom: 8,
-    },
-    calendarCard: {
-        backgroundColor: '#F1F2F5',
-        borderRadius: 12,
-        padding: 12,
-        marginBottom: 18,
-    },
-    calendarHeaderRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 10,
-    },
-    calendarArrowButton: {
-        width: 26,
-        height: 26,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    calendarArrow: {
-        fontSize: 18,
-        color: '#333333',
-        fontWeight: '700',
-    },
-    calendarMonthYear: {
-        fontSize: 13,
-        fontWeight: '700',
-        color: '#111111',
-    },
-    weekdayRow: {
-        flexDirection: 'row',
-        marginBottom: 6,
-    },
-    weekdayLabel: {
-        flex: 1,
-        textAlign: 'center',
-        fontSize: 11,
-        color: '#999999',
-    },
-    daysGrid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-    },
-    dayCell: {
-        width: `${100 / 7}%`,
-        aspectRatio: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: 8,
-        marginBottom: 2,
-    },
-    dayCellSelected: {
-        backgroundColor: '#1B2A8C',
-    },
-    dayCellText: {
-        fontSize: 12,
-        color: '#333333',
-    },
-    dayCellTextSelected: {
-        color: '#FFFFFF',
-        fontWeight: '700',
-    },
-    timeSlotRow: {
-        flexDirection: 'row',
-        marginBottom: 20,
-    },
-    timeSlotPill: {
-        borderRadius: 18,
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        marginRight: 10,
-    },
-    timeSlotPillInactive: {
-        borderWidth: 1,
-        borderColor: '#DDDDDD',
-        backgroundColor: '#FFFFFF',
-    },
-    timeSlotText: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#333333',
-    },
-    timeSlotTextSelected: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#FFFFFF',
-    },
-    confirmButtonWrap: {
-        alignSelf: 'flex-end',
-    },
-    confirmButton: {
-        borderRadius: 10,
-        paddingHorizontal: 24,
-        paddingVertical: 11,
-        alignItems: 'center',
-    },
-    confirmButtonText: {
-        fontSize: 13,
-        color: '#FFFFFF',
-        fontWeight: '700',
     },
     proceedButton: {
         borderRadius: 10,

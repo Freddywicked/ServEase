@@ -85,19 +85,6 @@ const SignupScreen = ({ navigation }) => {
 
                 {INPUT_FIELDS.map(renderField)}
 
-                <View style={styles.field}>
-                    <Text style={styles.label}>UPLOAD VALID ID</Text>
-                    <TouchableOpacity style={styles.uploadBox} onPress={handleUploadId}>
-                        <Image source={require('../assets/icon_uploadbutton.png')} style={styles.uploadIcon} />
-                        <View>
-                            <Text style={styles.uploadTitle}>
-                                {form.validId ? form.validId : 'Tap to upload'}
-                            </Text>
-                            <Text style={styles.uploadSubtitle}>Government-issued ID</Text>
-                        </View>
-                    </TouchableOpacity>
-                </View>
-
                 <View style={styles.termsRow}>
                     <TouchableOpacity
                         style={styles.checkbox}
