@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="560" viewBox="0 0 900 560">
+  <rect width="900" height="560" fill="#f2f5f7"/>
+  <rect x="115" y="35" width="670" height="490" rx="10" fill="#fff" stroke="#9fb3c2" stroke-width="3"/>
+  <text x="450" y="135" text-anchor="middle" fill="#075fbd" font-family="Georgia, serif" font-size="38" font-weight="700">Certificate of Experience</text>
+  <line x1="220" y1="164" x2="680" y2="164" stroke="#08a7ad" stroke-width="3"/>
+  <text x="450" y="245" text-anchor="middle" fill="#394955" font-family="Arial, sans-serif" font-size="24">This certifies that</text>
+  <text x="450" y="298" text-anchor="middle" fill="#152330" font-family="Arial, sans-serif" font-size="32" font-weight="700">Juan dela Cruz</text>
+  <text x="450" y="345" text-anchor="middle" fill="#394955" font-family="Arial, sans-serif" font-size="23">has demonstrated experience in home repair services.</text>
+  <circle cx="450" cy="425" r="42" fill="#08a7ad" opacity=".85"/>
+  <text x="450" y="432" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif" font-size="16" font-weight="700">DEMO</text>
+</svg>

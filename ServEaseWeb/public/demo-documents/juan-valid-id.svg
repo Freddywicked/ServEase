@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="560" viewBox="0 0 900 560">
+  <rect width="900" height="560" fill="#edf3f8"/>
+  <rect x="55" y="45" width="790" height="470" rx="24" fill="#fff" stroke="#0b668c" stroke-width="5"/>
+  <rect x="55" y="45" width="790" height="94" rx="24" fill="#075fbd"/>
+  <text x="105" y="104" fill="#fff" font-family="Arial, sans-serif" font-size="32" font-weight="700">DEMO GOVERNMENT ID</text>
+  <rect x="110" y="190" width="170" height="205" rx="12" fill="#c4d6e6"/>
+  <circle cx="195" cy="258" r="44" fill="#7899b6"/>
+  <path d="M125 375c14-60 126-60 140 0" fill="#7899b6"/>
+  <text x="335" y="224" fill="#152330" font-family="Arial, sans-serif" font-size="24" font-weight="700">JUAN DELA CRUZ</text>
+  <text x="335" y="271" fill="#51616e" font-family="Arial, sans-serif" font-size="20">ID No. 1234-5678-90</text>
+  <text x="335" y="312" fill="#51616e" font-family="Arial, sans-serif" font-size="20">Date of birth: 01 Jan 1997</text>
+  <text x="335" y="353" fill="#51616e" font-family="Arial, sans-serif" font-size="20">Barangay Sakdol</text>
+  <text x="335" y="433" fill="#c27a00" font-family="Arial, sans-serif" font-size="17" font-weight="700">FOR SERVEASE DEMO ONLY</text>
+</svg>

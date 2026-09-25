@@ -1,16 +1,66 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Brand from "../../components/common/Brand";
-import FileUpload from "../../components/common/FileUpload";
-const Field = ({ label, type = "text", placeholder }) => (
-  <div className="form-field">
-    <label>{label}</label>
-    <input type={type} placeholder={placeholder} required />
-  </div>
-);
-function SignUp() {
-  const nav = useNavigate();
-  const [ok, setOk] = useState(false);
+import { registrationApi } from "../../services/registrationApi";
+
+const initialForm = {
+  fullName: "",
+  email: "",
+  phone: "",
+  password: "",
+  confirmPassword: "",
+  address: "",
+  birthdate: "",
+  gender: "",
+};
+
+function FormField({ label, name, onChange, type = "text", value }) {
+  return (
+    <div className="form-field">
+      <label>{label}</label>
+      <input
+        name={name}
+        type={type}
+        value={value}
+        onChange={onChange}
+        required
+      />
+    </div>
+  );
+}
+
+export default function SignUp() {
+  const navigate = useNavigate();
+  const [form, setForm] = useState(initialForm);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [error, setError] = useState("");
+
+  function updateField(event) {
+    const { name, value } = event.target;
+    setForm((currentForm) => ({ ...currentForm, [name]: value }));
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+
+    if (form.password !== form.confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    await registrationApi.startRegistration({
+      fullName: form.fullName,
+      email: form.email,
+      phone: form.phone,
+      password: form.password,
+      address: form.address,
+      birthdate: form.birthdate,
+      gender: form.gender,
+    });
+
+    navigate("/verify-phone");
+  }
+
   return (
     <main className="auth-page">
       <section className="auth-card">
@@ -19,46 +69,72 @@ function SignUp() {
         <p className="auth-subtitle">
           Start booking trusted service providers near you.
         </p>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            nav("/role-select");
-          }}
-        >
-          <Field label="FULL NAME" placeholder="Juan Luna" />
-          <Field
+        <form onSubmit={handleSubmit}>
+          <FormField
+            label="FULL NAME"
+            name="fullName"
+            value={form.fullName}
+            onChange={updateField}
+          />
+          <FormField
             label="EMAIL ADDRESS"
+            name="email"
             type="email"
-            placeholder="juanluna@gmail.com"
+            value={form.email}
+            onChange={updateField}
           />
-          <Field label="PHONE NUMBER" placeholder="+63 912 345 6789" />
-          <Field
+          <FormField
+            label="PHONE NUMBER"
+            name="phone"
+            value={form.phone}
+            onChange={updateField}
+          />
+          <FormField
             label="PASSWORD"
+            name="password"
             type="password"
-            placeholder="Create a password"
+            value={form.password}
+            onChange={updateField}
           />
-          <Field
+          <FormField
             label="CONFIRM PASSWORD"
+            name="confirmPassword"
             type="password"
-            placeholder="Confirm password"
+            value={form.confirmPassword}
+            onChange={updateField}
           />
-          <Field
+          <FormField
             label="ADDRESS"
-            placeholder="Street, Barangay, Municipality, Province"
+            name="address"
+            value={form.address}
+            onChange={updateField}
           />
-          <FileUpload
-            label="UPLOAD VALID ID"
-            hint="Government-issued ID for account verification"
+          <FormField
+            label="BIRTHDATE"
+            name="birthdate"
+            type="date"
+            value={form.birthdate}
+            onChange={updateField}
           />
+          <div className="form-field">
+            <label>GENDER</label>
+            <select name="gender" value={form.gender} onChange={updateField} required>
+              <option value="" disabled>Select gender</option>
+              <option value="Female">Female</option>
+              <option value="Male">Male</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
           <label className="terms">
             <input
               type="checkbox"
-              checked={ok}
-              onChange={(e) => setOk(e.target.checked)}
+              checked={acceptedTerms}
+              onChange={(event) => setAcceptedTerms(event.target.checked)}
             />
-            I agree to ServEase's Terms of Service and Privacy Policy
+            I agree to ServEase&apos;s Terms of Service and Privacy Policy
           </label>
-          <button className="gradient-button" disabled={!ok}>
+          {error && <p className="form-error">{error}</p>}
+          <button className="gradient-button" disabled={!acceptedTerms}>
             Next
           </button>
         </form>
@@ -69,4 +145,3 @@ function SignUp() {
     </main>
   );
 }
-export default SignUp;

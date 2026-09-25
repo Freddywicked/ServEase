@@ -3,11 +3,13 @@ import { Routes, Route, Navigate } from "react-router-dom";
 
 import SignIn from "../pages/auth/SignIn";
 import SignUp from "../pages/auth/SignUp";
+import PhoneVerification from "../pages/auth/PhoneVerification";
 import RoleSelection from "../pages/auth/RoleSelection";
 import ForgotPassword from "../pages/auth/ForgotPassword";
 import ProviderApply from "../pages/provider/ProviderApply";
 import ProviderCategory from "../pages/provider/ProviderCategory";
 import ProviderVerification from "../pages/provider/ProviderVerification";
+import ProviderPending from "../pages/provider/ProviderPending";
 import {
   ProviderDashboard,
   ProviderRequests,
@@ -46,11 +48,13 @@ function AppRoutes() {
       <Route path="/" element={<Navigate to="/signin" />} />
       <Route path="/signin" element={<SignIn />} />
       <Route path="/signup" element={<SignUp />} />
+      <Route path="/verify-phone" element={<PhoneVerification />} />
       <Route path="/role-select" element={<RoleSelection />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/provider/apply" element={<ProviderApply />} />
       <Route path="/provider/category" element={<ProviderCategory />} />
       <Route path="/provider/verify" element={<ProviderVerification />} />
+      <Route path="/provider/pending" element={<ProviderPending />} />
       <Route path="/provider/dashboard" element={<ProviderDashboard />} />
       <Route path="/provider/requests" element={<ProviderRequests />} />
       <Route path="/provider/requests/:id" element={<RequestDetail />} />

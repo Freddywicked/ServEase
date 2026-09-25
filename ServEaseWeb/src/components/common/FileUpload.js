@@ -2,9 +2,18 @@ import React, { useId, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faCheck, faCloudArrowUp } from "@fortawesome/free-solid-svg-icons";
 
-function FileUpload({ label, hint, className = "" }) {
+function FileUpload({ label, hint, className = "", file, onFileChange }) {
   const id = useId();
-  const [file, setFile] = useState(null);
+  const [localFile, setLocalFile] = useState(null);
+  const selectedFile = file || localFile;
+
+  function handleChange(event) {
+    const nextFile = event.target.files?.[0] || null;
+
+    setLocalFile(nextFile);
+    onFileChange?.(nextFile);
+  }
+
   return (
     <div className={`upload-section ${className}`}>
       {label && <span className="upload-label">{label}</span>}
@@ -13,18 +22,18 @@ function FileUpload({ label, hint, className = "" }) {
         className="file-input"
         type="file"
         accept="image/*,.pdf"
-        onChange={(e) => setFile(e.target.files?.[0] || null)}
+        onChange={handleChange}
       />
       <label
         htmlFor={id}
-        className={`upload-box upload-trigger ${file ? "has-file" : ""}`}
+        className={`upload-box upload-trigger ${selectedFile ? "has-file" : ""}`}
       >
         <span className="upload-icon">
-          <FontAwesomeIcon icon={file ? faCheck : faCloudArrowUp} />
+          <FontAwesomeIcon icon={selectedFile ? faCheck : faCloudArrowUp} />
         </span>
         <span className="upload-copy">
-          <strong>{file ? file.name : "Tap to upload"}</strong>
-          <small>{file ? "File ready to upload" : hint}</small>
+          <strong>{selectedFile ? selectedFile.name : "Tap to upload"}</strong>
+          <small>{selectedFile ? "File ready to upload" : hint}</small>
         </span>
       </label>
     </div>

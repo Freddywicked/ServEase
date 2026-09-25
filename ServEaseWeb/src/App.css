@@ -1,0 +1,38 @@
+.form-error {
+  margin: 0 0 12px;
+  color: #aa190d;
+  font-size: 10px;
+}
+
+.phone-verification {
+  display: grid;
+  gap: 14px;
+  width: min(100%, 360px);
+  margin: auto;
+}
+
+.phone-verification h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.phone-verification p {
+  margin: -6px 0 0;
+  color: #6a6a6a;
+  font-size: 11px;
+}
+
+.phone-verification input {
+  height: 42px;
+  border: 1px solid #b6bbc0;
+  border-radius: 6px;
+  font-size: 18px;
+  letter-spacing: 8px;
+  text-align: center;
+}
+
+.selected-services {
+  margin: 8px 0 0;
+  color: #4b5965;
+  font-size: 9px;
+}
