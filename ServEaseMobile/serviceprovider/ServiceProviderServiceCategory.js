@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 
@@ -40,8 +40,25 @@ const ServiceProviderServiceCategory = ({ navigation, route }) => {
     };
 
     const handleNext = () => {
-        // TODO: validate service category selections before moving to the next step
-        navigation.navigate('ServiceProviderVerification', {
+        // Required-field validation before moving to the next step.
+        if (selectedCategories.length === 0) {
+            Alert.alert('Service Category Required', 'Please select at least one service category.');
+            return;
+        }
+        if (othersSelected && !otherService.trim()) {
+            Alert.alert('Service Required', 'Please specify the "Others" service you provide.');
+            return;
+        }
+        if (!yearsOfExperience.trim()) {
+            Alert.alert('Years of Experience Required', 'Please enter your years of experience.');
+            return;
+        }
+        if (offersHomeServices === null) {
+            Alert.alert('Home Services Required', 'Please indicate whether you offer home services.');
+            return;
+        }
+
+        navigation.navigate('ServiceProviderVerificationRequirements', {
             ...route.params,
             serviceCategory: {
                 selectedCategories,
@@ -74,7 +91,6 @@ const ServiceProviderServiceCategory = ({ navigation, route }) => {
                 <Text style={styles.title}>Apply as Service Provider</Text>
 
                 <View style={styles.progressContainer}>
-                    <View style={[styles.progressSegment, styles.progressSegmentActive]} />
                     <View style={[styles.progressSegment, styles.progressSegmentActive]} />
                     <View style={styles.progressSegment} />
                 </View>
@@ -117,7 +133,7 @@ const ServiceProviderServiceCategory = ({ navigation, route }) => {
                 {renderCheckbox('home-yes', 'Yes', offersHomeServices === 'yes', () => setOffersHomeServices('yes'))}
                 {renderCheckbox('home-no', 'No', offersHomeServices === 'no', () => setOffersHomeServices('no'))}
 
-                <TouchableOpacity style={styles.nextButton} onPress={() => navigation.navigate('ServiceProviderVerificationRequirements')}>
+                <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
                     <LinearGradient
                         colors={['#0255AF', '#04A5A5']}
                         start={{ x: 0, y: 0 }}

@@ -2,7 +2,12 @@ import React from 'react';
 import { View, Image, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
- 
+
+// NOTE: This screen is meant to be shown only once — right after a brand-new
+// account finishes sign-up (SignupScreen -> OTPVerification). Returning users
+// who log in via LoginScreen should skip this screen and land directly on
+// CustomerDashboard or ServiceProviderDashboard based on their saved role.
+// That routing decision needs to be added in OTPVerification.js / LoginScreen.js.
 const RoleSelectionScreen = ({ navigation }) => {
     const handleSelectCustomer = () => {
         // TODO: point this to the actual customer home/dashboard screen name
@@ -10,8 +15,7 @@ const RoleSelectionScreen = ({ navigation }) => {
     };
  
     const handleSelectServiceProvider = () => {
-        // TODO: point this to the first step of the Service Provider application
-        navigation.navigate('ServiceProviderPersonalDetails');
+        navigation.navigate('ServiceProviderServiceCategory');
     };
  
     return (
@@ -32,7 +36,7 @@ const RoleSelectionScreen = ({ navigation }) => {
                     </LinearGradient>
                 </TouchableOpacity>
  
-                <TouchableOpacity style={styles.roleButton} onPress={() => navigation.navigate('ServiceProviderPersonalDetails')}>
+                <TouchableOpacity style={styles.roleButton} onPress={() => navigation.navigate('ServiceProviderServiceCategory')}>
                     <LinearGradient
                         colors={['#0255AF', '#04A5A5']}
                         start={{ x: 0, y: 0 }}
@@ -88,4 +92,3 @@ const styles = StyleSheet.create({
 });
  
 export default RoleSelectionScreen;
- 

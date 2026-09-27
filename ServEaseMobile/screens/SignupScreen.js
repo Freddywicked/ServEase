@@ -24,12 +24,27 @@ const INITIAL_FORM = {
     agreedToTerms: false,
 };
 
+// Inline error shown under each required field when it is left empty.
+const REQUIRED_MESSAGES = {
+    fullName: 'Full name is required.',
+    email: 'Email address is required.',
+    phone: 'Phone number is required.',
+    password: 'Password is required.',
+    confirmPassword: 'Please confirm your password.',
+    address: 'Address is required.',
+};
+
 const SignupScreen = ({ navigation }) => {
     const [form, setForm] = useState(INITIAL_FORM);
     const [passwordVisible, setPasswordVisible] = useState({});
+    const [errors, setErrors] = useState({});
 
     const updateField = (key, value) => {
         setForm((prevForm) => ({ ...prevForm, [key]: value }));
+        // Clear the error as soon as the user starts fixing the field.
+        if (errors[key]) {
+            setErrors((prev) => ({ ...prev, [key]: '' }));
+        }
     };
 
     const togglePasswordVisibility = (key) => {
@@ -41,10 +56,42 @@ const SignupScreen = ({ navigation }) => {
         // when the backend upload endpoint is integrated.
     };
 
+    const validateForm = () => {
+        const nextErrors = {};
+
+        // Every text field must be filled (whitespace-only does not count).
+        INPUT_FIELDS.forEach(({ key }) => {
+            if (!form[key].trim()) {
+                nextErrors[key] = REQUIRED_MESSAGES[key];
+            }
+        });
+
+        if (
+            !nextErrors.password &&
+            !nextErrors.confirmPassword &&
+            form.password !== form.confirmPassword
+        ) {
+            nextErrors.confirmPassword = 'Passwords do not match.';
+        }
+
+        if (!form.agreedToTerms) {
+            nextErrors.agreedToTerms = 'Please agree to the Terms of Service and Privacy Policy.';
+        }
+
+        setErrors(nextErrors);
+        return Object.keys(nextErrors).length === 0;
+    };
+
     const handleNext = () => {
         // TODO: validate and send the `form` payload to the signup API endpoint,
         // then navigate to OTP verification after a successful signup.
-        navigation.navigate('OTPVerification');
+        // All fields are required before proceeding to the next screen.
+        if (!validateForm()) {
+            return;
+        }
+        // OTP verification is part of account creation only; this param lets
+        // OTPVerification enforce that it was reached from the signup flow.
+        navigation.navigate('OTPVerification', { fromSignup: true });
     };
 
     const handleLoginPress = () => {
@@ -54,7 +101,7 @@ const SignupScreen = ({ navigation }) => {
     const renderField = ({ key, label, placeholder, keyboardType, autoCapitalize, secure }) => (
         <View key={key} style={styles.field}>
             <Text style={styles.label}>{label}</Text>
-            <View style={styles.inputWrapper}>
+            <View style={[styles.inputWrapper, errors[key] ? styles.inputWrapperError : null]}>
                 <TextInput
                     style={styles.input}
                     placeholder={placeholder}
@@ -71,6 +118,7 @@ const SignupScreen = ({ navigation }) => {
                     </TouchableOpacity>
                 )}
             </View>
+            {errors[key] ? <Text style={styles.errorText}>{errors[key]}</Text> : null}
         </View>
     );
 
@@ -98,6 +146,9 @@ const SignupScreen = ({ navigation }) => {
                         <Text style={styles.link}>Privacy Policy</Text>
                     </Text>
                 </View>
+                {errors.agreedToTerms ? (
+                    <Text style={styles.errorText}>{errors.agreedToTerms}</Text>
+                ) : null}
 
                 <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
                     <Text style={styles.nextButtonText}>Next</Text>
@@ -154,6 +205,14 @@ const styles = StyleSheet.create({
         borderRadius: 10,
         backgroundColor: '#F9F9F9',
         paddingHorizontal: 14,
+    },
+    inputWrapperError: {
+        borderColor: '#E53935',
+    },
+    errorText: {
+        color: '#E53935',
+        fontSize: 11,
+        marginTop: 4,
     },
     input: {
         flex: 1,

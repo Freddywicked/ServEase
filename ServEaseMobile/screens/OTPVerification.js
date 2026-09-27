@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
     View,
     Image,
@@ -8,13 +8,27 @@ import {
     StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ACCOUNT_CREATED_KEY } from './SplashScreen';
 
 // Six one-time-passcode digits, ready to be sent to the verification API.
 const OTP_LENGTH = 6;
 
-const OTPVerification = ({ navigation }) => {
+const OTPVerification = ({ navigation, route }) => {
     const [otp, setOtp] = useState(Array(OTP_LENGTH).fill(''));
+    const [error, setError] = useState('');
     const inputRefs = useRef([]);
+
+    // This screen is only displayed during account creation: SignupScreen
+    // passes `fromSignup: true` when navigating here. Without it, send the
+    // user back to the start of the signup flow.
+    const isAccountCreation = route.params?.fromSignup === true;
+
+    useEffect(() => {
+        if (!isAccountCreation) {
+            navigation.replace('SignupScreen');
+        }
+    }, [isAccountCreation, navigation]);
 
     const handleChange = (text, index) => {
         // Only accept single digits.
@@ -22,6 +36,10 @@ const OTPVerification = ({ navigation }) => {
         const nextOtp = [...otp];
         nextOtp[index] = digit;
         setOtp(nextOtp);
+        // Clear the error as soon as the user starts fixing the code.
+        if (error) {
+            setError('');
+        }
 
         // Auto-advance to the next box once a digit is entered.
         if (digit && index < OTP_LENGTH - 1) {
@@ -36,11 +54,28 @@ const OTPVerification = ({ navigation }) => {
         }
     };
 
-    const handleSignIn = () => {
+    const handleSignIn = async () => {
+        // All six digits are required before proceeding.
+        if (otp.some((digit) => !digit)) {
+            setError('Please enter the complete 6-digit code.');
+            return;
+        }
         // TODO: send `otp.join('')` to the OTP verification endpoint
         // once the backend is integrated, then navigate to Login.
+        try {
+            // Remember that an account exists so the splash screen skips the
+            // Get Started button on the next app launch.
+            await AsyncStorage.setItem(ACCOUNT_CREATED_KEY, 'true');
+        } catch (storageError) {
+            // Non-fatal: the splash will fall back to the Get Started flow.
+        }
         navigation.navigate('LoginScreen');
     };
+
+    // Render nothing while redirecting out of the account creation guard.
+    if (!isAccountCreation) {
+        return null;
+    }
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -54,7 +89,7 @@ const OTPVerification = ({ navigation }) => {
                         <TextInput
                             key={index}
                             ref={(ref) => (inputRefs.current[index] = ref)}
-                            style={styles.otpBox}
+                            style={[styles.otpBox, error ? styles.otpBoxError : null]}
                             value={digit}
                             onChangeText={(text) => handleChange(text, index)}
                             onKeyPress={(event) => handleKeyPress(event, index)}
@@ -63,6 +98,7 @@ const OTPVerification = ({ navigation }) => {
                         />
                     ))}
                 </View>
+                {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
                 <TouchableOpacity style={styles.signInButton} onPress={handleSignIn}>
                     <Text style={styles.signInButtonText}>Verify</Text>
@@ -116,6 +152,15 @@ const styles = StyleSheet.create({
         fontSize: 20,
         fontWeight: '600',
         color: '#333333',
+    },
+    otpBoxError: {
+        borderWidth: 1,
+        borderColor: '#E53935',
+    },
+    errorText: {
+        color: '#E53935',
+        fontSize: 11,
+        marginBottom: 16,
     },
     signInButton: {
         backgroundImage: 'linear-gradient(to right, #0255AF, #04A5A5)',

@@ -18,13 +18,35 @@ const INITIAL_CREDENTIALS = {
 const LoginScreen = ({ navigation }) => {
     const [credentials, setCredentials] = useState(INITIAL_CREDENTIALS);
     const [passwordVisible, setPasswordVisible] = useState(false);
+    const [errors, setErrors] = useState({});
 
     const updateCredential = (key, value) => {
         setCredentials((prev) => ({ ...prev, [key]: value }));
+        // Clear the error as soon as the user starts fixing the field.
+        if (errors[key]) {
+            setErrors((prev) => ({ ...prev, [key]: '' }));
+        }
+    };
+
+    const validateForm = () => {
+        const nextErrors = {};
+        if (!credentials.email.trim()) {
+            nextErrors.email = 'Email address is required.';
+        }
+        if (!credentials.password.trim()) {
+            nextErrors.password = 'Password is required.';
+        }
+        setErrors(nextErrors);
+        return Object.keys(nextErrors).length === 0;
     };
 
     const handleSignIn = () => {
         // TODO: send `credentials` to the login API endpoint.
+        // All fields are required before proceeding to the next screen.
+        if (!validateForm()) {
+            return;
+        }
+        navigation.navigate('RoleSelectionScreen');
     };
 
     const handleForgotPassword = () => {
@@ -51,7 +73,7 @@ const LoginScreen = ({ navigation }) => {
 
                 <View style={styles.field}>
                     <Text style={styles.label}>EMAIL ADDRESS</Text>
-                    <View style={styles.inputWrapper}>
+                    <View style={[styles.inputWrapper, errors.email ? styles.inputWrapperError : null]}>
                         <TextInput
                             style={styles.input}
                             placeholder="Enter your email"
@@ -62,11 +84,12 @@ const LoginScreen = ({ navigation }) => {
                             autoCapitalize="none"
                         />
                     </View>
+                    {errors.email ? <Text style={styles.errorText}>{errors.email}</Text> : null}
                 </View>
 
                 <View style={styles.field}>
                     <Text style={styles.label}>PASSWORD</Text>
-                    <View style={styles.inputWrapper}>
+                    <View style={[styles.inputWrapper, errors.password ? styles.inputWrapperError : null]}>
                         <TextInput
                             style={styles.input}
                             placeholder="Enter your password"
@@ -80,12 +103,13 @@ const LoginScreen = ({ navigation }) => {
                             <Image source={require('../assets/icon_eye.png')} style={styles.eyeIcon} />
                         </TouchableOpacity>
                     </View>
+                    {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
                     <TouchableOpacity onPress={handleForgotPassword}>
                         <Text style={styles.forgotText}>Forgot password?</Text>
                     </TouchableOpacity>
                 </View>
 
-                <TouchableOpacity style={styles.signInButton}  onPress={() => navigation.navigate('RoleSelectionScreen')}>
+                <TouchableOpacity style={styles.signInButton} onPress={handleSignIn}>
                     <Text style={styles.signInButtonText}>Sign In</Text>
                 </TouchableOpacity>
 
@@ -151,6 +175,14 @@ const styles = StyleSheet.create({
         borderRadius: 10,
         backgroundColor: '#F9F9F9',
         paddingHorizontal: 14,
+    },
+    inputWrapperError: {
+        borderColor: '#E53935',
+    },
+    errorText: {
+        color: '#E53935',
+        fontSize: 11,
+        marginTop: 4,
     },
     input: {
         flex: 1,

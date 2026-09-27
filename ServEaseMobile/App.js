@@ -7,34 +7,33 @@ import SignupScreen from './screens/SignupScreen';
 import OTPVerification from './screens/OTPVerification';
 import LoginScreen from './screens/LoginScreen';
 import RoleSelectionScreen from './screens/RoleSelectionScreen';
-import ServiceProviderPersonalDetails from './screens/ServiceProviderPersonalDetails';
-import ServiceProviderServiceCategory from './screens/ServiceProviderServiceCategory';
-import ServiceProviderVerificationRequirements from './screens/ServiceProviderVerificationRequirements';
-import CustomerDashboard from './screens/CustomerDashboard';
-import CreateServiceRequest from './screens/CreateServiceRequest';
-import AIDiagnosis from './screens/AIDiagnosis';
-import AIResult from './screens/AIResult';
-import RecommendServiceProvider from './screens/RecommendServiceProvider';
-import SubmitServiceRequest from './screens/SubmitServiceRequest';
-import FindServiceProvider from './screens/FindServiceProvider';
-import Track from './screens/Track';
-import Payment from './screens/Payment';
-import Ratings from './screens/Ratings';
-import RequestDetails from './screens/RequestDetails';
-import MessageCustomer from './screens/MessageCustomer';
-import ConversationCustomer from './screens/ConversationCustomer';
-import History from './screens/History';
-import CustomerProfile from './screens/CustomerProfile';
-import ServiceProviderDashboard from './screens/ServiceProviderDashboard';
-import IncomingServiceRequest from './screens/IncomingServiceRequest';
-import Jobs from './screens/Jobs';
-import JobUpdateStatus from './screens/JobUpdateStatus';
-import JobAdditionalParts from './screens/JobAdditionalParts';
-import ViewServiceRequest from './screens/ViewServiceRequest';
-import MessageServiceProvider from './screens/MessageServiceProvider';
-import ConversationServiceProvider from './screens/ConversationServiceProvider';
-import Earnings from './screens/Earnings';
-import ServiceProviderProfile from './screens/ServiceProviderProfile';
+import ServiceProviderServiceCategory from './serviceprovider/ServiceProviderServiceCategory';
+import ServiceProviderVerificationRequirements from './serviceprovider/ServiceProviderVerificationRequirements';
+import CustomerDashboard from './customer/CustomerDashboard';
+import CreateServiceRequest from './customer/CreateServiceRequest';
+import AIDiagnosis from './customer/AIDiagnosis';
+import AIResult from './customer/AIResult';
+import RecommendServiceProvider from './customer/RecommendServiceProvider';
+import SubmitServiceRequest from './customer/SubmitServiceRequest';
+import FindServiceProvider from './customer/FindServiceProvider';
+import Track from './customer/Track';
+import Payment from './customer/Payment';
+import Ratings from './customer/Ratings';
+import RequestDetails from './customer/RequestDetails';
+import MessageCustomer from './customer/MessageCustomer';
+import ConversationCustomer from './customer/ConversationCustomer';
+import History from './customer/History';
+import CustomerProfile from './customer/CustomerProfile';
+import ServiceProviderDashboard from './serviceprovider/ServiceProviderDashboard';
+import IncomingServiceRequest from './serviceprovider/IncomingServiceRequest';
+import Jobs from './serviceprovider/Jobs';
+import JobUpdateStatus from './serviceprovider/JobUpdateStatus';
+import JobAdditionalParts from './serviceprovider/JobAdditionalParts';
+import ViewServiceRequest from './serviceprovider/ViewServiceRequest';
+import MessageServiceProvider from './serviceprovider/MessageServiceProvider';
+import ConversationServiceProvider from './serviceprovider/ConversationServiceProvider';
+import Earnings from './serviceprovider/Earnings';
+import ServiceProviderProfile from './serviceprovider/ServiceProviderProfile';
 
 const Stack = createNativeStackNavigator();
 
@@ -46,8 +45,13 @@ const App = () => {
         <Stack.Screen name="SignupScreen" component={SignupScreen}/>
         <Stack.Screen name="OTPVerification" component={OTPVerification}/>
         <Stack.Screen name="LoginScreen" component={LoginScreen}/>
+        {/* RoleSelectionScreen should only be reached once, right after a new
+            account finishes sign-up + OTP verification. Returning users who
+            hit LoginScreen should be routed straight to CustomerDashboard or
+            ServiceProviderDashboard based on their saved active role instead —
+            that branching still needs to be added in OTPVerification.js /
+            LoginScreen.js once the backend can tell us new vs. returning. */}
         <Stack.Screen name="RoleSelectionScreen" component={RoleSelectionScreen}/>
-        <Stack.Screen name="ServiceProviderPersonalDetails" component={ServiceProviderPersonalDetails}/>
         <Stack.Screen name="ServiceProviderServiceCategory" component={ServiceProviderServiceCategory}/>
         <Stack.Screen name="ServiceProviderVerificationRequirements" component={ServiceProviderVerificationRequirements}/>
         <Stack.Screen name="CustomerDashboard" component={CustomerDashboard}/>
