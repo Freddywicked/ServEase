@@ -106,7 +106,7 @@ function UserModal({
   const canReviewApplication = isProvider && user.status === "Pending";
 
   return (
-    <Modal onClose={onClose}>
+    <Modal className={canReviewApplication ? "review-modal" : "user-detail-modal"} onClose={onClose}>
       <h2>
         {user.name} <StatusBadge status={user.status} />
       </h2>
@@ -272,7 +272,13 @@ export default function UserManagement() {
           <div className="table-row" key={user.id}>
             <span>{user.name}</span>
             <span>{user.email}</span>
-            <span className="table-role">{user.role}</span>
+            <span
+              className={`table-role ${
+                user.role === "Customer" ? "customer" : "provider"
+              }`}
+            >
+              {user.role}
+            </span>
             <span>
               <StatusBadge status={user.status} />
             </span>
@@ -303,6 +309,7 @@ export default function UserManagement() {
           <button>2</button>
           <button>3</button>
           <button>…</button>
+          <button className="page-next" aria-label="Next page" />
         </div>
         <span>Showing 1 to {filteredUsers.length} of {users.length} users</span>
       </div>

@@ -1,0 +1,558 @@
+/* Measured desktop reference layer for the administrator workspace. */
+.admin-shell {
+  min-height: 100vh;
+  background: #fff;
+  color: #1d1d1f;
+  font-family: var(--heading-font);
+}
+
+.admin-shell .admin-header {
+  height: 99px;
+  padding: 0 16px;
+  border-color: #dedede;
+}
+
+.admin-shell .admin-header .brand {
+  flex-direction: row;
+  gap: 7px;
+  margin: 0;
+  color: #062d5f;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.admin-shell .admin-header .brand-mark {
+  width: 50px;
+  height: 60px;
+  margin: 0;
+  object-fit: cover;
+  object-position: center;
+}
+
+.admin-shell .admin-profile {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px;
+  color: #090909;
+  font-family: var(--heading-font);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.admin-shell .admin-profile svg {
+  width: 10px;
+  height: 10px;
+  margin: 0;
+  font-size: 10px;
+}
+
+.admin-shell .admin-sidebar {
+  top: 99px;
+  width: 172px;
+  padding: 14px 12px 16px;
+  border-color: #dfdfdf;
+}
+
+.admin-shell .admin-sidebar nav {
+  gap: 8px;
+}
+
+.admin-shell .admin-sidebar a {
+  height: 35px;
+  gap: 10px;
+  padding: 0 8px;
+  border-radius: 7px;
+  color: #111;
+  font-family: var(--heading-font);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.admin-shell .admin-sidebar a span,
+.admin-shell .admin-sidebar a svg {
+  width: 19px;
+  font-size: 19px;
+}
+
+.admin-shell .admin-sidebar a.active {
+  background: linear-gradient(90deg, #075fbd, #09a8ae);
+  color: #fff;
+}
+
+.admin-shell .admin-sidebar-actions {
+  display: grid;
+  gap: 13px;
+  margin-top: auto;
+  padding: 0 6px 1px;
+}
+
+.admin-shell .admin-logout,
+.admin-shell .admin-collapse {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #171717;
+  font-family: var(--heading-font);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.admin-shell .admin-logout svg,
+.admin-shell .admin-collapse svg {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  font-size: 22px;
+}
+
+.admin-shell .admin-content {
+  min-height: calc(100vh - 99px);
+  max-width: none;
+  margin-left: 172px;
+  padding: 34px 0 40px 25px;
+}
+
+.admin-shell .admin-title-row {
+  display: block;
+  width: min(795px, calc(100vw - 209px));
+  margin-left: 6px;
+}
+
+.admin-shell .admin-title-row h1 {
+  margin: 0;
+  color: #075fbd;
+  font-family: var(--heading-font);
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: -.045em;
+  line-height: 1.12;
+}
+
+.admin-shell .admin-title-row p {
+  margin: 5px 0 27px;
+  color: #383838;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.admin-shell .admin-refresh {
+  display: none;
+}
+
+.admin-shell .metric-grid {
+  width: min(795px, calc(100vw - 209px));
+  margin-left: 13px;
+  gap: 11px;
+}
+
+.admin-shell .metric-card {
+  min-height: 99px;
+  padding: 22px 10px;
+  border-radius: 8px;
+}
+
+.admin-shell .metric-card span {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.admin-shell .metric-card strong {
+  margin-top: 13px;
+  font-size: 18px;
+}
+
+.admin-shell .trend-card {
+  position: relative;
+  box-sizing: border-box;
+  width: min(795px, calc(100vw - 209px));
+  height: 308px;
+  margin: 36px 0 0 13px;
+  padding: 28px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #c8e1fc;
+}
+
+.admin-shell .trend-heading h2 {
+  margin: 0;
+  color: #111;
+  font-family: var(--heading-font);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.admin-shell .trend-heading span {
+  display: none;
+}
+
+.admin-shell .chart-y-axis {
+  position: absolute;
+  top: 60px;
+  left: 36px;
+  display: grid;
+  height: 181px;
+  align-content: space-between;
+  color: #384550;
+  font-size: 8px;
+}
+
+.admin-shell .trend-card svg {
+  position: absolute;
+  top: 24px;
+  left: 38px;
+  display: block;
+  width: 615px;
+  height: 247px;
+  margin: 0;
+}
+
+.admin-shell .chart-lines line {
+  stroke: #d3dce3;
+  stroke-dasharray: 2 5;
+}
+
+.admin-shell .trend-card polyline {
+  stroke: #075fbd;
+  stroke-width: 3px;
+}
+
+.admin-shell .chart-point {
+  opacity: 0;
+}
+
+.admin-shell .chart-days {
+  position: absolute;
+  top: 246px;
+  left: 52px;
+  display: flex;
+  width: 567px;
+  margin: 0;
+}
+
+.admin-shell .chart-days button {
+  padding: 0;
+  color: #384550;
+  font-family: var(--heading-font);
+  font-size: 10px;
+}
+
+/* User management list. */
+.admin-shell .management-title {
+  margin: 0;
+  color: #075fbd;
+  font-family: var(--heading-font);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.admin-shell .user-tabs {
+  gap: 22px;
+  margin: 30px 0 4px 11px;
+}
+
+.admin-shell .user-tabs button {
+  padding: 0 3px 7px;
+  color: #252525;
+  font-family: var(--heading-font);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.admin-shell .user-tabs .active {
+  border-bottom: 2px solid #075fbd;
+  color: #075fbd;
+}
+
+.admin-shell .user-table {
+  box-sizing: border-box;
+  width: min(810px, calc(100vw - 290px));
+  min-height: 446px;
+  margin-left: 11px;
+  overflow: hidden;
+  border-radius: 18px;
+  background: #c8e1fc;
+}
+
+.admin-shell .user-table .table-head,
+.admin-shell .user-table .table-row {
+  min-width: 0;
+  padding: 0 18px;
+  gap: 8px;
+  font-family: var(--heading-font);
+}
+
+.admin-shell .user-table .table-head {
+  min-height: 39px;
+  color: #8295a8;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.admin-shell .user-table .table-row {
+  min-height: 35px;
+  color: #34404a;
+  font-size: 8px;
+}
+
+.admin-shell .table-role.customer {
+  color: #009da8;
+}
+
+.admin-shell .table-role.provider {
+  color: #0a2b80;
+}
+
+.admin-shell .status {
+  display: inline-flex;
+  min-width: 58px;
+  height: 19px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 9px;
+  border-radius: 10px;
+  font-family: var(--heading-font);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.admin-shell .status.pending {
+  min-width: 66px;
+  background: #ffc77e;
+}
+
+.admin-shell .view-action,
+.admin-shell .edit-action {
+  width: 16px;
+  height: 20px;
+  margin: 0 7px 0 0 !important;
+  padding: 0 !important;
+  color: #17232b !important;
+  font-size: 14px !important;
+}
+
+.admin-shell .table-footer {
+  box-sizing: border-box;
+  width: min(810px, calc(100vw - 290px));
+  margin: 10px 0 0 11px;
+  padding: 0 9px;
+  color: #6a6a6a;
+  font-family: var(--heading-font);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.admin-shell .table-footer button {
+  width: 18px;
+  height: 19px;
+  margin-right: 4px;
+  padding: 0;
+  border-color: #d2d2d2;
+  border-radius: 3px;
+  font-family: var(--heading-font);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.admin-shell .table-footer .page-active {
+  border-color: #075fbd;
+  background: #075fbd;
+}
+
+.admin-shell .table-footer .page-next {
+  vertical-align: bottom;
+}
+
+/* Details, review, and account-disable dialogs. */
+.admin-shell .admin-modal-backdrop {
+  z-index: 40;
+  padding: 20px;
+  background: rgb(0 0 0 / .35);
+}
+
+.admin-shell .admin-modal {
+  box-sizing: border-box;
+  position: relative;
+  border-radius: 8px;
+  background: #fff;
+  color: #303030;
+}
+
+.admin-shell .modal-close {
+  top: 16px;
+  right: 19px;
+  z-index: 1;
+  padding: 0;
+  color: #111;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.admin-shell .user-detail-modal {
+  width: min(513px, calc(100vw - 40px));
+  min-height: 276px;
+  padding: 47px 45px 24px;
+}
+
+.admin-shell .user-detail-modal h2 {
+  margin: 0;
+  font-family: var(--heading-font);
+  font-size: 19px;
+  line-height: 1.15;
+}
+
+.admin-shell .user-detail-modal .modal-role {
+  margin: 2px 0 24px;
+  font-size: 12px;
+}
+
+.admin-shell .user-detail-modal dl {
+  grid-template-columns: 152px 1fr;
+  gap: 7px;
+  font-size: 13px;
+}
+
+.admin-shell .review-modal {
+  width: min(444px, calc(100vw - 40px));
+  min-height: 409px;
+  padding: 50px 27px 13px;
+}
+
+.admin-shell .review-modal h2 {
+  margin: 0;
+  font-family: var(--heading-font);
+  font-size: 18px;
+  line-height: 1.15;
+}
+
+.admin-shell .review-modal .modal-role {
+  margin: 2px 0 20px;
+  font-size: 11px;
+}
+
+.admin-shell .review-modal dl {
+  grid-template-columns: 132px 1fr;
+  gap: 4px;
+  margin: 0;
+  font-size: 11px;
+}
+
+.admin-shell .review-modal .document-buttons {
+  gap: 5px;
+  margin: 17px 0 10px;
+}
+
+.admin-shell .review-modal .document-buttons button {
+  height: 25px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-family: var(--heading-font);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.admin-shell .review-modal textarea {
+  box-sizing: border-box;
+  height: 68px;
+  padding: 8px;
+  border: 1px solid #555;
+  border-radius: 7px;
+  background: #fff;
+  font-family: var(--heading-font);
+  font-size: 9px;
+}
+
+.admin-shell .modal-actions {
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.admin-shell .modal-actions button {
+  min-width: 83px;
+  height: 24px;
+  padding: 0;
+  border-radius: 7px;
+  font-family: var(--heading-font);
+  font-size: 9px;
+}
+
+.admin-shell .disable-modal {
+  width: min(490px, calc(100vw - 40px));
+  min-height: 284px;
+  padding: 80px 28px 20px;
+  text-align: center;
+}
+
+.admin-shell .disable-modal h2 {
+  font-family: var(--heading-font);
+  font-size: 18px;
+}
+
+.admin-shell .disable-user-summary {
+  gap: 3px;
+  margin: 22px 0 40px;
+  font-size: 11px;
+}
+
+.admin-shell .disable-user-summary strong {
+  font-size: 14px;
+}
+
+.admin-shell .disable-modal .modal-actions {
+  justify-content: center;
+}
+
+/* The reference includes a usable dashboard-only sidebar collapse affordance. */
+.admin-shell--collapsed .admin-sidebar {
+  width: 54px;
+  padding-right: 7px;
+  padding-left: 7px;
+}
+
+.admin-shell--collapsed .admin-sidebar a {
+  justify-content: center;
+  padding: 0;
+}
+
+.admin-shell--collapsed .admin-sidebar a:not(.active),
+.admin-shell--collapsed .admin-sidebar-actions span {
+  font-size: 0;
+}
+
+.admin-shell--collapsed .admin-sidebar-actions {
+  justify-items: center;
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.admin-shell--collapsed .admin-content {
+  margin-left: 54px;
+}
+
+/* A compact but usable fallback for narrow windows. */
+@media (max-width: 850px) {
+  .admin-shell .admin-header { height: 86px; }
+  .admin-shell .admin-sidebar { top: 86px; width: 54px; padding: 12px 7px; }
+  .admin-shell .admin-sidebar a { justify-content: center; padding: 0; }
+  .admin-shell .admin-sidebar a:not(.active),
+  .admin-shell .admin-sidebar-actions span { font-size: 0; }
+  .admin-shell .admin-content { min-height: calc(100vh - 86px); margin-left: 54px; padding: 24px 18px 32px; }
+  .admin-shell .admin-title-row,
+  .admin-shell .metric-grid,
+  .admin-shell .trend-card,
+  .admin-shell .user-table,
+  .admin-shell .table-footer { width: 100%; margin-left: 0; }
+  .admin-shell .metric-grid { grid-template-columns: repeat(2, 1fr); }
+  .admin-shell .admin-title-row h1 { font-size: 30px; }
+  .admin-shell .trend-card { height: 308px; }
+  .admin-shell .trend-card svg { left: 6%; width: 88%; }
+  .admin-shell .chart-days { left: 8%; width: 82%; }
+  .admin-shell .chart-y-axis { display: none; }
+}

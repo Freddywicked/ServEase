@@ -11,7 +11,7 @@ const registrationData = [
   { date: "14 May", users: 500 },
 ];
 function AdminDashboard() {
-  const [data, setData] = useState(registrationData);
+  const data = registrationData;
   const [active, setActive] = useState(null);
   const max = Math.max(...data.map((i) => i.users), 100);
   const coords = useMemo(
@@ -31,12 +31,6 @@ function AdminDashboard() {
     { label: "Service Providers", value: 500, tone: "navy" },
     { label: "Pending Accounts", value: 1000, tone: "peach" },
   ];
-  const addDemoRegistration = () =>
-    setData((items) =>
-      items.map((item, index) =>
-        index === items.length - 1 ? { ...item, users: item.users + 1 } : item,
-      ),
-    );
   return (
     <AdminLayout>
       <div className="admin-title-row">
@@ -44,9 +38,6 @@ function AdminDashboard() {
           <h1>Welcome, Admin!</h1>
           <p>Here's what's happening today.</p>
         </div>
-        <button onClick={addDemoRegistration} className="admin-refresh">
-          Add demo registration
-        </button>
       </div>
       <section className="metric-grid">
         {metrics.map((item) => (
@@ -64,6 +55,9 @@ function AdminDashboard() {
               ? `${active.users} registrations · ${active.date}`
               : "Hover a point to inspect"}
           </span>
+        </div>
+        <div className="chart-y-axis" aria-hidden="true">
+          {[500, 400, 300, 200, 100, 0].map((value) => <span key={value}>{value}</span>)}
         </div>
         <svg
           viewBox="0 0 100 100"

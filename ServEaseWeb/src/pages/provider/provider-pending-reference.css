@@ -1,0 +1,177 @@
+/* Pending-provider confirmation, measured against the supplied verification
+   hand-off screen.  It intentionally leaves the finished verification form
+   visible behind the confirmation rather than presenting a second workflow. */
+.provider-pending-page {
+  min-height: 760px;
+  padding: 62px 20px 30px;
+  color: #222;
+}
+
+.provider-pending-page .brand--large {
+  margin: 0 0 44px;
+  font-size: 37px;
+  line-height: .8;
+  transform: translateX(10px);
+}
+
+.provider-pending-page .brand--large .brand-mark {
+  width: 112px;
+  height: 76px;
+  margin: 0;
+  display: block;
+  object-fit: contain;
+}
+
+.provider-pending-page .brand--large::after {
+  content: "ServEase";
+  width: 139px;
+  margin-top: 6px;
+  background: linear-gradient(90deg, #062d5f 0 53%, #09a8ae 53%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-size: 31px;
+  font-weight: 800;
+  letter-spacing: -.04em;
+  line-height: .8;
+  text-align: center;
+}
+
+.provider-pending-page .provider-title {
+  font-size: 18px;
+}
+
+.provider-pending-page .provider-pending-progress {
+  width: 357px;
+  max-width: 100%;
+  margin: 36px auto 23px;
+}
+
+.provider-pending-page .pending-verification-surface {
+  width: min(100%, 333px);
+  padding: 14px 20px 20px;
+  border-radius: 20px;
+  transform: translateX(2px);
+}
+
+.provider-pending-page .pending-verification-surface h3 {
+  margin: 0 0 17px;
+  color: var(--navy);
+  font-size: 14px;
+}
+
+.pending-upload-section {
+  margin-bottom: 10px;
+}
+
+.pending-upload-section > span {
+  display: block;
+  margin-bottom: 5px;
+  color: #70747a;
+  font-size: 6px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+}
+
+.pending-upload-box {
+  display: flex;
+  height: 35px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 13px;
+  border: 1px solid #8b9299;
+  border-radius: 5px;
+  color: #1f2933;
+  font-size: 18px;
+}
+
+.pending-upload-box b {
+  font-size: 9px;
+}
+
+.pending-agreements {
+  display: grid;
+  gap: 10px;
+  padding-top: 3px;
+  color: #313131;
+  font-size: 6px;
+  letter-spacing: 1px;
+}
+
+.provider-pending-page .pending-submit {
+  display: grid;
+  width: 188px;
+  height: 23px;
+  margin-top: 23px;
+  place-items: center;
+  border-radius: 4px;
+  font-size: 9px;
+  pointer-events: none;
+  transform: translateX(4px);
+}
+
+.provider-pending-overlay {
+  position: fixed;
+  z-index: 70;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(0 0 0 / .36);
+}
+
+.provider-pending-modal {
+  position: relative;
+  box-sizing: border-box;
+  display: grid;
+  width: min(365px, calc(100vw - 40px));
+  min-height: 196px;
+  align-content: start;
+  justify-items: center;
+  padding: 50px 24px 25px;
+  border-radius: 7px;
+  background: #fff;
+  color: #181818;
+  font-family: var(--heading-font);
+  text-align: center;
+  transform: translate(30px, -80px);
+}
+
+.provider-pending-close {
+  position: absolute;
+  top: 11px;
+  right: 15px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #111;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.provider-pending-modal h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.provider-pending-modal p {
+  margin: 11px 0 26px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.provider-pending-modal a {
+  color: #072b5d;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: underline;
+}
+
+@media (max-width: 600px) {
+  .provider-pending-page { min-height: 100vh; padding-top: 40px; }
+  .provider-pending-modal { transform: translateX(0); }
+}

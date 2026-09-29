@@ -42,6 +42,7 @@ import DocumentViewer from "../pages/DocumentViewer";
 import "../pages/admin/admin.css";
 import "../pages/admin/user-management.css";
 import "../pages/admin/dashboard.css";
+import "../pages/admin/admin-reference.css";
 
 function AppRoutes() {
   return (
