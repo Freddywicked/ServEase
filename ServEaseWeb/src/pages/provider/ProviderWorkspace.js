@@ -1,31 +1,45 @@
-import React, { useState } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { Link, useNavigate, useLocation, useParams } from "react-router-dom";
 import Brand from "../../components/common/Brand";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faBars,
+  faBolt,
+  faCaretDown,
   faChartLine,
+  faChevronLeft,
+  faCirclePlus,
   faComments,
+  faGear,
+  faImage,
+  faLocationDot,
   faRightFromBracket,
   faScrewdriverWrench,
   faTableCellsLarge,
-  faWrench,
 } from "@fortawesome/free-solid-svg-icons";
 import "./provider-workspace.css";
 import "./provider-uniform.css";
 import "./provider-density.css";
+import "./provider-reference.css";
+import { providerApi } from "../../services/providerApi";
 const nav = [
   [faTableCellsLarge, "Dashboard", "/provider/dashboard"],
-  [faScrewdriverWrench, "Service Requests", "/provider/requests"],
-  [faWrench, "Active Jobs", "/provider/jobs"],
+  [faGear, "Service Requests", "/provider/requests"],
+  [faScrewdriverWrench, "Active Jobs", "/provider/jobs"],
   [faComments, "Messages", "/provider/messages"],
   [faChartLine, "Earnings", "/provider/earnings"],
 ];
 export function ProviderLayout({ children }) {
-  const loc = useLocation(),
-    go = useNavigate();
-  const accountName =
-    localStorage.getItem("servease_account_name") || "Jess Garcia";
+  const loc = useLocation();
+  const go = useNavigate();
+  const [accountName, setAccountName] = useState(
+    localStorage.getItem("servease_account_name") || "Jess Garcia",
+  );
+
+  useEffect(() => {
+    providerApi.getProfile().then((profile) => {
+      if (!localStorage.getItem("servease_account_name")) setAccountName(profile.name);
+    });
+  }, []);
   const initials = accountName
     .split(" ")
     .map((x) => x[0])
@@ -41,7 +55,7 @@ export function ProviderLayout({ children }) {
           onClick={() => go("/provider/profile")}
           aria-label="Open profile"
         >
-          {initials} <FontAwesomeIcon icon={faBars} />
+          {initials} <FontAwesomeIcon icon={faCaretDown} />
         </button>
       </header>
       <aside className="customer-sidebar">
@@ -74,28 +88,107 @@ const Pills = ({ items, active, setActive }) => (
   <div className="provider-pills">
     {items.map((x) => (
       <button
-        className={x === active ? "active" : ""}
-        onClick={() => setActive(x)}
-        key={x}
+        className={(typeof x === "string" ? x : x.value) === active ? "active" : ""}
+        onClick={() => setActive(typeof x === "string" ? x : x.value)}
+        key={typeof x === "string" ? x : x.value}
       >
-        {x}
+        {typeof x === "string" ? x : x.label}
       </button>
     ))}
   </div>
 );
+
+const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const timeOptions = ["10:00 AM", "11:00 AM"];
+
+function AvailabilityModal({ onClose }) {
+  const [month, setMonth] = useState(new Date(2026, 8, 1));
+  const [selectedDate, setSelectedDate] = useState("2026-09-09");
+  const [selectedTime, setSelectedTime] = useState("10:00 AM");
+  const [unavailableSlots, setUnavailableSlots] = useState([]);
+
+  useEffect(() => {
+    providerApi.getCalendar().then((calendar) => setUnavailableSlots(calendar.unavailableSlots));
+  }, []);
+
+  const year = month.getFullYear();
+  const monthIndex = month.getMonth();
+  const firstDay = new Date(year, monthIndex, 1).getDay();
+  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+  const slot = `${selectedDate}|${selectedTime}`;
+  const isUnavailable = unavailableSlots.includes(slot);
+
+  const changeMonth = (offset) => {
+    const next = new Date(year, monthIndex + offset, 1);
+    setMonth(next);
+    setSelectedDate(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-01`);
+  };
+
+  const toggleSlot = async () => {
+    await providerApi.toggleUnavailableSlot(slot);
+    const calendar = await providerApi.getCalendar();
+    setUnavailableSlots(calendar.unavailableSlots);
+  };
+
+  return (
+    <div className="provider-modal" role="dialog" aria-modal="true" aria-label="Manage availability">
+      <section className="availability-modal">
+        <button className="availability-close" onClick={onClose} aria-label="Close calendar">×</button>
+        <b>Select Date</b>
+        <div className="availability-calendar">
+          <div className="availability-calendar-heading">
+            <button onClick={() => changeMonth(-1)} aria-label="Previous month">‹</button>
+            <select value={monthIndex} onChange={(event) => { const next = new Date(year, Number(event.target.value), 1); setMonth(next); setSelectedDate(`${year}-${String(next.getMonth() + 1).padStart(2, "0")}-01`); }}>
+              {monthNames.map((name, index) => <option value={index} key={name}>{name.slice(0, 3)}</option>)}
+            </select>
+            <select value={year} onChange={(event) => { const nextYear = Number(event.target.value); setMonth(new Date(nextYear, monthIndex, 1)); setSelectedDate(`${nextYear}-${String(monthIndex + 1).padStart(2, "0")}-01`); }}>
+              {[2026, 2027, 2028].map((option) => <option value={option} key={option}>{option}</option>)}
+            </select>
+            <button onClick={() => changeMonth(1)} aria-label="Next month">›</button>
+          </div>
+          <div className="calendar-weekdays">{["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => <span key={day}>{day}</span>)}</div>
+          <div className="calendar-days">
+            {Array.from({ length: firstDay }, (_, index) => <span key={`blank-${index}`} />)}
+            {Array.from({ length: daysInMonth }, (_, index) => {
+              const day = index + 1;
+              const value = `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+              const hasUnavailableTime = unavailableSlots.some((item) => item.startsWith(`${value}|`));
+              return <button className={`${value === selectedDate ? "selected" : ""} ${hasUnavailableTime ? "partially-unavailable" : ""}`} onClick={() => setSelectedDate(value)} key={value}>{day}</button>;
+            })}
+          </div>
+        </div>
+        <b>Select Time</b>
+        <div className="availability-times">
+          {timeOptions.map((time) => <button className={time === selectedTime ? "selected" : ""} onClick={() => setSelectedTime(time)} key={time}>{time}</button>)}
+        </div>
+        <button className="availability-submit" onClick={toggleSlot}>{isUnavailable ? "Mark as Available" : "Mark as Unavailable"}</button>
+      </section>
+    </div>
+  );
+}
+
 export function ProviderDashboard() {
-  const go = useNavigate();
+  const [workspace, setWorkspace] = useState(null);
+  const [showCalendar, setShowCalendar] = useState(false);
+
+  useEffect(() => {
+    providerApi.get().then(setWorkspace);
+  }, []);
+
+  if (!workspace) return <ProviderLayout><p>Loading dashboard…</p></ProviderLayout>;
+  const activeJobs = workspace.jobs.filter((job) => job.status === "In Progress").length;
+  const pendingRequest = workspace.serviceRequests.find((request) => request.status === "new");
   return (
     <ProviderLayout>
-      <h1>Welcome, Jess!</h1>
-      <h2>Repair Specialist</h2>
-      <div className="provider-stats">
+      <h1>Welcome, {workspace.profile.name.split(" ")[0]}!</h1>
+      <h2>{workspace.profile.role}</h2>
+      <div className="provider-stats provider-dashboard-stats">
         <div>
-          <b>4</b>
+          <b>{activeJobs}</b>
           <span>Active jobs</span>
         </div>
         <div>
-          <b>44</b>
+          <b>{workspace.earnings.transactions.length}</b>
           <span>This month</span>
         </div>
         <div>
@@ -105,160 +198,132 @@ export function ProviderDashboard() {
       </div>
       <button
         className="provider-primary"
-        onClick={() => go("/provider/calendar")}
+        onClick={() => setShowCalendar(true)}
       >
         Manage your Calendar
       </button>
       <div className="provider-dashboard-grid">
         <section>
           <h3>PENDING REQUEST</h3>
-          <div>None</div>
+          <div>{pendingRequest ? `#${pendingRequest.id} · ${pendingRequest.customer}` : "None"}</div>
         </section>
         <section>
           <h3>NOTIFICATIONS</h3>
           <div>No Notifications</div>
         </section>
       </div>
-      <section className="provider-empty">
+      <section className="provider-empty provider-active-repair">
         <h3>ACTIVE REPAIR</h3>
-        <div>No Active Repair</div>
+        <div>{activeJobs ? `${workspace.jobs[0].id} · ${workspace.jobs[0].stage}` : "No Active Repair"}</div>
       </section>
+      {showCalendar && <AvailabilityModal onClose={() => setShowCalendar(false)} />}
     </ProviderLayout>
   );
 }
 export function ProviderRequests() {
-  const go = useNavigate(),
-    [tab, setTab] = useState("New (1)"),
-    [schedule, setSchedule] = useState(false),
-    [date, setDate] = useState("2026-09-10"),
-    [time, setTime] = useState("10:00 AM");
-  const appointment = tab === "Appointment";
-  const quote = tab === "Pending Quotation";
+  const go = useNavigate();
+  const [tab, setTab] = useState("New");
+  const [requests, setRequests] = useState([]);
+
+  useEffect(() => {
+    providerApi.getServiceRequests().then(setRequests);
+  }, []);
+
+  const visibleRequests = requests.filter((request) => {
+    if (tab === "New") return request.status === "new";
+    if (tab === "Pending Quotation") return request.status === "quoted";
+    return request.status !== "declined";
+  });
+
   return (
     <ProviderLayout>
       <h1>Incoming Service Requests</h1>
       <Pills
-        items={["New (1)", "Pending Quotation", "Appointment", "All"]}
+        items={[{ value: "New", label: "New (1)" }, "Pending Quotation", "All"]}
         active={tab}
         setActive={setTab}
       />
-      <article className="provider-request-card">
-        {appointment ? (
-          <>
-            <b>Request #SR-0000</b>
-            <small>Micco Dominic sent a new schedule.</small>
-            <strong className="request-state">Pending Appointment</strong>
-            <h3>
-              {date.replaceAll("-", "/")} {time}
-            </h3>
-            <hr />
-            <b>Reason for New Schedule</b>
-            <small>
-              Customer asked for a different date because the original slot is
-              unavailable.
-            </small>
+      {visibleRequests.map((request) => (
+        <article className={`provider-request-card provider-request-card--${request.status}`} key={request.id}>
+          <header className="provider-request-header">
             <div>
-              <button onClick={() => go("/provider/calendar")}>Accept</button>
-              <button onClick={() => setSchedule(true)}>
-                Suggest new Schedule
-              </button>
+              <b>Request #{request.id}</b>
+              <small>{request.customer} | {request.date}</small>
             </div>
-          </>
-        ) : quote ? (
-          <>
-            <b>Request #SR-0000</b>
-            <small>Nick Duran | Jun 27</small>
-            <strong className="request-state quoted">Quoted</strong>
-            <div className="ai-strip">
-              ϟ　AI suggests drain panel replacement (91% confidence)
+            {request.status === "quoted" && <strong className="request-state quoted">Quoted</strong>}
+          </header>
+          <div className="ai-strip"><FontAwesomeIcon className="ai-bolt" icon={faBolt} /> AI suggests {request.diagnosis.toLowerCase()} ({request.confidence}% confidence)</div>
+          <p className="provider-request-distance"><FontAwesomeIcon icon={faLocationDot} /> {request.distance}</p>
+          <hr className="provider-request-divider" />
+          {request.quote ? (
+            <div className="provider-quote-footer">
+              <small>Quote sent: ₱{request.quote.labor.toLocaleString()} (Labor), ₱{request.quote.parts.toLocaleString()} (Parts)</small>
+              <b className="quote-total">TOTAL: ₱{(request.quote.labor + request.quote.parts).toLocaleString()}</b>
+              <button className="provider-message-customer" onClick={() => go("/provider/messages")}>Message Customer</button>
             </div>
-            <p>●　1 km away</p>
-            <hr />
-            <small>Quote sent: ₱800 pesos (Labor), ₱2,000 pesos (Parts)</small>
-            <b className="quote-total">TOTAL: ₱2,800</b>
-            <button>Message Customer</button>
-          </>
-        ) : (
-          <>
-            <b>Request #SR-0000</b>
-            <small>Dominic Alcantara | Jun 27</small>
-            <div className="ai-strip">
-              ϟ　AI suggests capacitor failure (82% confidence)
-            </div>
-            <p>●　1.2 km away</p>
-            <hr />
-            <button onClick={() => go("/provider/requests/SR-0000")}>
-              View
-            </button>
-          </>
-        )}
-      </article>
-      {schedule && (
-        <div className="provider-modal">
-          <section>
-            <button onClick={() => setSchedule(false)}>×</button>
-            <h3>Suggest new schedule</h3>
-            <p>Offer an available appointment to the customer.</p>
-            <label>
-              Select date
-              <input
-                type="date"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-              />
-            </label>
-            <label>
-              Select time
-              <select value={time} onChange={(e) => setTime(e.target.value)}>
-                <option>10:00 AM</option>
-                <option>11:00 AM</option>
-                <option>1:00 PM</option>
-              </select>
-            </label>
-            <button onClick={() => setSchedule(false)}>Send schedule</button>
-          </section>
-        </div>
-      )}
+          ) : <div className="provider-request-actions"><button onClick={() => go(`/provider/requests/${request.id}`)}>View</button></div>}
+        </article>
+      ))}
+      {!visibleRequests.length && <p className="provider-empty">No requests in this view.</p>}
     </ProviderLayout>
   );
 }
 export function RequestDetail() {
-  const go = useNavigate(),
-    [modal, setModal] = useState(""),
-    [reason, setReason] = useState("");
+  const go = useNavigate();
+  const { id } = useParams();
+  const [modal, setModal] = useState("");
+  const [reason, setReason] = useState("");
+  const [request, setRequest] = useState(null);
+  const [quote, setQuote] = useState({ labor: "", parts: "", notes: "" });
+
+  useEffect(() => {
+    providerApi.getRequest(id).then(setRequest);
+  }, [id]);
+
+  if (!request) return <ProviderLayout><p>Loading service request…</p></ProviderLayout>;
+
+  const submitQuote = async () => {
+    await providerApi.sendQuote(request.id, {
+      labor: Number(quote.labor) || 0,
+      parts: Number(quote.parts) || 0,
+      notes: quote.notes,
+    });
+    go("/provider/requests");
+  };
+
+  const decline = async () => {
+    await providerApi.declineRequest(request.id, reason.trim());
+    go("/provider/requests");
+  };
+
   return (
     <ProviderLayout>
       <h1>Service Request</h1>
-      <section className="provider-detail">
-        <h2>Request #SR-0000</h2>
+      <section className="provider-detail provider-request-detail">
+        <h2>Request #{request.id}</h2>
         <b>Customer Information</b>
         <div className="customer-mini">
           <i />{" "}
           <span>
-            <b>Dominic Alcantara</b>
-            <small>123 Maple St QC Manila</small>
+            <b>{request.customer}</b>
+            <small>{request.address}</small>
           </span>
-          <u>●　1.2 km away</u>
+          <u><FontAwesomeIcon icon={faLocationDot} />{request.distance}</u>
         </div>
         <b>Customer Concern</b>
         <p>
-          Customer narration about the device's problem and preferred repair
-          outcome.
+          {request.concern}
         </p>
-        <div className="image-placeholder">▧</div>
+        <div className="image-placeholder"><FontAwesomeIcon icon={faImage} /></div>
         <b>AI Diagnosis (Preliminary)</b>
         <div className="ai-strip">
-          ϟ　AI suggests capacitor failure (82% confidence)
+          <FontAwesomeIcon className="ai-bolt" icon={faBolt} /> AI suggests {request.diagnosis.toLowerCase()} ({request.confidence}% confidence)
         </div>
         <small>
           Possible causes:
           <br />
           <b>
-            Dirty air filter
-            <br />
-            Refrigerant leak
-            <br />
-            Compressor issue
+            {request.possibleCauses.map((cause) => <React.Fragment key={cause}>{cause}<br /></React.Fragment>)}
           </b>
         </small>
         <div className="detail-actions">
@@ -270,8 +335,8 @@ export function RequestDetail() {
       </section>
       {modal && (
         <div className="provider-modal">
-          <section>
-            <button onClick={() => setModal("")}>×</button>
+          <section className={`provider-modal__panel provider-modal__panel--${modal}`}>
+            <button className="provider-modal__close" onClick={() => setModal("")} aria-label="Close dialog">×</button>
             {modal === "reject" ? (
               <>
                 <h3>Reason for Rejection</h3>
@@ -283,10 +348,7 @@ export function RequestDetail() {
                 />
                 <button
                   disabled={!reason.trim()}
-                  onClick={() => {
-                    setModal("");
-                    go("/provider/requests");
-                  }}
+                  onClick={decline}
                 >
                   Send
                 </button>
@@ -296,18 +358,21 @@ export function RequestDetail() {
                 <h3>Service Request Approved</h3>
                 <p>Send a pre-repair quotation to the customer.</p>
                 <div className="quote-inputs">
-                  <input placeholder="Labor (Peso)" type="number" />
-                  <input placeholder="Parts (Peso)" type="number" />
+                  <label>
+                    <span>Labor (Peso)</span>
+                    <input aria-label="Labor (Peso)" placeholder="0.00" type="number" value={quote.labor} onChange={(event) => setQuote({ ...quote, labor: event.target.value })} />
+                  </label>
+                  <label>
+                    <span>Parts (Peso)</span>
+                    <input aria-label="Parts (Peso)" placeholder="0.00" type="number" value={quote.parts} onChange={(event) => setQuote({ ...quote, parts: event.target.value })} />
+                  </label>
+                  <FontAwesomeIcon className="quote-add" icon={faCirclePlus} aria-hidden="true" />
                 </div>
-                <textarea placeholder="Parts needed, timeline..." />
-                <button
-                  onClick={() => {
-                    setModal("");
-                    go("/provider/requests");
-                  }}
-                >
-                  Send Quote
-                </button>
+                <label className="quote-notes">
+                  <span>Notes</span>
+                  <textarea placeholder="Parts needed, timeline..." value={quote.notes} onChange={(event) => setQuote({ ...quote, notes: event.target.value })} />
+                </label>
+                <button onClick={submitQuote}>Send Quote</button>
               </>
             )}
           </section>
@@ -317,23 +382,44 @@ export function RequestDetail() {
   );
 }
 export function ProviderJobs() {
-  const go = useNavigate(),
-    [view, setView] = useState("list"),
-    [stage, setStage] = useState("Repairing"),
-    [notes, setNotes] = useState("");
+  const [view, setView] = useState("list");
+  const [stage, setStage] = useState("Repairing");
+  const [notes, setNotes] = useState("");
+  const [cost, setCost] = useState("");
+  const [jobs, setJobs] = useState([]);
+
+  useEffect(() => {
+    providerApi.getJobs().then(setJobs);
+  }, []);
+
+  const job = jobs[0];
+  const returnToJobs = async () => {
+    if (!job) return;
+    if (view === "status") await providerApi.addJobUpdate(job.id, { stage, notes, createdAt: new Date().toISOString() });
+    if (view === "parts") await providerApi.requestAdditionalParts(job.id, { cost: Number(cost) || 0, notes, createdAt: new Date().toISOString() });
+    setNotes("");
+    setCost("");
+    setView("list");
+    providerApi.getJobs().then(setJobs);
+  };
   if (view === "status" || view === "parts")
     return (
       <ProviderLayout>
         <h1>Active Jobs</h1>
+        <input
+          className="provider-search"
+          placeholder="Search job and details..."
+        />
         <Pills
           items={["All", "Active", "Pending", "Done"]}
           active="All"
           setActive={() => {}}
         />
-        <section className="provider-editor">
-          <h2>
-            ‹　{view === "status" ? "Update Status" : "Notify Additional Parts"}
-          </h2>
+        <section className={`provider-editor provider-editor--${view}`}>
+          <div className="provider-editor-heading">
+            <button className="provider-editor-back" type="button" onClick={() => setView("list")} aria-label="Back to active jobs"><FontAwesomeIcon icon={faChevronLeft} /></button>
+            <h2>{view === "status" ? "Update Status" : "Notify Additional Parts"}</h2>
+          </div>
           {view === "status" ? (
             <>
               <label>
@@ -356,23 +442,23 @@ export function ProviderJobs() {
                 />
               </label>
               <div className="upload-job">
-                ▧<br />
+                <FontAwesomeIcon icon={faImage} />
                 <small>Upload Image</small>
               </div>
-              <button onClick={() => setView("list")}>Push Update</button>
+              <button onClick={returnToJobs}>Push Update</button>
             </>
           ) : (
             <>
               <h3>Explain the unexpected additional parts to the customer.</h3>
               <label>
                 Additional Cost (Peso)
-                <input type="number" placeholder="0.00" />
+                <input type="number" placeholder="0.00" value={cost} onChange={(event) => setCost(event.target.value)} />
               </label>
               <label>
                 Notes
-                <textarea placeholder="Parts needed, timeline..." />
+                <textarea placeholder="Parts needed, timeline..." value={notes} onChange={(event) => setNotes(event.target.value)} />
               </label>
-              <button onClick={() => setView("list")}>Send Request</button>
+              <button onClick={returnToJobs}>Send Request</button>
             </>
           )}
         </section>
@@ -390,28 +476,37 @@ export function ProviderJobs() {
         active="All"
         setActive={() => {}}
       />
-      <article className="provider-job">
-        <b>Request #SR-0000</b>
-        <span>In Progress</span>
-        <small>Nikki P. | Jun 27</small>
-        <div className="ai-strip">
-          ϟ　AI suggests LCD problem (96% confidence)
+      {job && <article className="provider-job">
+        <div className="provider-job-heading">
+          <div>
+            <b>Request #{job.id}</b>
+            <small>{job.customer} | {job.date}</small>
+          </div>
+          <span>{job.status}</span>
         </div>
+        <div className="ai-strip">
+          <FontAwesomeIcon className="ai-bolt" icon={faBolt} /> AI suggests {job.diagnosis} ({job.confidence}% confidence)
+        </div>
+        <div className="provider-job-divider" />
         <div className="job-progress">
           <i />
           <i />
           <i />
           <i />
         </div>
-        <b>Current Step: Repairing</b>
-        <small>Progress Payment 500 already paid by customer</small>
-        <div>
-          <button onClick={() => setView("status")}>Update Status</button>
-          <button onClick={() => setView("parts")}>
-            Notify Additional Parts
-          </button>
+        <div className="provider-job-footer">
+          <div className="provider-job-copy">
+            <b>Current Step: {job.stage}</b>
+            <small>{job.notes}</small>
+          </div>
+          <div className="provider-job-actions">
+            <button onClick={() => setView("status")}>Update Status</button>
+            <button onClick={() => setView("parts")}>
+              Notify Additional Parts
+            </button>
+          </div>
         </div>
-      </article>
+      </article>}
     </ProviderLayout>
   );
 }

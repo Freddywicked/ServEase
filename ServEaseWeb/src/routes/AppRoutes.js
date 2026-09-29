@@ -33,6 +33,7 @@ import {
   Payment,
   Messages,
   History,
+  RateReview,
   RequestSent,
 } from "../pages/customer/CustomerPages";
 import AdminDashboard from "../pages/admin/AdminDashboard";
@@ -76,6 +77,7 @@ function AppRoutes() {
       <Route path="/customer/payment" element={<Payment />} />
       <Route path="/customer/messages" element={<Messages />} />
       <Route path="/customer/history" element={<History />} />
+      <Route path="/customer/review" element={<RateReview />} />
       <Route path="/customer/request/sent" element={<RequestSent />} />
       <Route path="/admin/dashboard" element={<AdminDashboard />} />
       <Route path="/admin/users" element={<UserManagement />} />

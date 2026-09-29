@@ -2,52 +2,56 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faPenToSquare,
+  faCircleCheck,
   faRightFromBracket,
+  faUserPen,
 } from "@fortawesome/free-solid-svg-icons";
 import { ProviderLayout } from "./ProviderWorkspace";
 import { providerApi } from "../../services/providerApi";
 
 export function ProviderMessages() {
-  const [text, setText] = useState(""),
-    [messages, setMessages] = useState([]);
+  const [text, setText] = useState("");
+  const [conversations, setConversations] = useState([]);
+  const [selectedId, setSelectedId] = useState("");
+
   useEffect(() => {
-    providerApi.get().then((x) => setMessages(x.messages || []));
+    providerApi.getConversations().then((items) => {
+      setConversations(items);
+      setSelectedId(items[0]?.id || "");
+    });
   }, []);
+
+  const selectedConversation = conversations.find((conversation) => conversation.id === selectedId);
+
   const send = async (e) => {
     e.preventDefault();
-    if (!text.trim()) return;
-    await providerApi.sendMessage(text.trim());
-    setMessages((x) => [...x, { id: Date.now(), text, from: "You" }]);
+    if (!text.trim() || !selectedConversation) return;
+    await providerApi.sendMessage(selectedConversation.id, text.trim());
+    setConversations(await providerApi.getConversations());
     setText("");
   };
   return (
     <ProviderLayout>
       <h1>Messages</h1>
-      <div className="provider-messages">
-        <aside>
-          <button className="selected">
-            <i /> <b>Nick Duran</b>
-            <small>K lang.</small>
-          </button>
-          <button>
-            <i /> <b>Gabriela Lim</b>
-            <small>Hi Ma'am, sinend ko na po yung quotation.</small>
-          </button>
+      <div className="provider-messages provider-messages--reference">
+        <aside className="provider-conversation-list">
+          {conversations.map((conversation) => (
+            <button key={conversation.id} className={conversation.id === selectedId ? "selected" : ""} onClick={() => setSelectedId(conversation.id)}>
+              <i /> <b>{conversation.customer}</b>
+              <small>{conversation.preview}</small>
+              {conversation.id === conversations[0]?.id && <span className="provider-unread-dot" aria-label="Unread message" />}
+            </button>
+          ))}
         </aside>
-        <section>
+        {selectedConversation && <section>
           <header>
-            <b>Nick Duran</b>
-            <small>Laptop Screen Repair</small>
-            <em>Online</em>
+            <b>{selectedConversation.customer}</b>
+            <small>{selectedConversation.service}</small>
+            {selectedConversation.online && <em>Online</em>}
           </header>
           <div className="message-thread">
-            <p>
-              Hi! Matatagalan pa to since sa Manila pa kukuning yung screen.
-              <small>Jun 24 9:12 AM</small>
-            </p>
-            {messages.map((m) => (
-              <p key={m.id}>{m.text}</p>
+            {selectedConversation.messages.map((message) => (
+              <p key={message.id} className={message.from === "provider" ? "sent" : ""}>{message.text}<small>{message.timestamp}</small></p>
             ))}
           </div>
           <form onSubmit={send}>
@@ -57,65 +61,69 @@ export function ProviderMessages() {
               placeholder="Type a message..."
             />
           </form>
-        </section>
+        </section>}
       </div>
     </ProviderLayout>
   );
 }
 
 export function ProviderEarnings() {
+  const [earnings, setEarnings] = useState(null);
+  useEffect(() => { providerApi.getEarnings().then(setEarnings); }, []);
+  if (!earnings) return <ProviderLayout><p>Loading earnings…</p></ProviderLayout>;
   return (
     <ProviderLayout>
       <h1>Earnings</h1>
-      <div className="provider-stats compact">
+      <div className="provider-stats compact provider-earnings-stats">
         <div>
-          <b>₱8,150</b>
+          <b>₱{earnings.weekly.toLocaleString()}</b>
           <span>This week</span>
         </div>
         <div>
-          <b>₱1,300</b>
+          <b>₱{earnings.pending.toLocaleString()}</b>
           <span>Pending Payment</span>
         </div>
       </div>
       <h3 className="section-label">RECENT TRANSACTIONS</h3>
-      <div className="transaction-row">
-        Initial payment · SR-0000 <b>₱500</b>
-      </div>
-      <div className="transaction-row">
-        Repair completion · SR-0003 <b>₱2,650</b>
-      </div>
-      <div className="transaction-row">
-        Additional parts · SR-0007 <b>₱1,300</b>
-      </div>
+      {earnings.transactions.map((transaction) => (
+        <div className="transaction-row" key={transaction.id}>
+          {transaction.customer} · {transaction.requestId} <b>₱{transaction.amount.toLocaleString()} · {transaction.status}</b>
+        </div>
+      ))}
     </ProviderLayout>
   );
 }
 
 export function ProviderProfile() {
   const go = useNavigate();
+  const [profile, setProfile] = useState(null);
+  useEffect(() => { providerApi.getProfile().then(setProfile); }, []);
+  if (!profile) return <ProviderLayout><p>Loading profile…</p></ProviderLayout>;
   return (
     <ProviderLayout>
       <h1>Profile</h1>
       <section className="provider-profile">
         <i />
-        <h2>Sylvia Lee</h2>
-        <p>Automotive Repair Service Provider</p>
-        <div>
-          <mark>✓ &nbsp; Verified</mark>
-          <b>92% Positive Feedback</b>
+        <h2>{profile.name}</h2>
+        <p>{profile.role}</p>
+        <div className="provider-profile-feedback">
+          {profile.verified && <mark><FontAwesomeIcon icon={faCircleCheck} /> Verified</mark>}
+          <b>{profile.positiveFeedback}</b>
         </div>
-        <p>5 years experience</p>
-        <strong>Specialties:</strong> IT and Phone Repair
-        <br />
-        <strong>Location:</strong> Naga City · 2.5 km away
-        <br />
-        <strong>Available:</strong> Mon–Fri, 8AM–6PM<h4>AI Summary Insights</h4>
-        <span>Professional</span>
-        <span>Always on Time</span>
+        <p>{profile.experience}</p>
+        <div className="provider-profile-details">
+          <div><strong>Specialties:</strong> {profile.specialties}</div>
+          <div><strong>Location:</strong> {profile.location}</div>
+          <div><strong>Available:</strong> {profile.availability}</div>
+        </div>
+        <div className="provider-profile-insights">
+          <h4>AI Summary Insights</h4>
+          {profile.insights.map((insight) => <span key={insight}>{insight}</span>)}
+        </div>
       </section>
       <div className="profile-actions">
         <button>
-          <FontAwesomeIcon icon={faPenToSquare} /> Edit Profile
+          <FontAwesomeIcon icon={faUserPen} /> Edit Profile
         </button>
         <button onClick={() => go("/signin")}>
           <FontAwesomeIcon icon={faRightFromBracket} /> Log out

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -7,18 +7,28 @@ import {
   faScrewdriverWrench,
 } from "@fortawesome/free-solid-svg-icons";
 import { CustomerLayout } from "./CustomerDashboard";
+import { registrationApi } from "../../services/registrationApi";
 import "./profile.css";
 
 export default function Profile() {
   const nav = useNavigate();
-  const name = localStorage.getItem("servease_account_name") || "Nikki de Lima";
+  const [profile, setProfile] = useState(null);
+
+  useEffect(() => {
+    registrationApi.getRegistration().then((registration) => {
+      setProfile(registration?.profile || null);
+    });
+  }, []);
+
+  const name = profile?.fullName || "Customer";
+  const contact = [profile?.email, profile?.phone].filter(Boolean).join(" | ");
   return (
     <CustomerLayout>
       <h1 className="customer-title">Profile</h1>
       <section className="customer-profile">
         <div className="customer-avatar" />
         <h2>{name}</h2>
-        <p>nikkide5@gmail.com | 09123456789</p>
+        <p>{contact || "No contact details available"}</p>
       </section>
       <div className="customer-profile-actions">
         <button>

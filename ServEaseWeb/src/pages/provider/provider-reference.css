@@ -1,0 +1,1399 @@
+/* Final provider workspace pass: these rules intentionally follow the legacy
+   provider styles so the desktop screens share one measured reference frame. */
+
+.provider-shell {
+  color: #2f2f31;
+  font-family: var(--heading-font);
+}
+
+.provider-shell .customer-header {
+  height: 96px;
+  padding: 0 16px;
+  border-color: #dfdfdf;
+}
+
+.provider-shell .customer-header .brand {
+  gap: 7px;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.provider-shell .customer-header .brand-mark {
+  width: 50px;
+  height: 60px;
+  object-fit: cover;
+  object-position: center;
+}
+
+.provider-shell .profile-button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px;
+  color: #090909;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.provider-shell .profile-button svg {
+  width: 10px;
+  height: 10px;
+}
+
+.provider-shell .customer-sidebar {
+  top: 96px;
+  width: 172px;
+  padding: 20px 10px 16px;
+  border-color: #dfdfdf;
+}
+
+.provider-shell .customer-sidebar nav {
+  gap: 7px;
+}
+
+.provider-shell .customer-sidebar a {
+  height: 35px;
+  gap: 10px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.provider-shell .customer-sidebar a span,
+.provider-shell .customer-sidebar a svg {
+  width: 19px;
+  font-size: 19px;
+}
+
+.provider-shell .customer-sidebar .logout {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 8px;
+  color: #171717;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.provider-shell .customer-sidebar .logout svg {
+  width: 22px;
+  height: 22px;
+}
+
+.provider-shell .provider-content {
+  width: auto;
+  max-width: none;
+  min-height: calc(100vh - 96px);
+  margin-left: 172px;
+  padding: 28px 28px 40px 38px;
+}
+
+.provider-shell .provider-content > h1 {
+  margin: 0;
+  color: #075fbe;
+  font-family: var(--heading-font);
+  font-size: 38px;
+  font-weight: 800;
+  letter-spacing: -.045em;
+  line-height: 1.12;
+}
+
+.provider-shell .provider-content > h2 {
+  margin: 4px 0 0;
+  color: #4a4a4a;
+  font-family: var(--heading-font);
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.provider-shell .provider-content h3 {
+  font-family: var(--heading-font);
+}
+
+.provider-shell .provider-stats {
+  display: flex;
+  gap: 14px;
+  margin: 16px 0 28px;
+}
+
+.provider-shell .provider-stats > div {
+  display: grid;
+  width: 162px;
+  height: 73px;
+  padding: 8px;
+  place-items: center;
+  border-radius: 8px;
+  background: #e8e8e8;
+}
+
+.provider-shell .provider-stats b {
+  align-self: end;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.provider-shell .provider-stats span {
+  align-self: start;
+  font-size: 10px;
+}
+
+.provider-shell .provider-primary {
+  width: min(100%, 512px);
+  height: 35px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #075fbd, #09a8ae);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.provider-shell .provider-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 315px));
+  gap: 32px;
+  max-width: 662px;
+  margin: 62px 4px 40px;
+}
+
+.provider-shell .provider-dashboard-grid h3 {
+  margin: 0 0 12px;
+  color: #747474;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.provider-shell .provider-empty h3 {
+  margin: 0 0 9px;
+  color: #747474;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.provider-shell .provider-content .provider-dashboard-grid section > div,
+.provider-shell .provider-content .provider-empty > div {
+  display: grid;
+  height: 104px;
+  min-height: 104px;
+  place-items: center;
+  border: 1px solid #c7c7c7;
+  border-radius: 6px;
+  color: #717171;
+  font-size: 10px;
+}
+
+.provider-shell .provider-empty,
+.provider-shell .provider-active-repair {
+  max-width: 730px;
+  margin: 0 4px;
+}
+
+.provider-shell .provider-content .provider-active-repair > div {
+  height: 136px;
+  min-height: 136px;
+}
+
+/* Shared compact controls used by requests and jobs. */
+.provider-shell .provider-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 19px 0 17px;
+}
+
+.provider-shell .provider-pills button,
+.provider-shell .provider-content button:not(.profile-button):not(.provider-primary) {
+  border: 1px solid #cdbfc0;
+  border-radius: 14px;
+  background: #fff;
+  color: #333;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.provider-shell .provider-pills button {
+  min-width: 74px;
+  height: 27px;
+  padding: 0 19px;
+}
+
+.provider-shell .provider-pills button.active {
+  border-color: #09277c !important;
+  background: #06277e !important;
+  color: #fff !important;
+}
+
+.provider-shell .ai-strip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 31px;
+  padding: 7px 11px;
+  border-radius: 7px;
+  background: #292929;
+  color: #fff;
+  font-size: 9px;
+  line-height: 1.15;
+}
+
+.provider-shell .ai-strip .ai-bolt {
+  color: #5a89c9;
+  font-size: 12px;
+}
+
+/* Incoming service requests. */
+.provider-shell .provider-request-card {
+  display: block;
+  position: relative;
+  width: min(100%, 797px);
+  max-width: 797px;
+  min-height: 161px;
+  padding: 10px 11px 9px;
+  border: 1px solid #a7a7a7;
+  border-radius: 8px;
+  color: #333;
+  font-size: 10px;
+}
+
+.provider-shell .provider-request-card .ai-strip {
+  margin-right: 18px;
+}
+
+.provider-shell .provider-request-card + .provider-request-card {
+  margin-top: 17px;
+}
+
+.provider-shell .provider-request-header {
+  display: flex;
+  min-height: 36px;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.provider-shell .provider-request-header > div {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+}
+
+.provider-shell .provider-request-header b {
+  font-size: 11px;
+  line-height: 1.15;
+}
+
+.provider-shell .provider-request-header small,
+.provider-shell .provider-request-card small {
+  color: #616161;
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.provider-shell .request-state.quoted {
+  display: grid;
+  width: 84px;
+  height: 16px;
+  place-items: center;
+  border-radius: 12px;
+  background: #c6b658;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.provider-shell .provider-request-distance {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 19px;
+  margin: 5px 3px 4px;
+  color: #626262;
+  font-size: 9px;
+}
+
+.provider-shell .provider-request-distance svg {
+  font-size: 13px;
+}
+
+.provider-shell .provider-request-divider {
+  height: 1px;
+  margin: 0 21px 0 3px;
+  border: 0;
+  background: #bdbdbd;
+}
+
+.provider-shell .provider-request-actions {
+  position: absolute;
+  right: 30px;
+  bottom: 9px;
+}
+
+.provider-shell .provider-content .provider-request-actions button {
+  width: 77px;
+  height: 29px;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 10px;
+  background: #5a85c3 !important;
+  color: #fff !important;
+  font-size: 10px;
+}
+
+.provider-shell .provider-request-card--quoted {
+  min-height: 181px;
+}
+
+.provider-shell .provider-quote-footer {
+  position: relative;
+  min-height: 58px;
+  padding: 8px 7px 0;
+}
+
+.provider-shell .provider-quote-footer > small {
+  display: block;
+  max-width: 62%;
+}
+
+.provider-shell .quote-total {
+  position: absolute;
+  top: 23px;
+  right: 0;
+  color: #5c5c5c;
+  font-size: 10px;
+}
+
+.provider-shell .provider-message-customer {
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  width: 339px;
+  max-width: 58%;
+  height: 27px;
+  transform: translateX(-50%);
+}
+
+/* Service request detail and the quote/rejection dialogs. */
+.provider-shell .provider-request-detail {
+  display: grid;
+  max-width: 535px;
+  gap: 10px;
+  margin-top: 30px;
+  font-size: 10px;
+}
+
+.provider-shell .provider-request-detail h2 {
+  margin: 0 0 6px;
+  color: #333;
+  font-size: 18px;
+  line-height: 1.15;
+}
+
+.provider-shell .provider-request-detail > b {
+  font-size: 10px;
+}
+
+.provider-shell .customer-mini {
+  width: 383px;
+  max-width: 100%;
+  gap: 36px;
+  margin-left: 19px;
+  margin-top: -3px;
+}
+
+.provider-shell .customer-mini i {
+  width: 57px;
+  height: 57px;
+}
+
+.provider-shell .customer-mini span {
+  gap: 5px;
+}
+
+.provider-shell .customer-mini span b,
+.provider-shell .customer-mini span small {
+  font-size: 10px;
+}
+
+.provider-shell .customer-mini u {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #666;
+  font-size: 9px;
+}
+
+.provider-shell .customer-mini u svg {
+  width: 10px;
+  height: 12px;
+  color: #666;
+}
+
+.provider-shell .provider-request-detail p {
+  min-height: 24px;
+  margin: -2px 0 1px;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.provider-shell .image-placeholder {
+  width: min(100%, 515px);
+  height: 114px;
+  margin-top: 0;
+  background: #d9d9d9;
+  font-size: 31px;
+}
+
+.provider-shell .image-placeholder + b {
+  margin-top: 8px;
+}
+
+.provider-shell .provider-request-detail .ai-strip {
+  width: min(100%, 530px);
+  min-height: 29px;
+}
+
+.provider-shell .provider-request-detail > small {
+  margin-top: 10px;
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.provider-shell .detail-actions {
+  width: 560px;
+  max-width: none;
+  justify-content: flex-end;
+  gap: 16px;
+  margin-top: 50px;
+}
+
+.provider-shell .detail-actions button {
+  width: 159px;
+  min-width: 0;
+  height: 27px;
+  padding: 0 !important;
+  border-radius: 7px !important;
+}
+
+.provider-shell .detail-actions .approve {
+  border: 0 !important;
+  background: #5683bf !important;
+  color: #fff !important;
+}
+
+.provider-shell .provider-modal {
+  background: rgba(0, 0, 0, .35);
+  z-index: 30;
+}
+
+.provider-shell .provider-modal .provider-modal__panel {
+  box-sizing: border-box;
+  display: grid;
+  width: 286px;
+  min-height: 190px;
+  gap: 6px;
+  padding: 14px 12px 11px;
+  border-radius: 8px;
+  font-size: 9px;
+}
+
+.provider-shell .provider-modal__panel .provider-modal__close {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  width: auto;
+  height: auto;
+  padding: 0;
+  border: 0 !important;
+  background: transparent !important;
+  color: #111;
+  font-size: 24px !important;
+  line-height: 1;
+}
+
+.provider-shell .provider-modal__panel h3 {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.15;
+}
+
+.provider-shell .provider-modal__panel p {
+  margin: 0;
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.provider-shell .provider-modal__panel textarea,
+.provider-shell .provider-modal__panel input {
+  padding: 6px;
+  border-color: #cdbfc0;
+  border-radius: 6px;
+  font-size: 8px;
+}
+
+.provider-shell .provider-modal__panel textarea {
+  height: 82px;
+  resize: none;
+}
+
+.provider-shell .provider-modal__panel > button:last-child {
+  width: 100%;
+  height: 27px;
+  padding: 0;
+  border-radius: 7px;
+  font-size: 9px;
+}
+
+.provider-shell .provider-modal .provider-modal__panel--quote {
+  min-height: 198px;
+  transform: translateY(-25px);
+}
+
+.provider-shell .provider-modal .provider-modal__panel--reject {
+  transform: translateY(-39px);
+}
+
+.provider-shell .quote-inputs {
+  display: grid;
+  grid-template-columns: 61px 61px 15px;
+  align-items: end;
+  gap: 8px;
+}
+
+.provider-shell .quote-inputs label,
+.provider-shell .quote-notes {
+  display: grid;
+  gap: 3px;
+}
+
+.provider-shell .quote-inputs label span,
+.provider-shell .quote-notes span {
+  color: #666;
+  font-size: 7px;
+}
+
+.provider-shell .quote-inputs input {
+  width: 61px;
+  height: 22px;
+}
+
+.provider-shell .quote-add {
+  margin-bottom: 5px;
+  color: #6d6d6d;
+  font-size: 13px;
+}
+
+.provider-shell .quote-notes textarea {
+  height: 40px;
+}
+
+/* Calendar modal uses the same modal shell but has its own measured layout. */
+.provider-shell .availability-modal {
+  width: 291px !important;
+  min-height: 366px !important;
+  padding: 14px 14px 15px !important;
+  gap: 9px !important;
+}
+
+.provider-shell .availability-modal > .availability-close {
+  position: absolute;
+  top: 10px;
+  right: 13px;
+  width: auto;
+  height: auto;
+  padding: 0;
+  border: 0 !important;
+  background: transparent !important;
+  font-size: 24px !important;
+  line-height: 1;
+}
+
+.provider-shell .availability-modal > b {
+  margin-top: 2px;
+  font-size: 8px;
+}
+
+.provider-shell .availability-modal > b:first-of-type {
+  margin-top: 29px;
+}
+
+.provider-shell .availability-calendar {
+  padding: 11px;
+  border-radius: 11px;
+}
+
+.provider-shell .availability-calendar-heading {
+  grid-template-columns: 20px 1fr 1fr 20px;
+}
+
+.provider-shell .availability-calendar-heading select {
+  height: 20px;
+  padding: 2px 5px;
+}
+
+.provider-shell .calendar-weekdays {
+  margin: 8px 0 2px;
+}
+
+.provider-shell .calendar-days {
+  gap: 1px 3px;
+}
+
+.provider-shell .calendar-days button {
+  height: 24px;
+  padding: 4px 0 !important;
+}
+
+.provider-shell .availability-times {
+  gap: 13px;
+}
+
+.provider-shell .availability-times button {
+  width: 76px;
+  min-width: 0;
+  height: 23px;
+  padding: 0 !important;
+}
+
+.provider-shell .availability-submit {
+  width: 90px;
+  height: 23px;
+  margin-top: 0;
+  padding: 0 !important;
+}
+
+/* Active jobs. */
+.provider-shell .provider-search {
+  display: block;
+  width: 300px;
+  max-width: 100%;
+  height: 40px;
+  margin: 20px 0 15px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 7px;
+  background: #ededed;
+  color: #555;
+  font-size: 13px;
+}
+
+.provider-shell .provider-search::placeholder {
+  color: #9b9b9b;
+}
+
+.provider-shell .provider-search + .provider-pills {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.provider-shell .provider-job {
+  display: grid;
+  width: min(100%, 936px);
+  max-width: 936px;
+  min-height: 196px;
+  gap: 10px;
+  padding: 12px 16px 15px;
+  border: 1px solid #a7a7a7;
+  border-radius: 8px;
+}
+
+.provider-shell .provider-job-heading {
+  display: flex;
+  min-height: 28px;
+  justify-content: space-between;
+}
+
+.provider-shell .provider-job-heading > div {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+}
+
+.provider-shell .provider-job-heading b {
+  font-size: 11px;
+}
+
+.provider-shell .provider-job-heading small {
+  color: #636363;
+  font-size: 9px;
+}
+
+.provider-shell .provider-job-heading > span {
+  display: grid;
+  width: 82px;
+  height: 19px;
+  place-items: center;
+  border-radius: 12px;
+  background: #58b85e;
+  color: #fff;
+  font-size: 8px;
+}
+
+.provider-shell .provider-content .provider-job .ai-strip {
+  height: 33px;
+  min-height: 33px;
+  margin-right: 18px;
+  padding: 7px 11px;
+}
+
+.provider-shell .provider-job-divider {
+  height: 1px;
+  margin-top: 0;
+  margin-right: 18px;
+  background: #bdbdbd;
+}
+
+.provider-shell .job-progress {
+  gap: 15px;
+  margin-top: 1px;
+}
+
+.provider-shell .job-progress i {
+  width: 101px;
+  height: 8px;
+}
+
+.provider-shell .provider-job-footer {
+  display: flex;
+  min-height: 37px;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+}
+
+.provider-shell .provider-job-copy {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  text-align: left;
+}
+
+.provider-shell .provider-job-copy b {
+  font-size: 9px;
+}
+
+.provider-shell .provider-job-copy small {
+  color: #666;
+  font-size: 8px;
+}
+
+.provider-shell .provider-job-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.provider-shell .provider-job-actions button {
+  height: 26px;
+  padding: 0 18px;
+  border-radius: 10px;
+  font-size: 9px;
+  margin-left: 0 !important;
+}
+
+.provider-shell .provider-job-actions button:first-child {
+  min-width: 119px;
+}
+
+.provider-shell .provider-job-actions button:last-child {
+  min-width: 153px;
+}
+
+/* Update Status and Notify Additional Parts editors. */
+.provider-shell .provider-editor {
+  display: grid;
+  width: min(100%, 900px);
+  gap: 15px;
+  margin-top: 26px;
+  font-size: 11px;
+}
+
+.provider-shell .provider-editor-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.provider-shell .provider-editor-heading h2 {
+  margin: 0;
+  color: #444;
+  font-size: 21px;
+  line-height: 1.1;
+}
+
+.provider-shell .provider-editor-back {
+  width: 16px;
+  height: 26px;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  font-size: 20px !important;
+}
+
+.provider-shell .provider-editor label {
+  display: grid;
+  width: 100%;
+  max-width: none;
+  gap: 8px;
+  color: #666;
+  font-size: 11px;
+}
+
+.provider-shell .provider-editor textarea,
+.provider-shell .provider-editor input,
+.provider-shell .provider-editor select {
+  border-color: #cdbfc0;
+  border-radius: 8px;
+  font-size: 10px;
+}
+
+.provider-shell .provider-editor--status select {
+  width: 185px;
+  max-width: 100%;
+  height: 40px;
+  padding: 0 13px;
+}
+
+.provider-shell .provider-editor--status {
+  gap: 26px;
+}
+
+.provider-shell .provider-editor--status textarea {
+  width: 100%;
+  height: 118px;
+  resize: none;
+}
+
+.provider-shell .upload-job {
+  display: grid;
+  width: 100%;
+  max-width: none;
+  height: 134px;
+  place-content: center;
+  gap: 8px;
+  border-color: #cdbfc0;
+  border-radius: 8px;
+  color: #4a4a4a;
+}
+
+.provider-shell .upload-job svg {
+  margin: auto;
+  font-size: 37px;
+}
+
+.provider-shell .upload-job small {
+  font-size: 8px;
+}
+
+.provider-shell .provider-editor > button {
+  justify-self: end;
+  width: 145px;
+  min-width: 0;
+  height: 36px;
+  padding: 0;
+  border-radius: 10px;
+}
+
+.provider-shell .provider-editor--status > button {
+  margin-top: 18px;
+}
+
+.provider-shell .provider-editor--parts {
+  width: min(100%, 957px);
+  gap: 15px;
+}
+
+.provider-shell .provider-editor--parts h3 {
+  margin: 0;
+  color: #595959;
+  font-size: 13px;
+}
+
+.provider-shell .provider-editor--parts label:first-of-type {
+  width: 158px;
+}
+
+.provider-shell .provider-editor--parts input {
+  width: 158px;
+  height: 29px;
+  padding: 0 8px;
+}
+
+.provider-shell .provider-editor--parts textarea {
+  width: 100%;
+  height: 132px;
+  resize: none;
+}
+
+.provider-shell .provider-editor--parts > button {
+  width: 151px;
+  height: 41px;
+  margin-top: 24px;
+}
+
+/* Messages, profile, and earnings. */
+.provider-shell .provider-messages--reference {
+  display: grid;
+  grid-template-columns: 291px minmax(0, 574px);
+  gap: 76px;
+  width: min(100%, 941px);
+  margin-top: 27px;
+}
+
+.provider-shell .provider-conversation-list {
+  gap: 8px;
+}
+
+.provider-shell .provider-conversation-list button {
+  position: relative;
+  width: 291px;
+  min-height: 53px;
+  padding: 9px;
+  border-color: #a7a7a7;
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+.provider-shell .provider-conversation-list i {
+  width: 25px;
+  height: 25px;
+}
+
+.provider-shell .provider-conversation-list small {
+  font-size: 9px;
+}
+
+.provider-shell .provider-unread-dot {
+  position: absolute;
+  top: 21px;
+  right: 16px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #5984c1;
+}
+
+.provider-shell .provider-messages--reference section {
+  width: 574px;
+  height: 594px;
+  border-color: #999;
+  border-radius: 8px;
+}
+
+.provider-shell .provider-messages--reference section header {
+  min-height: 55px;
+  padding: 12px 16px;
+}
+
+.provider-shell .provider-messages--reference section header b {
+  font-size: 14px;
+}
+
+.provider-shell .provider-messages--reference section header small {
+  font-size: 9px;
+}
+
+.provider-shell .provider-messages--reference em {
+  top: 11px;
+  right: 16px;
+  width: 130px;
+  padding: 5px 0;
+  text-align: center;
+  font-size: 10px;
+}
+
+.provider-shell .provider-messages--reference .message-thread {
+  padding: 22px 26px;
+}
+
+.provider-shell .provider-messages--reference .message-thread p {
+  position: relative;
+  width: 311px;
+  max-width: 100%;
+  height: 49px;
+  min-height: 0;
+  margin: 10px 0 8px auto;
+  padding: 10px 22px 7px;
+  border-radius: 8px;
+  background: #5984c1;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.provider-shell .provider-messages--reference .message-thread small {
+  position: absolute;
+  top: 54px;
+  right: 8px;
+  margin: 0;
+  color: #555;
+  font-size: 7px;
+}
+
+.provider-shell .provider-messages--reference form {
+  padding: 9px 23px 18px;
+}
+
+.provider-shell .provider-messages--reference form input {
+  height: 34px;
+  padding: 0 13px;
+  border-color: #cdbfc0;
+  border-radius: 8px;
+  font-size: 9px;
+}
+
+.provider-shell .provider-earnings-stats {
+  gap: 29px;
+  margin: 27px 0 28px;
+}
+
+.provider-shell .provider-earnings-stats > div {
+  width: 204px;
+  height: 100px;
+}
+
+.provider-shell .provider-earnings-stats b {
+  font-size: 18px;
+}
+
+.provider-shell .provider-earnings-stats span {
+  font-size: 10px;
+}
+
+.provider-shell .section-label {
+  margin: 0 0 18px;
+  color: #5f5f5f;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.provider-shell .transaction-row {
+  display: flex;
+  width: min(100%, 428px);
+  min-height: 67px;
+  align-items: center;
+  margin: 23px 0;
+  padding: 14px;
+  border-color: #a7a7a7;
+  border-radius: 8px;
+  font-size: 10px;
+}
+
+.provider-shell .provider-profile {
+  position: relative;
+  left: 50%;
+  width: 480px;
+  max-width: 100%;
+  margin: -53px 0 0;
+  transform: translateX(-58%);
+  font-size: 11px;
+}
+
+.provider-shell .provider-profile > i {
+  width: 121px;
+  height: 121px;
+}
+
+.provider-shell .provider-profile h2 {
+  margin: 17px 0 4px;
+  color: #474747;
+  font-size: 15px;
+}
+
+.provider-shell .provider-profile p {
+  margin: 0;
+  font-size: 10px;
+}
+
+.provider-shell .provider-profile-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  margin-top: 9px;
+}
+
+.provider-shell .provider-profile mark {
+  display: flex;
+  width: 111px;
+  height: 27px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border-radius: 16px;
+  background: #b7cbea;
+  color: #0861bc;
+  font-size: 10px;
+}
+
+.provider-shell .provider-profile mark svg {
+  font-size: 14px;
+}
+
+.provider-shell .provider-profile-feedback b {
+  font-size: 10px;
+}
+
+.provider-shell .provider-profile-feedback + p {
+  margin-top: 19px;
+  font-size: 12px;
+}
+
+.provider-shell .provider-profile-details {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.provider-shell .provider-profile-insights {
+  margin-top: 21px;
+}
+
+.provider-shell .provider-profile h4 {
+  margin: 0 0 10px;
+  font-size: 10px;
+}
+
+.provider-shell .provider-profile-insights span {
+  display: inline-grid;
+  min-width: 82px;
+  height: 19px;
+  place-items: center;
+  margin: 0 2px;
+  padding: 0 11px;
+  border-color: #aaa;
+  border-radius: 12px;
+  font-size: 8px;
+}
+
+.provider-shell .profile-actions {
+  width: 180px;
+  gap: 16px;
+  margin-top: 53px;
+}
+
+.provider-shell .provider-content .profile-actions button {
+  gap: 12px;
+  width: auto !important;
+  height: auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #444 !important;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+}
+
+.provider-shell .profile-actions button svg {
+  width: 23px;
+  height: 23px;
+}
+
+.provider-shell .login-customer {
+  right: 39px;
+  bottom: 42px;
+  width: 111px;
+  height: 39px;
+  padding: 0;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: linear-gradient(90deg, #075fbd, #09a8ae) !important;
+  color: #fff !important;
+  font-size: 9px !important;
+}
+
+@media (min-width: 1150px) {
+  .provider-shell .customer-header {
+    height: 108px;
+  }
+
+  .provider-shell .customer-sidebar {
+    top: 108px;
+    width: 190px;
+    padding-top: 21px;
+  }
+
+  .provider-shell .provider-content {
+    min-height: calc(100vh - 108px);
+    margin-left: 190px;
+    padding: 31px 20px 42px 45px;
+  }
+
+  .provider-shell .provider-content > h1 {
+    font-size: 40px;
+  }
+
+  .provider-shell .provider-content > h1 + .provider-pills {
+    margin: 26px 0 20px;
+  }
+
+  .provider-shell .provider-request-card {
+    width: min(100%, 864px);
+    max-width: 864px;
+  }
+}
+
+/* The widest supplied provider screens use one additional frame step. */
+@media (min-width: 1200px) {
+  .provider-shell .customer-header {
+    height: 112px;
+  }
+
+  .provider-shell .customer-sidebar {
+    top: 112px;
+    width: 199px;
+  }
+
+  .provider-shell .provider-content {
+    min-height: calc(100vh - 112px);
+    margin-left: 199px;
+    padding: 29px 20px 42px 43px;
+  }
+
+  .provider-shell .provider-job-actions {
+    margin-right: 10px;
+  }
+
+  .provider-shell .provider-editor--status > label,
+  .provider-shell .provider-editor--status .upload-job,
+  .provider-shell .provider-editor--status > button {
+    transform: translateX(5px);
+  }
+
+  .provider-shell .provider-editor--status label + label {
+    margin-top: -4px;
+  }
+
+  .provider-shell .provider-editor--parts > h3,
+  .provider-shell .provider-editor--parts > label,
+  .provider-shell .provider-editor--parts > button {
+    transform: translateX(1px);
+  }
+
+  .provider-shell .provider-editor--parts > label:first-of-type {
+    margin-top: -6px;
+  }
+}
+
+/* The calendar reference uses the compact tablet workspace frame. */
+@media (min-width: 701px) and (max-width: 1000px) {
+  .provider-shell .customer-header {
+    height: 87px;
+    padding: 0 14px;
+  }
+
+  .provider-shell .customer-header .brand {
+    gap: 6px;
+    font-size: 19px;
+  }
+
+  .provider-shell .customer-header .brand-mark {
+    width: 46px;
+    height: 55px;
+  }
+
+  .provider-shell .profile-button {
+    font-size: 16px;
+  }
+
+  .provider-shell .customer-sidebar {
+    top: 87px;
+    width: 148px;
+    padding: 15px 8px 14px;
+  }
+
+  .provider-shell .customer-sidebar nav {
+    gap: 6px;
+  }
+
+  .provider-shell .customer-sidebar a {
+    height: 30px;
+    gap: 8px;
+    padding: 0 7px;
+    border-radius: 6px;
+    font-size: 8px;
+  }
+
+  .provider-shell .customer-sidebar a span,
+  .provider-shell .customer-sidebar a svg {
+    width: 17px;
+    font-size: 17px;
+  }
+
+  .provider-shell .customer-sidebar .logout {
+    gap: 10px;
+    padding: 6px 7px;
+    font-size: 9px;
+  }
+
+  .provider-shell .provider-content {
+    min-height: calc(100vh - 87px);
+    margin-left: 148px;
+    padding: 22px 24px 32px 28px;
+  }
+
+  .provider-shell .provider-content > h1 {
+    font-size: 32px;
+  }
+}
+
+@media (max-width: 700px) {
+  .provider-shell .customer-header {
+    height: 76px;
+  }
+
+  .provider-shell .customer-sidebar {
+    top: 76px;
+    width: 54px;
+    padding: 12px 7px;
+  }
+
+  .provider-shell .customer-sidebar a {
+    justify-content: center;
+  }
+
+  .provider-shell .customer-sidebar a:not(.active) {
+    font-size: 0;
+  }
+
+  .provider-shell .customer-sidebar .logout span {
+    display: none;
+  }
+
+  .provider-shell .provider-content {
+    margin-left: 54px;
+    padding: 22px 18px 32px;
+  }
+
+  .provider-shell .provider-content > h1 {
+    font-size: 31px;
+  }
+
+  .provider-shell .provider-dashboard-grid,
+  .provider-shell .provider-messages--reference {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-shell .provider-dashboard-grid {
+    margin-right: 0;
+    margin-left: 0;
+  }
+
+  .provider-shell .provider-conversation-list button,
+  .provider-shell .provider-messages--reference section {
+    width: 100%;
+  }
+
+  .provider-shell .provider-messages--reference {
+    gap: 20px;
+  }
+
+  .provider-shell .provider-profile {
+    left: auto;
+    margin: 24px auto 0;
+    transform: none;
+  }
+}

@@ -1,0 +1,8 @@
+ServEase: A Mobile and Web Application for On-Demand Repair Service Management System
+
+Abstract
+An increased demand for repair service of IT-related to automotive and household services has been apparent, since these have become critical in modern living. Despite these significant demands, most of the repair services are still relying on traditional processes like going to the physical store, using social media, phone calls, SMS and personal referrals. Recognizing this gap, this project proposes ServEase, a centralized mobile and web application designed to have a structured system between customers and service providers to reduce the service delays. The project adopts the Agile Scrum to guide system development, allowing a continuous improvement in each sprint. Requirements were gathered through interviews and surveys with service providers and customers to determine the system's essential functionalities.
+
+The application features account registration, user role selection, job request creation, provider matching, service tracking, payment integration, and provider management. It also supports communication between customers and service providers, review systems, and service history tracking. By centralizing these tasks into one platform, the system aims to improve transaction speed, reduce manual coordination, and enhance trust and transparency for both parties.
+
+This manuscript was added to the app so it can be viewed in ServEaseWeb.

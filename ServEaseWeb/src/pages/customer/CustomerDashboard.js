@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import Brand from "../../components/common/Brand";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -11,6 +11,8 @@ import {
   faScrewdriverWrench,
   faTableCellsLarge,
 } from "@fortawesome/free-solid-svg-icons";
+import { customerFlowApi } from "../../services/customerFlowApi";
+import { registrationApi } from "../../services/registrationApi";
 const nav = [
   [faTableCellsLarge, "Dashboard", "/customer/dashboard"],
   [faMagnifyingGlass, "Find Service Providers", "/customer/providers"],
@@ -21,8 +23,15 @@ const nav = [
 export function CustomerLayout({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const accountName =
-    localStorage.getItem("servease_account_name") || "Customer Guest";
+  const [accountName, setAccountName] = useState("Customer");
+
+  useEffect(() => {
+    registrationApi.getRegistration().then((registration) => {
+      const registeredName = registration?.profile?.fullName;
+
+      if (registeredName) setAccountName(registeredName);
+    });
+  }, []);
   const initials = accountName
     .split(" ")
     .map((x) => x[0])
@@ -69,9 +78,19 @@ export function CustomerLayout({ children }) {
 }
 export default function CustomerDashboard() {
   const nav = useNavigate();
+  const [dashboard, setDashboard] = useState(null);
+
+  useEffect(() => {
+    customerFlowApi.getDashboard().then(setDashboard);
+  }, []);
+
+  if (!dashboard) {
+    return <CustomerLayout><p>Loading dashboard…</p></CustomerLayout>;
+  }
+
   return (
     <CustomerLayout>
-      <h1 className="customer-title">Welcome, Juan!</h1>
+      <h1 className="customer-title">Welcome, {dashboard.customerName}!</h1>
       <h2 className="customer-subtitle">What needs fixing today?</h2>
       <button
         className="request-button"
@@ -81,11 +100,19 @@ export default function CustomerDashboard() {
       </button>
       <section className="dashboard-section">
         <h3>NOTIFICATIONS</h3>
-        <div className="empty-card">No Notifications</div>
+        <div className="empty-card">
+          {dashboard.notifications.length
+            ? dashboard.notifications[0].message
+            : "No Notifications"}
+        </div>
       </section>
       <section className="dashboard-section">
         <h3>ACTIVE REPAIR</h3>
-        <div className="empty-card repair">No Active Repair</div>
+        <div className="empty-card repair">
+          {dashboard.activeRequest
+            ? `${dashboard.activeRequest.providerName} is handling ${dashboard.activeRequest.category}.`
+            : "No Active Repair"}
+        </div>
       </section>
     </CustomerLayout>
   );

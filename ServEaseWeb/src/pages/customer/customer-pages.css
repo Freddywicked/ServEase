@@ -2,3 +2,186 @@
 .request-sent{max-width:390px;margin:125px auto;text-align:center;font-size:12px}.request-sent>div{width:74px;height:74px;margin:auto;border-radius:50%;background:#075fbd;color:#fff;font-size:48px;line-height:70px}.request-sent h3{margin-top:27px}.request-sent button{display:block;width:260px;height:35px;margin:150px auto 0;border:0;border-radius:6px;color:#fff;background:linear-gradient(90deg,#075fbd,#09a8ae)}
 .request-form{max-width:845px;font-size:13px}.request-form>p{font-size:14px;color:#4b4b4b}.request-form>b,.request-form>label{display:block;margin:15px 0 8px;font-size:14px}.request-form input{width:100%;height:34px;border:1px solid #aaa;border-radius:6px;padding:8px}.request-categories{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:12px 0 18px}.request-categories button{height:34px;border:0;border-radius:6px;color:#fff;background:linear-gradient(90deg,#075fbd,#09a8ae);font-size:10px;box-shadow:0 2px 4px #999}.request-categories button:not(.selected){opacity:.82}.request-form .request-grid>label{font-size:14px;font-weight:700}.request-form .request-grid textarea{display:block;margin-top:8px}.request-form .map-placeholder{display:flex;align-items:center;justify-content:center;color:#e74036;font-size:35px}
 .progress-badge{float:right;padding:4px 13px;border-radius:12px;background:#648bc4;color:#fff;font-size:8px}.repair-timeline{display:grid;gap:8px;margin:12px 6px;font-size:9px}.repair-timeline>div{display:flex;align-items:center;gap:10px;color:#444;font-size:18px}.repair-timeline>div.complete,.repair-timeline>div.current{color:#5d85c4}.repair-timeline span{display:grid;color:#111;font-size:9px}.repair-timeline small{font-size:7px}.payment-note strong{float:right;font-size:13px}.time-options{display:flex;gap:8px;margin:12px 0}.time-options button{flex:1}.customer-modal input,.customer-modal textarea{width:100%;margin:8px 0;border:1px solid #bbb;border-radius:8px;padding:8px}.customer-modal textarea{height:120px}.bubble.outgoing{background:#5d86c4;color:#fff;clear:both}.messages section form{clear:both}.payment button:disabled{opacity:.4;cursor:not-allowed}
+.history-list{display:grid;gap:8px;max-width:570px;margin:auto}.history-list article{display:flex;justify-content:space-between;border:1px solid #aaa;border-radius:8px;padding:12px;font-size:10px}
+.review-form{display:grid;gap:15px;max-width:480px;margin:10px auto;font-size:11px}.review-form h3{margin:0}.review-form label{display:grid;gap:8px;font-weight:700}.review-form textarea{height:100px;border:1px solid #aaa;border-radius:8px;padding:10px;resize:vertical}.review-form>button{justify-self:end;min-width:80px;border:1px solid #aaa;border-radius:8px;background:#fff;padding:8px}.rating-stars{display:flex;gap:4px}.rating-stars button{border:0;background:none;color:#d4ced0;font-size:38px}.rating-stars button.selected{color:#f2c500}
+
+/* Desktop dimensions measured from the supplied customer workspace screens. */
+@media (min-width:701px){
+  .customer-content{max-width:1040px}
+  .customer-search{height:44px;border-radius:7px;font-size:15px}
+  .filter-pills{gap:7px;margin:20px 0 18px}
+  .chips button,.filter-pills button,.history-tabs button{padding:6px 22px;font-size:10px}
+  .provider-list{max-width:700px;gap:12px}
+  .provider-list article{min-height:80px;padding:12px 16px;font-size:10px}
+  .provider-list h3{font-size:16px}
+  .provider-list article button{font-size:8px}
+  .verified,.available{padding:5px 14px;font-size:9px}
+  .provider-profile{width:300px;margin:18px auto;font-size:11px}
+  .avatar{width:118px;height:118px}
+  .provider-profile h3{font-size:15px}
+  .review{padding:9px;font-size:9px}
+  .request-card{min-height:132px;max-width:790px;padding:18px 22px;font-size:11px}
+  .request-card+.request-card{margin-top:17px}
+  .request-card p{margin:8px 0 13px}
+  .quote-tag,.find-button,.right-buttons button{font-size:9px}
+  .payment-note{padding:12px;font-size:11px}
+  .quote-page{max-width:760px;font-size:15px}
+  .customer-modal section{width:300px;padding:38px 24px;font-size:10px}
+  .customer-modal section>button:last-child,.payment button{font-size:9px;padding:8px 20px}
+  .payment{width:250px;font-size:11px}
+  .messages{grid-template-columns:300px 1fr;gap:70px}
+  .messages aside button{height:54px;font-size:10px}
+  .messages section{min-height:545px;padding:16px;font-size:11px}
+  .bubble{width:300px}
+  .messages input{height:34px}
+  .history-list{max-width:640px}
+  .history-list article{padding:14px;font-size:11px}
+  .review-form{max-width:520px;font-size:12px}
+  .rating-stars button{font-size:42px}
+}
+
+/* Request workspace — measured from the supplied customer request screens. */
+@media (min-width:701px){
+  .customer-content{max-width:960px;padding:28px 29px}
+  .customer-title{margin:0 0 20px;font-size:37px;line-height:1.06}
+  .customer-search{width:648px;max-width:100%;height:40px;padding:0 15px;border-radius:7px;background:#dedede;color:#555;font-size:13px}
+  .request-tabs{margin:16px 0 24px}
+  .filter-pills.request-tabs{gap:5px}
+  .filter-pills.request-tabs button{min-width:74px;height:22px;padding:3px 17px;border-color:#bbb;border-radius:14px;font-size:9px;font-weight:500}
+  .filter-pills.request-tabs button.active{background:#082a85}
+  .request-card{width:648px;max-width:100%;min-height:0;padding:12px 14px;border-color:#9d9d9d;border-radius:8px;color:#3d3d3d;font-size:9px;line-height:1.2}
+  .request-card+.request-card{margin-top:10px}
+  .request-card-title{display:block;font-size:11px;font-weight:800}
+  .request-provider{margin:7px 0 5px!important;font-size:9px;line-height:1}
+  .request-label{display:block;font-size:8px}
+  .request-cause{display:block;margin-top:2px;font-size:11px}
+  .request-card--confidence{min-height:126px}
+  .request-card--confidence .confidence{margin:8px 0 3px;gap:9px}
+  .request-card--confidence .confidence i{height:8px;background:linear-gradient(90deg,#0761c3 var(--confidence),#d9d9d9 var(--confidence))}
+  .request-card--confidence .confidence b{font-size:8px;font-weight:500}
+  .confidence-caption{font-size:8px;color:#555}
+  .quote-tag{padding:3px 10px;border-radius:12px;background:#bd885d;font-size:8px;font-weight:500}
+  .request-card--quote{min-height:87px;cursor:pointer}
+  .request-card--quote>p{margin:4px 0 8px!important;font-size:8px}
+  .request-cost-row{display:flex;justify-content:space-between;align-items:center;padding:0 0 7px;border-bottom:1px solid #aaa;font-size:8px}
+  .request-cost-row--total{padding:7px 0 0;border:0;font-size:9px}
+  .request-cost-row--total b,.request-cost-row--total span{font-weight:800}
+  .request-quote-actions{display:none}
+  .request-card--schedule{min-height:120px}
+  .request-card--schedule>p{margin:4px 0 0!important;font-size:8px}
+  .scheduled-date{display:block;margin:12px 0 15px;text-align:center;font-size:11px}
+  .schedule-reason{display:grid;gap:4px;margin-left:6px;font-size:8px}
+  .schedule-reason small{font-size:8px}
+  .right-buttons{gap:7px}
+  .request-card--schedule .right-buttons{margin-top:10px}
+  .right-buttons button{height:22px;min-width:66px;padding:3px 16px;border-color:#b7a9a9;border-radius:9px;font-size:8px;font-weight:600}
+  .request-card--payment{min-height:193px}
+  .request-card--payment>p,.request-card--timeline>p{margin:5px 0 0!important;font-size:8px}
+  .progress-badge{padding:3px 10px;font-size:8px}
+  .payment-note{margin:12px 0 9px;padding:9px;border-radius:7px;background:#fffccd;font-size:8px}
+  .payment-note strong{font-size:11px}
+  .request-card--payment .right-buttons{padding-bottom:9px;border-bottom:1px solid #aaa}
+  .request-card--payment .right-buttons button:last-child{margin-top:9px;margin-left:auto}
+  .request-card--timeline{min-height:226px}
+  .repair-timeline{gap:6px;margin:10px 6px 14px}
+  .repair-timeline>div{gap:8px;font-size:16px}
+  .repair-timeline span{font-size:8px}
+  .repair-timeline small{font-size:7px}
+  .request-card--timeline .right-buttons{padding-top:9px;border-top:1px solid #aaa}
+  .find-button{margin-top:10px;font-size:8px}
+}
+
+/* Customer request flow: state-specific geometry from the supplied screens. */
+.request-list{display:grid;align-items:start}
+.customer-modal{background:rgba(0,0,0,.36)}
+.customer-modal .customer-modal__panel{box-sizing:border-box;position:relative;background:#fff;border-radius:9px}
+.customer-modal__close{position:absolute;right:10px;top:8px;border:0!important;background:transparent!important;color:#111;font-size:22px!important;line-height:1;padding:0!important}
+.request-detail-header{display:flex;align-items:flex-start}
+.request-back{border:0;background:transparent;color:#111;cursor:pointer;font-family:Arial,sans-serif}
+.request-detail-header h2,.request-detail-header p{margin:0}
+.quote-table-row{display:flex;justify-content:space-between;align-items:center}
+.payment-method{cursor:pointer}
+.payment-method__mark{display:inline-grid;place-items:center;font-weight:800}
+
+@media (min-width:701px){
+  .request-list{width:714px;max-width:100%;gap:10px}
+  .request-card+.request-card{margin-top:0}
+  .request-card--status-approved,.request-card--status-declined,.request-card--status-done{width:714px}
+  .request-card--status-sent,.request-card--status-on-going{width:648px}
+  .request-card--confidence.request-card--status-declined{min-height:166px}
+  .request-card--status-declined .find-button{position:absolute;right:14px;bottom:12px;margin:0;float:none}
+
+  .request-card--quote{min-height:87px;padding:10px 12px}
+  .request-card--quote>p{margin:4px 0 7px!important}
+  .request-card--schedule{min-height:120px;padding:10px 14px}
+  .request-card--schedule>p{margin:3px 0 0!important}
+  .request-card--schedule .scheduled-date{margin:7px 0 6px;font-size:10px}
+  .request-card--schedule .schedule-reason{gap:2px;margin-left:6px}
+  .request-card--schedule .right-buttons{margin-top:6px}
+
+  .request-card--payment{min-height:193px}
+  .payment-note{margin:10px 0 7px;padding:9px 9px 8px}
+  .payment-note b{display:block}
+  .payment-note strong{margin-top:-11px;font-size:11px}
+  .payment-note small{display:block;margin-top:4px;font-size:8px}
+  .request-card--payment .payment-decision-actions{margin-top:7px;padding:0!important;border:0!important}
+  .request-card--payment .payment-decision-actions button{margin:0!important}
+  .request-card--payment .payment-message-actions{margin-top:7px;padding:8px 0 0!important;border-top:1px solid #aaa;border-bottom:0!important}
+  .request-card--payment .payment-message-actions button{margin:0!important}
+
+  .request-card--timeline{min-height:226px}
+  .repair-timeline{gap:0;margin:10px 6px 13px}
+  .repair-timeline>div{position:relative;min-height:26px;gap:8px;font-size:0}
+  .repair-timeline>div:not(:last-child)::after{content:"";position:absolute;left:9px;top:20px;bottom:-6px;width:1px;background:#b9b9b9}
+  .repair-timeline>div>i{position:relative;z-index:1;display:grid;place-items:center;flex:0 0 20px;width:20px;height:20px;border-radius:50%;background:#414141;color:#fff;font-size:11px;font-style:normal;line-height:1}
+  .repair-timeline>div.complete>i,.repair-timeline>div.current>i{background:#5d85c4}
+  .repair-timeline span{gap:1px;font-size:8px;line-height:1.05}
+  .repair-timeline span b{font-weight:800}
+  .repair-timeline small{font-size:6px;color:#666}
+  .timeline-actions{padding-top:9px;border-top:1px solid #aaa}
+
+  .request-detail-page{max-width:790px}
+  .request-detail-header{margin-top:24px;gap:19px}
+  .request-back{width:16px;padding:0;font-size:38px;line-height:.58;transform:translateY(3px)}
+  .request-detail-header h2{font-size:16px;line-height:1.25;font-weight:800}
+  .request-detail-header p{margin-top:5px;color:#666;font-size:15px;line-height:1.25}
+  .quote-body{max-width:755px;margin:12px 0 0 35px}
+  .quote-description{margin:0 0 17px!important;color:#575757;font-size:15px;line-height:1.45!important}
+  .quote-table-row{height:22px;min-height:0;padding:0 7px;border-bottom:1px solid #aaa;font-size:16px;line-height:1}
+  .quote-table-row--total{padding:0;border:0;font-weight:800}
+  .quote-table-row--total span{font-weight:800}
+  .quote-note{margin:24px 7px 0!important;color:#646464;font-size:15px;line-height:1.58!important}
+  .quote-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:14px}
+  .quote-actions button{width:118px;height:40px;border:1px solid #b7a9a9;border-radius:8px;background:#fff;color:#4a4a4a;font-size:16px;font-weight:800}
+
+  .payment-page{max-width:790px}
+  .payment-page .request-detail-header{margin-top:24px}
+  .payment{width:220px;max-width:calc(100% - 260px);margin:47px 0 0 260px;text-align:center;font-size:9px}
+  .payment h3{margin:0 0 37px;font-size:15px;font-weight:800}
+  .payment>b{display:block;color:#173f78;font-size:11px}
+  .payment-methods{display:grid;gap:11px;margin:18px 0 26px}
+  .payment .payment-method{display:grid;grid-template-columns:13px 32px 1fr;align-items:center;gap:7px;margin:0;text-align:left;color:#555;font-size:9px}
+  .payment .payment-method input{width:10px;height:10px;margin:0;accent-color:#0a61bc}
+  .payment-method__mark{width:30px;height:15px;border-radius:2px;font-size:7px;letter-spacing:-.08em}
+  .payment-method__mark--gcash{color:#0763cb;background:#fff}
+  .payment-method__mark--qr{color:#e22229;background:#fff}
+  .payment-method__mark--card{color:#1b3c75;background:#f4f1e4;font-size:6px}
+  .payment>button{margin:0!important;padding:6px 20px!important;border-radius:7px!important;font-size:8px!important}
+
+  .customer-modal .customer-modal__panel{font-size:9px}
+  .customer-modal .customer-modal--approval{width:262px;min-height:164px;padding:37px 18px 15px;text-align:center}
+  .customer-modal .customer-modal--approval h3{margin:0;font-size:10px;font-weight:800}
+  .customer-modal .customer-modal--approval p{width:200px;margin:12px auto 7px;color:#666;font-size:8px;line-height:1.45}
+  .customer-modal .customer-modal--approval>button:not(.customer-modal__close){margin:0!important;padding:6px 14px!important;border:1px solid #b7a9a9!important;border-radius:8px!important;background:#fff!important;font-size:8px!important}
+  .customer-modal .customer-modal--rejection{width:316px;min-height:297px;padding:27px 18px 12px;text-align:left}
+  .customer-modal .customer-modal--rejection h3{margin:0;font-size:14px;font-weight:800}
+  .customer-modal .customer-modal--rejection textarea{box-sizing:border-box;width:269px;max-width:100%;height:175px;margin:15px 0 8px;padding:9px;resize:none;font-size:8px}
+  .customer-modal .customer-modal--rejection .modal-actions{display:flex;justify-content:flex-end}
+  .customer-modal .customer-modal--rejection .modal-actions button{min-width:90px;margin:0!important;padding:7px 15px!important;border:1px solid #b7a9a9!important;border-radius:8px!important;background:#fff!important;font-size:8px!important}
+  .customer-modal .customer-modal--receipt{width:273px;min-height:335px;padding:39px 12px 18px;text-align:center}
+  .customer-modal .customer-modal--receipt h3{margin:0;font-size:10px;font-weight:800}
+  .customer-modal .customer-modal--receipt p{width:175px;margin:9px auto 14px;color:#666;font-size:8px;line-height:1.45}
+  .customer-modal .customer-modal--receipt .receipt{box-sizing:border-box;height:151px;margin:0 0 36px;border-radius:8px;background:#ddd;text-align:right;padding:8px 11px;font-size:18px}
+  .customer-modal .customer-modal--receipt .receipt span{font-size:18px;font-weight:800}
+  .customer-modal .customer-modal--receipt>button:not(.customer-modal__close){margin:0!important;padding:7px 19px!important;border:1px solid #b7a9a9!important;border-radius:8px!important;background:#fff!important;font-size:8px!important}
+}
