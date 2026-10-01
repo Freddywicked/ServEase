@@ -1,48 +1,53 @@
 /**
  * Error helpers shared by the whole backend.
  *
- * Throw httpError(status, message) anywhere in a controller or service and
- * errorHandler turns it into a JSON response. Express 5 passes errors from
- * async route functions here automatically, so no try/catch wrappers are
- * needed just to forward errors.
+ * Throw httpError(status, message) or new ApiError(status, message) anywhere
+ * and errorHandler turns it into JSON:
+ *   { message, details?, error: { message, details? } }
+ * `error` is what the web app reads; the top-level fields are for the mobile app.
  */
 
-import config from '../config/index.js';
-
-export const httpError = (status, message, details) => {
+const httpError = (status, message, details) => {
   const error = new Error(message);
   error.status = status;
-  if (details) {
-    error.details = details;
-  }
+  if (details) error.details = details;
   return error;
 };
 
-// For any route that doesn't exist.
-export const notFoundHandler = (req, res) => {
-  res.status(404).json({
-    error: { message: `Route not found: ${req.method} ${req.originalUrl}` },
-  });
+const send = (res, status, message, details) => {
+  const extra = details ? { details } : {};
+  res.status(status).json({ message, ...extra, error: { message, ...extra } });
 };
 
-// Must be registered last, after all routes. Express recognises it as an error
-// handler because it takes four arguments, so keep `next` even though it's
-// unused.
-// eslint-disable-next-line no-unused-vars
-export const errorHandler = (err, req, res, next) => {
-  const status = err.status || err.statusCode || 500;
+// For any route that doesn't exist.
+const notFoundHandler = (req, res) => {
+  send(res, 404, `Route not found: ${req.method} ${req.originalUrl}`);
+};
 
-  if (status >= 500) {
-    console.error(err);
+// Must be registered last. Keep all four arguments so Express treats it
+// as an error handler.
+// eslint-disable-next-line no-unused-vars
+const errorHandler = (err, req, res, next) => {
+  // File upload errors (multer) are the client's fault, not a server crash.
+  if (err.name === 'MulterError') {
+    err.status = 400;
+    if (err.code === 'LIMIT_FILE_SIZE') err.message = 'Each file must be 5 MB or smaller.';
+  }
+  // Malformed JSON body.
+  if (err.type === 'entity.parse.failed') {
+    err.status = 400;
+    err.message = 'Invalid JSON in request body.';
   }
 
-  // In production, don't leak internal error text on unexpected failures.
+  const status = err.status || err.statusCode || 500;
+  if (status >= 500) console.error(err);
+
   const message =
-    status >= 500 && config.nodeEnv === 'production'
+    status >= 500 && process.env.NODE_ENV === 'production'
       ? 'Something went wrong.'
       : err.message || 'Something went wrong.';
 
-  res.status(status).json({
-    error: { message, ...(err.details ? { details: err.details } : {}) },
-  });
+  send(res, status, message, err.details);
 };
+
+module.exports = { httpError, notFoundHandler, errorHandler };

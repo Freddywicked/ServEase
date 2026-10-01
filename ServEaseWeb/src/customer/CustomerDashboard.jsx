@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
-
-// Fallback values shown when no data has been fetched from the backend (matches the Figma design).
-const DEFAULT_FIRST_NAME = 'Juan';
-const DEFAULT_INITIALS = 'CG';
+import { useAuth } from '../context/auth_context';
 
 const SECTION_LABEL =
   'm-0 mb-3 mt-5 font-[Lato] text-[16px] font-bold uppercase leading-[19px] text-black/50';
+
+// "Mark Frederick Cerillo" -> "MC"
+const getInitials = (name = '') => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '';
+  const first = parts[0][0];
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : '';
+  return (first + last).toUpperCase();
+};
 
 function EmptyBox({ sizeClass, message, children }) {
   return (
@@ -26,23 +32,26 @@ function EmptyBox({ sizeClass, message, children }) {
 }
 
 export default function CustomerDashboard() {
-  // TODO: replace these with data fetched from the backend once it's ready
-  // (e.g. the logged-in customer's profile, their notifications, and their active repairs).
-  const [customer, setCustomer] = useState(null); // { firstName, initials }
+  const { user, loading } = useAuth();
+
+  // TODO: fill these from the backend once the endpoints exist.
   const [notifications, setNotifications] = useState([]); // [{ id, message }]
   const [activeRepairs, setActiveRepairs] = useState([]); // [{ id, title, status, provider }]
 
   useEffect(() => {
-    // TODO: fetch customer, notifications and active repairs, then call
-    // setCustomer(...), setNotifications(...), setActiveRepairs(...)
-  }, []);
+    // TODO: fetch notifications and active repairs for user.id, then call
+    // setNotifications(...) and setActiveRepairs(...)
+  }, [user]);
 
-  const firstName = customer?.firstName || DEFAULT_FIRST_NAME;
-  const initials = customer?.initials || DEFAULT_INITIALS;
+  // Wait while the saved login is being restored, then require a logged-in user.
+  if (loading) return null;
+  if (!user) return <Navigate to="/login" replace />;
+
+  const firstName = user.name?.trim().split(/\s+/)[0] || '';
+  const initials = getInitials(user.name);
 
   return (
     <CustomerSidebar initials={initials}>
-      {/* Same padding as the admin dashboard (24px / 36px), fluid width */}
       <div className="box-border px-4 py-6 sm:px-9">
         <h1 className="m-0 mb-1 font-[Quicksand] text-[32px] font-bold leading-none text-[#021E79] sm:text-[40px] lg:text-[48px]">
           Welcome, {firstName}!

@@ -2,6 +2,9 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
 import VerifyOTP from './pages/OTPVerification'
+import RoleSelection from './pages/RoleSelection'
+import ServiceCategory from './serviceprovider/ServiceCategory'
+import VerificationRequirements from './serviceprovider/VerificationRequirements'
 import AdminDashboard from './admin/AdminDashboard'
 import UserManagement from './admin/UserManagement'
 import CustomerDashboard from './customer/CustomerDashboard'
@@ -12,6 +15,7 @@ import ServiceProviderDashboard from './serviceprovider/ServiceProviderDashboard
 
 function App() {
   return (
+    
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Navigate to="/login" replace />} />
@@ -20,6 +24,8 @@ function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/verify-otp" element={<VerifyOTP />} />
+        <Route path="/role-selection" element={<RoleSelection />} />
+        
 
         {/* Admin */}
         <Route path="/admin/dashboard" element={<AdminDashboard />} />
@@ -34,10 +40,13 @@ function App() {
         {/* TODO: add more customer routes here as they're built, e.g. /customer/providers, /customer/requests, /customer/messages, /customer/history */}
 
         {/* Service Provider */}
+        <Route path="/serviceprovider/service-category" element={<ServiceCategory />} />
+        <Route path="/serviceprovider/service-category/verification-requirements" element={<VerificationRequirements />} />
         <Route path="/serviceprovider/dashboard" element={<ServiceProviderDashboard />} />
         {/* TODO: import and add more service provider routes here as they're built, e.g. /serviceprovider/requests, /serviceprovider/jobs, /serviceprovider/messages, /serviceprovider/earnings */}
       </Routes>
     </BrowserRouter>
+    
   )
 }
 

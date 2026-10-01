@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const auth = require('../controllers/auth.controller');
+const auth = require('../controllers/auth_controllers');
 const { authenticate } = require('../middleware/auth');
 
 // TODO: add express-rate-limit to request-otp and login before going live.

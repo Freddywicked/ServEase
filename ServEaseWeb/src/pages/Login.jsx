@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import logo from '../assets/servease_logo.png';
 import eyeIcon from '../assets/icon_eye.png';
+import { login } from '../api/client';
+import { useAuth } from '../context/auth_context';
 
 const CARD_WIDTH = 659;
 const CARD_HEIGHT = 737;
@@ -127,6 +129,16 @@ const styles = {
     color: '#2E86FF',
     textDecoration: 'none',
   },
+  errorText: {
+    position: 'absolute',
+    top: 424,
+    left: '6.525%',
+    right: '6.525%',
+    fontFamily: "'Roboto', sans-serif",
+    fontSize: 11,
+    color: '#E53935',
+    margin: 0,
+  },
   primaryBtn: {
     position: 'absolute',
     top: 453,
@@ -208,9 +220,12 @@ const styles = {
 };
 
 export default function Login() {
+  const navigate = useNavigate();
+  const { setUser } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState('');
   const [scale, setScale] = useState(() =>
     Math.min(1, window.innerWidth / CARD_WIDTH, window.innerHeight / CARD_HEIGHT),
   );
@@ -223,10 +238,22 @@ export default function Login() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // TODO: connect to Supabase Auth (email/password sign-in) once the backend is set up
-    console.log('Login submit', { email, password });
+    setError('');
+    try {
+      const { user, provider } = await login(email, password);
+      setUser(user);
+      if (user.role === 'admin') {
+        navigate('/admin/dashboard');
+      } else if (provider?.verification_status === 'verified') {
+        navigate('/serviceprovider/dashboard');
+      } else {
+        navigate('/customer/dashboard');
+      }
+    } catch (err) {
+      setError(err.message || 'Invalid email or password.');
+    }
   };
 
   const handleGoogleSignIn = () => {
@@ -302,6 +329,8 @@ export default function Login() {
           <div style={styles.forgotRow}>
             <Link className="servease-auth-link" to="/forgot-password" style={styles.forgotLink}>Forgot password?</Link>
           </div>
+
+          {error && <p style={styles.errorText}>{error}</p>}
 
           <button className="servease-primary-btn" type="submit" style={styles.primaryBtn}>Sign in</button>
 

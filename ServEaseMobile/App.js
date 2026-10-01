@@ -2,6 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'react-native';
+import { AuthProvider } from './context/auth_context';
 import SplashScreen from './screens/SplashScreen';
 import SignupScreen from './screens/SignupScreen';
 import OTPVerification from './screens/OTPVerification';
@@ -39,18 +40,13 @@ const Stack = createNativeStackNavigator();
 
 const App = () => {
   return (
+    <AuthProvider>
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="SplashScreen" component={SplashScreen}/>
         <Stack.Screen name="SignupScreen" component={SignupScreen}/>
         <Stack.Screen name="OTPVerification" component={OTPVerification}/>
         <Stack.Screen name="LoginScreen" component={LoginScreen}/>
-        {/* RoleSelectionScreen should only be reached once, right after a new
-            account finishes sign-up + OTP verification. Returning users who
-            hit LoginScreen should be routed straight to CustomerDashboard or
-            ServiceProviderDashboard based on their saved active role instead —
-            that branching still needs to be added in OTPVerification.js /
-            LoginScreen.js once the backend can tell us new vs. returning. */}
         <Stack.Screen name="RoleSelectionScreen" component={RoleSelectionScreen}/>
         <Stack.Screen name="ServiceProviderServiceCategory" component={ServiceProviderServiceCategory}/>
         <Stack.Screen name="ServiceProviderVerificationRequirements" component={ServiceProviderVerificationRequirements}/>
@@ -81,6 +77,7 @@ const App = () => {
         <Stack.Screen name="ServiceProviderProfile" component={ServiceProviderProfile}/>
       </Stack.Navigator>
     </NavigationContainer>
+    </AuthProvider>
   );
 };
 

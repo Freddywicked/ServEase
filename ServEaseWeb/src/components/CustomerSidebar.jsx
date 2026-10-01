@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ChevronDown } from 'lucide-react';
+import { logout } from '../api/client';
+import { useAuth } from '../context/auth_context';
 import fullLogo from '../assets/servease_web_sidebar.png';
 import iconLogo from '../assets/servease_icon.png';
 import dashboardIconWhite from '../assets/icon_dashboard_white.png';
@@ -61,6 +63,8 @@ export default function CustomerSidebar({ children, initials = DEFAULT_INITIALS 
     () => typeof window !== 'undefined' && window.matchMedia(AUTO_COLLAPSE_QUERY).matches
   );
   const location = useLocation();
+  const navigate = useNavigate();
+  const { setUser } = useAuth();
   const width = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH;
 
   // Responsive: collapse the sidebar automatically on small screens, expand again on large ones.
@@ -72,12 +76,13 @@ export default function CustomerSidebar({ children, initials = DEFAULT_INITIALS 
   }, []);
 
   const handleLogout = () => {
-    // TODO: clear the Supabase Auth session and redirect to /login once the backend is set up
-    console.log('Log out clicked');
+    logout(); // removes the saved login token
+    setUser(null); // clears the logged-in user in the app
+    navigate('/login', { replace: true });
   };
 
   const handleAccountClick = () => {
-    // TODO: wire up an account menu (profile / log out) once auth is connected
+    // TODO: wire up an account menu (profile / log out)
     console.log('Account menu clicked');
   };
 

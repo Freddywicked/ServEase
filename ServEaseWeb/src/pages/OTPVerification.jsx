@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import logo from '../assets/servease_logo.png';
+import { register } from '../api/client';
+import { useAuth } from '../context/auth_context';
 
 const OTP_LENGTH = 6;
 const DESIGN_WIDTH = 1440;
@@ -88,6 +90,17 @@ const styles = {
     outline: 'none',
     caretColor: '#0255AF',
   },
+  errorText: {
+    position: 'absolute',
+    top: 616,
+    left: 0,
+    right: 0,
+    textAlign: 'center',
+    fontFamily: "'Roboto', sans-serif",
+    fontSize: 13,
+    color: '#E53935',
+    margin: 0,
+  },
   primaryBtn: {
     position: 'absolute',
     top: 656,
@@ -110,11 +123,22 @@ const styles = {
 
 export default function VerifyOTP() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { setUser } = useAuth();
   const [digits, setDigits] = useState(Array(OTP_LENGTH).fill(''));
+  const [error, setError] = useState('');
   const inputRefs = useRef([]);
   const [scale, setScale] = useState(() =>
     Math.min(1, window.innerWidth / DESIGN_WIDTH, window.innerHeight / DESIGN_HEIGHT),
   );
+
+  // This screen only makes sense right after Signup, which hands the form
+  // forward via router state. Reached directly, there's nothing to verify.
+  useEffect(() => {
+    if (!location.state) {
+      navigate('/signup', { replace: true });
+    }
+  }, [location.state, navigate]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -140,12 +164,17 @@ export default function VerifyOTP() {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const code = digits.join('');
-    // TODO: verify this code against Supabase Auth (phone/OTP via Twilio) once the backend is set up
-    console.log('Verify OTP', code);
-    navigate('/login');
+    try {
+      const user = await register(location.state, code);
+      setUser(user);
+      // Brand-new account: let them pick Customer or Service Provider.
+      navigate('/role-selection');
+    } catch (err) {
+      setError(err.message || 'Verification failed. Please try again.');
+    }
   };
 
   return (
@@ -187,6 +216,8 @@ export default function VerifyOTP() {
               />
             ))}
           </div>
+
+          {error && <p style={styles.errorText}>{error}</p>}
 
           <button className="servease-primary-btn" type="submit" style={styles.primaryBtn}>Verify</button>
         </form>

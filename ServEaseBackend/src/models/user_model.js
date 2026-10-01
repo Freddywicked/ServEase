@@ -1,17 +1,21 @@
-const supabase = require('../config/supabase');
+const { supabase } = require('../config/supabase');
 const { unwrap } = require('../utils/db');
 
-// Only select `password` when you must check it (login). Never send it to the client.
-const PUBLIC_FIELDS = 'user_id, name, username, email, phone_number, role, address, birthdate, gender';
+// The users table's primary key is `id`. Rows are also given a `user_id` copy
+// (see withUserId) so any other code that reads user.user_id keeps working.
+// Only select `password_hash` when you must check it (login). Never send it to the client.
+const PUBLIC_FIELDS = 'id, name, username, email, phone_number, role, address, birthdate, gender';
+
+const withUserId = (row) => (row ? { ...row, user_id: row.id } : row);
 
 const findByEmail = async (email, columns = '*') =>
-  unwrap(await supabase.from('users').select(columns).eq('email', email).maybeSingle());
+  withUserId(unwrap(await supabase.from('users').select(columns).eq('email', email).maybeSingle()));
 
 const findByUsername = async (username, columns = '*') =>
-  unwrap(await supabase.from('users').select(columns).eq('username', username).maybeSingle());
+  withUserId(unwrap(await supabase.from('users').select(columns).eq('username', username).maybeSingle()));
 
 const findById = async (id) =>
-  unwrap(await supabase.from('users').select(PUBLIC_FIELDS).eq('user_id', id).maybeSingle());
+  withUserId(unwrap(await supabase.from('users').select(PUBLIC_FIELDS).eq('id', id).maybeSingle()));
 
 const findProvider = async (userId) =>
   unwrap(
@@ -24,19 +28,21 @@ const findProvider = async (userId) =>
 
 // BR-02: every new account starts as a customer (users row + customers row).
 const createCustomer = async (fields) => {
-  const user = unwrap(
-    await supabase.from('users').insert({ ...fields, role: 'customer' }).select(PUBLIC_FIELDS).single()
+  const user = withUserId(
+    unwrap(
+      await supabase.from('users').insert({ ...fields, role: 'customer' }).select(PUBLIC_FIELDS).single()
+    )
   );
 
-  const { error } = await supabase.from('customers').insert({ user_id: user.user_id });
+  const { error } = await supabase.from('customers').insert({ user_id: user.id });
   if (error) {
     // supabase-js can't run a multi-table transaction, so undo the first insert by hand.
-    await supabase.from('users').delete().eq('user_id', user.user_id);
+    await supabase.from('users').delete().eq('id', user.id);
     unwrap({ error });
   }
   return user;
 };
 
-const toPublic = ({ password, ...rest }) => rest;
+const toPublic = ({ password, password_hash, ...rest }) => rest;
 
 module.exports = { findByEmail, findByUsername, findById, findProvider, createCustomer, toPublic };

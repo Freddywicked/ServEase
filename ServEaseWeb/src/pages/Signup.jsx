@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import logo from '../assets/servease_logo.png';
 import eyeIcon from '../assets/icon_eye.png';
+import { requestOtp } from '../api/client';
+import { useAuth } from '../context/auth_context';
 
 const CARD_WIDTH = 659;
 const CARD_HEIGHT = 930;
@@ -169,6 +171,16 @@ const styles = {
     lineHeight: '14px',
     color: '#333',
   },
+  errorText: {
+    position: 'absolute',
+    top: 808,
+    left: '6.525%',
+    right: '6.525%',
+    fontFamily: "'Roboto', sans-serif",
+    fontSize: 11,
+    color: '#E53935',
+    margin: 0,
+  },
   primaryBtn: {
     position: 'absolute',
     top: 826,
@@ -227,6 +239,7 @@ export default function Signup() {
   const [agreed, setAgreed] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [error, setError] = useState('');
   const [scale, setScale] = useState(() => Math.min(1, window.innerWidth / CARD_WIDTH));
 
   useEffect(() => {
@@ -239,12 +252,20 @@ export default function Signup() {
 
   const update = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
-  const handleNext = (e) => {
+  const handleNext = async (e) => {
     e.preventDefault();
-    if (form.password !== form.confirmPassword || !agreed) return;
-    // TODO: submit signup form to Supabase Auth once the backend is set up
-    console.log('Signup submit', form);
-    navigate('/verify-otp');
+    setError('');
+    if (form.password !== form.confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    if (!agreed) return;
+    try {
+      await requestOtp(form);
+      navigate('/verify-otp', { state: form });
+    } catch (err) {
+      setError(err.message || 'Something went wrong. Please try again.');
+    }
   };
 
   return (
@@ -424,8 +445,8 @@ export default function Signup() {
                 required
               >
                 <option value="" disabled>Male/Female</option>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
               </select>
               <span style={styles.chevron} aria-hidden="true" />
             </div>
@@ -445,6 +466,8 @@ export default function Signup() {
             </label>
           </div>
 
+          {error && <p style={styles.errorText}>{error}</p>}
+
           <button className="servease-primary-btn" type="submit" style={styles.primaryBtn}>Next</button>
 
           <p style={styles.footerText}>
@@ -456,4 +479,3 @@ export default function Signup() {
     </div>
   );
 }
-

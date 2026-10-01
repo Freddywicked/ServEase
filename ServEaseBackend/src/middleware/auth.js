@@ -1,7 +1,7 @@
-const ApiError = require('../utils/ApiError');
-const asyncHandler = require('../utils/asyncHandler');
+const ApiError = require('../utils/api_error');
+const asyncHandler = require('../utils/async_handler');
 const { verifyToken } = require('../utils/jwt');
-const User = require('../models/user.model');
+const User = require('../models/user_model');
 
 // Must match the value you store in service_providers.verification_status
 // once an admin approves a provider (BR-04 / BR-05).
