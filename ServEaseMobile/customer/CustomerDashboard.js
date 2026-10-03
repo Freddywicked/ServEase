@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
+import { useAuth } from '../context/auth_context';
 
 const ACTIVE_TAB = 'CustomerHome';
 
@@ -18,41 +19,46 @@ const TAB_ITEMS = [
 ];
 
 const CustomerDashboard = ({ navigation, route }) => {
-    const [customerName, setCustomerName] = useState('');
+    // `user` and `provider` come from auth_context: populated on login (LoginScreen calls
+    // setUser/setProvider with /auth/login's response) and kept in sync afterwards via
+    // refreshUser(). `user.name` matches the backend's registration field (see client.js's
+    // toRegistrationPayload); `provider` is null until an application exists, and then
+    // looks like { verification_status }, e.g. 'pending' or 'verified'.
+    const { user, provider, refreshUser } = useAuth();
+    const customerName = user?.name || 'Customer';
+    const applicationStatus = provider?.verification_status ?? null; // null | 'pending' | 'verified' | 'rejected'
+
     const [activeRepair, setActiveRepair] = useState(null);
     const [notifications, setNotifications] = useState([]);
-    const [applicationStatus, setApplicationStatus] = useState(null); // null | 'pending' | 'approved'
 
     useEffect(() => {
-        // TODO: fetch the logged-in customer's name, active repair status, and
-        // notifications from the backend once the API is integrated.
+        // TODO: fetch the logged-in customer's active repair status and notifications
+        // from the backend once the API is integrated.
 
         // Coming straight from submitting a Service Provider application —
-        // reflect the "under review" state right away while waiting on the
-        // backend/admin.
-        if (route?.params?.pendingApproval) {
-            setApplicationStatus('pending');
+        // ServiceProviderVerificationRequirements.js already calls refreshUser() right
+        // after a successful submit, so this is just a safety net in case this screen
+        // mounted before that refresh resolved.
+        if (route?.params?.pendingApproval && applicationStatus == null) {
+            refreshUser().catch(() => {
+                // Non-fatal: the banner just won't show until the next refreshUser() call.
+            });
         }
 
         // ---------------------------------------------------------------------
-        // BACKEND-READY: fetch this user's Service Provider application status
-        // so the banner below reflects "pending" / "approved" / "rejected" on
-        // its own (not just right after submitting), and updates once the
-        // admin approves it from the web dashboard — e.g. via polling or a
-        // Firebase Cloud Messaging push notification.
+        // BACKEND-READY: poll (or subscribe via Firebase Cloud Messaging) for this
+        // user's Service Provider application status so the pending banner below
+        // clears on its own once the admin approves it from the web dashboard —
+        // not just right after submitting.
         //
-        // Example (uncomment and adjust once the API is ready):
+        // Example (uncomment and adjust once this needs to run on an interval):
         //
-        // const fetchApplicationStatus = async () => {
-        //   const response = await fetch(`${API_BASE_URL}/api/service-provider/applications/me`, {
-        //     headers: { Authorization: `Bearer ${userAuthToken}` },
-        //   });
-        //   const data = await response.json();
-        //   setApplicationStatus(data.status); // 'pending' | 'approved' | 'rejected' | null
-        // };
-        // fetchApplicationStatus();
+        // const interval = setInterval(() => {
+        //   refreshUser().catch(() => {});
+        // }, 30000);
+        // return () => clearInterval(interval);
         // ---------------------------------------------------------------------
-    }, [route?.params?.pendingApproval]);
+    }, [route?.params?.pendingApproval, applicationStatus, refreshUser]);
 
     const handleCreateServiceRequest = () => {
         // TODO: point this to the actual create-service-request screen once it exists
@@ -70,49 +76,18 @@ const CustomerDashboard = ({ navigation, route }) => {
         navigation.navigate(tabKey);
     };
 
-    const handleSwitchToServiceProvider = () => {
-        // ---------------------------------------------------------------------
-        // BACKEND-READY: persist the user's active mode as "service_provider"
-        // (e.g. PATCH /api/users/me { activeMode: 'service_provider' }) so the
-        // account opens in Service Provider mode on future logins too. A
-        // single account holds both roles, so this only flips which side of
-        // the app is shown — it does not create a separate account.
-        // ---------------------------------------------------------------------
-
-        // Reset the stack so the whole app switches to the Service Provider
-        // side rather than pushing one screen on top of the customer flow.
-        navigation.reset({
-            index: 0,
-            routes: [{ name: 'ServiceProviderDashboard' }],
-        });
-    };
-
     return (
         <SafeAreaView style={styles.safeArea}>
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.headerRow}>
                     <View style={styles.headerTextWrap}>
-                        <Text style={styles.welcomeText}>Welcome, {customerName || 'Customer'}!</Text>
+                        <Text style={styles.welcomeText}>Welcome, {customerName}!</Text>
                         <Text style={styles.subtitle}>What needs fixing today?</Text>
                     </View>
                     <TouchableOpacity onPress={handleNotificationsPress}>
                         <Image source={require('../assets/icon_ringbell.png')} style={styles.bellIcon} />
                     </TouchableOpacity>
                 </View>
-
-                {applicationStatus === 'approved' && (
-                    <TouchableOpacity onPress={handleSwitchToServiceProvider}>
-                        <LinearGradient
-                            colors={['#0255AF', '#04A5A5']}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 0 }}
-                            style={styles.approvalBanner}
-                        >
-                            <Text style={styles.approvalBannerTitle}>You're approved as a Service Provider!</Text>
-                            <Text style={styles.approvalBannerSubtitle}>Tap to switch to Service Provider mode</Text>
-                        </LinearGradient>
-                    </TouchableOpacity>
-                )}
 
                 {applicationStatus === 'pending' && (
                     <View style={styles.pendingBanner}>
@@ -212,21 +187,6 @@ const styles = StyleSheet.create({
         width: 24,
         height: 24,
         resizeMode: 'contain',
-        marginTop: 4,
-    },
-    approvalBanner: {
-        borderRadius: 12,
-        padding: 14,
-        marginBottom: 16,
-    },
-    approvalBannerTitle: {
-        color: '#FFFFFF',
-        fontSize: 14,
-        fontWeight: '700',
-    },
-    approvalBannerSubtitle: {
-        color: '#FFFFFF',
-        fontSize: 12,
         marginTop: 4,
     },
     pendingBanner: {

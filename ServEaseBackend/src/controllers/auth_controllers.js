@@ -84,6 +84,9 @@ const login = asyncHandler(async (req, res) => {
   const valid = user && (await bcrypt.compare(String(password), user.password_hash));
   if (!valid) throw new ApiError(401, 'Invalid credentials');
 
+  // Checked after the password so the message can't be used to probe which accounts exist.
+  if (user.is_disabled) throw new ApiError(403, 'This account has been disabled. Please contact support.');
+
   const provider = await User.findProvider(user.user_id);
   res.json({
     token: signToken(user),

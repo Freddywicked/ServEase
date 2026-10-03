@@ -1,12 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { Navigate } from 'react-router-dom';
 import ServiceProviderSidebar from '../components/ServiceProviderSidebar.jsx';
+import { me } from '../api/client';
+import { useAuth } from '../context/auth_context';
 
-// Fallback values shown when no data has been fetched from the backend (matches the Figma design,
-// with the placeholder numbers replaced by 0 since there is no data yet).
-const DEFAULT_FIRST_NAME = 'Jess';
-const DEFAULT_INITIALS = 'CG';
-const DEFAULT_ROLE = 'Repair Specialist';
+// Shown under the welcome heading, based on the provider application's status in the backend.
+const STATUS_LABELS = {
+  pending: 'Application under review',
+  verified: 'Verified Service Provider',
+  rejected: 'Application not approved',
+};
+
+// "Mark Frederick Cerillo" -> "MC"
+const getInitials = (name = '') => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '';
+  const first = parts[0][0];
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : '';
+  return (first + last).toUpperCase();
+};
 
 const SECTION_LABEL =
   'm-0 mb-3 mt-5 font-[Lato] text-[16px] font-bold uppercase leading-[19px] text-black/50';
@@ -275,23 +288,45 @@ function CalendarModal({ onClose }) {
 }
 
 export default function ServiceProviderDashboard() {
-  // TODO: replace these with data fetched from the backend once it's ready
-  // (e.g. the logged-in provider's profile, stats, pending requests, notifications and active repair).
-  const [provider, setProvider] = useState(null); // { firstName, initials, role }
+  const { user, loading } = useAuth();
+  const [provider, setProvider] = useState(undefined); // undefined = still loading, null = never applied
+  const [loadError, setLoadError] = useState('');
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+
+  // TODO: fill these from the backend once the endpoints exist.
   const [stats, setStats] = useState(null); // { activeJobs, thisMonth, rating }
   const [pendingRequests, setPendingRequests] = useState([]); // [{ id, title }]
   const [notifications, setNotifications] = useState([]); // [{ id, message }]
   const [activeRepairs, setActiveRepairs] = useState([]); // [{ id, title, status, customer }]
-  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
+  // Load this account's provider application from the backend.
   useEffect(() => {
-    // TODO: fetch provider, stats, pendingRequests, notifications and activeRepairs, then call
-    // setProvider(...), setStats(...), setPendingRequests(...), setNotifications(...), setActiveRepairs(...)
-  }, []);
+    if (!user) return undefined;
+    let cancelled = false;
+    me()
+      .then((data) => {
+        if (!cancelled) setProvider(data.provider || null);
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError(err.message || "Couldn't load your account.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
-  const firstName = provider?.firstName || DEFAULT_FIRST_NAME;
-  const initials = provider?.initials || DEFAULT_INITIALS;
-  const role = provider?.role || DEFAULT_ROLE;
+  if (loading) return null;
+  if (!user) return <Navigate to="/login" replace />;
+  if (loadError) {
+    return <p className="m-0 p-6 font-[Roboto] text-[14px] text-[#B91C1C]">{loadError}</p>;
+  }
+  if (provider === undefined) return null;
+  // No provider application on this account: send them to choose a role / apply.
+  if (provider === null) return <Navigate to="/role-selection" replace />;
+
+  const firstName = user.name?.trim().split(/\s+/)[0] || '';
+  const initials = getInitials(user.name);
+  const role = STATUS_LABELS[provider.verification_status] || 'Service Provider';
   const activeJobs = stats?.activeJobs ?? 0;
   const thisMonth = stats?.thisMonth ?? 0;
   const rating = stats?.rating ?? 0;

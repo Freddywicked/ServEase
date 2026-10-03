@@ -1,32 +1,87 @@
 import React, { useState } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, Modal } from 'react-native';
+import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet, Alert, Modal, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
+import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
+import { errorCodes, isErrorWithCode, pick, types as DocumentPickerTypes } from '@react-native-documents/picker';
+import { useAuth } from '../context/auth_context';
+import { submitServiceProviderApplication } from '../api/client';
 
 const ServiceProviderVerification = ({ navigation, route }) => {
-    const [validId, setValidId] = useState(null);
-    const [selfie, setSelfie] = useState(null);
-    const [supportingDocs, setSupportingDocs] = useState(null);
+    // The auth token itself is never read here — client.js's request helpers pull it
+    // from AsyncStorage internally and attach it to every authenticated call, including
+    // submitServiceProviderApplication below. refreshUser() re-fetches /auth/me after a
+    // successful submit so `provider` (and its real verification_status) comes straight
+    // from the backend instead of being guessed at client-side.
+    const { refreshUser } = useAuth();
+
+    const [validId, setValidId] = useState(null); // { uri, type, fileName } from the image picker
+    const [selfie, setSelfie] = useState(null); // { uri, type, fileName }
+    const [supportingDocs, setSupportingDocs] = useState([]); // [{ uri, type, name }], optional
     const [certifyTrue, setCertifyTrue] = useState(false);
     const [agreeTerms, setAgreeTerms] = useState(false);
     const [showApprovalModal, setShowApprovalModal] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+
+    // Simple action sheet so the user can choose the camera or their gallery for a photo
+    // upload, then hands whichever asset they picked to `onPicked`.
+    const pickImage = (title, onPicked) => {
+        Alert.alert(title, 'Choose a source', [
+            {
+                text: 'Take Photo',
+                onPress: async () => {
+                    const result = await launchCamera({ mediaType: 'photo', quality: 0.8 });
+                    if (result.didCancel || result.errorCode) return;
+                    const asset = result.assets?.[0];
+                    if (asset) onPicked(asset);
+                },
+            },
+            {
+                text: 'Choose from Gallery',
+                onPress: async () => {
+                    const result = await launchImageLibrary({ mediaType: 'photo', quality: 0.8 });
+                    if (result.didCancel || result.errorCode) return;
+                    const asset = result.assets?.[0];
+                    if (asset) onPicked(asset);
+                },
+            },
+            { text: 'Cancel', style: 'cancel' },
+        ]);
+    };
 
     const handleUploadValidId = () => {
-        // TODO: open a file/image picker and store the selected ID once the
-        // backend upload endpoint is integrated.
+        pickImage('Upload Valid ID', setValidId);
     };
 
     const handleUploadSelfie = () => {
-        // TODO: open a camera/image picker for selfie verification once the
-        // backend upload endpoint is integrated.
+        pickImage('Selfie Verification', setSelfie);
     };
 
-    const handleUploadSupportingDocs = () => {
-        // TODO: open a file/document picker for supporting documents once the
-        // backend upload endpoint is integrated.
+    const handleUploadSupportingDocs = async () => {
+        try {
+            const results = await pick({
+                type: [DocumentPickerTypes.pdf, DocumentPickerTypes.images],
+                allowMultiSelection: true,
+            });
+            setSupportingDocs(results);
+        } catch (err) {
+            const isCancellation = isErrorWithCode(err) && err.code === errorCodes.OPERATION_CANCELED;
+            if (!isCancellation) {
+                Alert.alert('Upload Failed', "Couldn't select the file. Please try again.");
+            }
+        }
     };
 
-    const handleSubmit = () => {
+    // Normalizes either an image-picker asset ({ uri, type, fileName }) or a
+    // document-picker result ({ uri, type, name }) into the { uri, type, name } shape
+    // React Native's fetch/FormData expects for a file part.
+    const toFormDataFile = (file, fallbackName) => ({
+        uri: file.uri,
+        type: file.type || 'application/octet-stream',
+        name: file.fileName || file.name || fallbackName,
+    });
+
+    const handleSubmit = async () => {
         // Required-field validation before submitting the application.
         if (!validId) {
             Alert.alert('Valid ID Required', 'Please upload a valid government-issued ID.');
@@ -45,46 +100,49 @@ const ServiceProviderVerification = ({ navigation, route }) => {
             return;
         }
 
-        const payload = {
-            ...route.params,
-            verification: { validId, selfie, supportingDocs, certifyTrue, agreeTerms },
-        };
+        setSubmitting(true);
+        try {
+            // Multipart form so the ID photo, selfie, and any supporting documents go up
+            // in the same request as the rest of the application. There's no `user_id`
+            // field — submitServiceProviderApplication (client.js) attaches the Bearer
+            // token itself, so the backend identifies the applicant from that rather
+            // than a client-supplied id. Applications land as "pending" server-side and
+            // are approved/rejected from the admin web dashboard (AdminDashboard.jsx /
+            // UserManagement.jsx), not from this app.
+            //
+            // Field names below are CONFIRMED against provider_routes.js for the three
+            // files (validId/selfie/supportingDocs — not snake_case, and posts to /apply,
+            // not /application). selectedCategories/yearsOfExperience/otherService are a
+            // best-effort match, not confirmed — I haven't seen provider_controllers.js,
+            // so these could still be off; share it to lock this down exactly.
+            // certifyTrue/agreeTerms stay client-side only — they're a submit gate, not
+            // something service_providers has a column for.
+            const { selectedCategories = [], othersSelected, otherService, yearsOfExperience } =
+                route.params?.serviceCategory || {};
 
-        // ---------------------------------------------------------------------
-        // BACKEND-READY: submit the full Service Provider application
-        // (personal details, service category, and verification docs) to the
-        // admin review queue. Applications land as "pending" and are
-        // approved/rejected from the admin web dashboard, not from this app.
-        //
-        // Example (uncomment and adjust once the API is ready):
-        //
-        // try {
-        //   const response = await fetch(`${API_BASE_URL}/api/service-provider/applications`, {
-        //     method: 'POST',
-        //     headers: {
-        //       'Content-Type': 'application/json',
-        //       Authorization: `Bearer ${userAuthToken}`,
-        //     },
-        //     body: JSON.stringify({
-        //       userId: currentUser.id,
-        //       personalDetails: payload.personalDetails,
-        //       serviceCategory: payload.serviceCategory,
-        //       verification: payload.verification,
-        //       status: 'pending',
-        //     }),
-        //   });
-        //   if (!response.ok) throw new Error('Failed to submit application');
-        //   const data = await response.json();
-        //   // data.applicationId can be stored so the app can later check (or
-        //   // receive a push notification about) the admin's decision.
-        // } catch (error) {
-        //   Alert.alert('Submission Failed', 'Something went wrong. Please try again.');
-        //   return;
-        // }
-        // ---------------------------------------------------------------------
+            const formData = new FormData();
+            formData.append('selectedCategories', JSON.stringify(selectedCategories));
+            formData.append('yearsOfExperience', String(yearsOfExperience ?? ''));
+            if (othersSelected && otherService) formData.append('otherService', otherService);
+            formData.append('validId', toFormDataFile(validId, 'valid_id.jpg'));
+            formData.append('selfie', toFormDataFile(selfie, 'selfie.jpg'));
+            supportingDocs.forEach((doc, index) => {
+                formData.append('supportingDocs', toFormDataFile(doc, `document_${index}.pdf`));
+            });
 
-        console.log('Service Provider application payload:', payload);
-        setShowApprovalModal(true);
+            await submitServiceProviderApplication(formData);
+
+            // Re-fetch /auth/me so `provider` (and its real verification_status) comes
+            // from the backend — this is the same context value CustomerDashboard.js
+            // already reads, so its "pending" banner updates as soon as this resolves.
+            await refreshUser();
+
+            setShowApprovalModal(true);
+        } catch (error) {
+            Alert.alert('Submission Failed', error.message || 'Something went wrong. Please try again.');
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     const handleApprovalModalClose = () => {
@@ -98,13 +156,13 @@ const ServiceProviderVerification = ({ navigation, route }) => {
         });
     };
 
-    const renderUploadBox = (label, subtitle, value, onPress) => (
+    const renderUploadBox = (label, subtitle, displayText, onPress) => (
         <View style={styles.field}>
             <Text style={styles.label}>{label}</Text>
-            <TouchableOpacity style={styles.uploadBox} onPress={onPress}>
+            <TouchableOpacity style={styles.uploadBox} onPress={onPress} disabled={submitting}>
                 <Image source={require('../assets/icon_upload.png')} style={styles.uploadIcon} />
                 <View>
-                    <Text style={styles.uploadTitle}>{value ? value : 'Tap to upload'}</Text>
+                    <Text style={styles.uploadTitle}>{displayText || 'Tap to upload'}</Text>
                     {subtitle ? <Text style={styles.uploadSubtitle}>{subtitle}</Text> : null}
                 </View>
             </TouchableOpacity>
@@ -112,7 +170,7 @@ const ServiceProviderVerification = ({ navigation, route }) => {
     );
 
     const renderCheckbox = (label, checked, onToggle) => (
-        <TouchableOpacity style={styles.checkboxRow} onPress={onToggle}>
+        <TouchableOpacity style={styles.checkboxRow} onPress={onToggle} disabled={submitting}>
             <View style={styles.checkboxBox}>
                 <Image source={require('../assets/icon_checkbox.png')} style={styles.checkboxIcon} />
                 {checked && <Text style={styles.checkmark}>✓</Text>}
@@ -134,22 +192,31 @@ const ServiceProviderVerification = ({ navigation, route }) => {
 
                 <Text style={styles.sectionTitle}>Verification Requirements</Text>
 
-                {renderUploadBox('UPLOAD VALID ID', 'Government-issued ID', validId, handleUploadValidId)}
-                {renderUploadBox('SELFIE VERIFICATION', null, selfie, handleUploadSelfie)}
-                {renderUploadBox('SUPPORTING DOCUMENTS (OPTIONAL)', null, supportingDocs, handleUploadSupportingDocs)}
+                {renderUploadBox('UPLOAD VALID ID', 'Government-issued ID', validId?.fileName, handleUploadValidId)}
+                {renderUploadBox('SELFIE VERIFICATION', null, selfie?.fileName, handleUploadSelfie)}
+                {renderUploadBox(
+                    'SUPPORTING DOCUMENTS (OPTIONAL)',
+                    null,
+                    supportingDocs.length > 0 ? `${supportingDocs.length} file(s) selected` : null,
+                    handleUploadSupportingDocs
+                )}
 
                 <Text style={styles.subLabel}>AGREEMENTS</Text>
                 {renderCheckbox('I certify that all information provided is true and correct.', certifyTrue, () => setCertifyTrue((prev) => !prev))}
                 {renderCheckbox("I agree to ServEase's Terms & Conditions.", agreeTerms, () => setAgreeTerms((prev) => !prev))}
 
-                <TouchableOpacity style={styles.nextButton} onPress={handleSubmit}>
+                <TouchableOpacity style={styles.nextButton} onPress={handleSubmit} disabled={submitting}>
                     <LinearGradient
                         colors={['#0255AF', '#04A5A5']}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 0 }}
                         style={styles.nextButtonGradient}
                     >
-                        <Text style={styles.nextButtonText}>Submit</Text>
+                        {submitting ? (
+                            <ActivityIndicator color="#FFFFFF" />
+                        ) : (
+                            <Text style={styles.nextButtonText}>Submit</Text>
+                        )}
                     </LinearGradient>
                 </TouchableOpacity>
             </ScrollView>

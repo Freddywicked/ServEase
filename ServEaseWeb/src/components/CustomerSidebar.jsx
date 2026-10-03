@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ChevronDown } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { logout } from '../api/client';
 import { useAuth } from '../context/auth_context';
 import fullLogo from '../assets/servease_web_sidebar.png';
@@ -9,14 +9,15 @@ import dashboardIconWhite from '../assets/icon_dashboard_white.png';
 import dashboardIconBlack from '../assets/icon_dashboard_black.png';
 import gearIconWhite from '../assets/icon_gear_white.png';
 import gearIconBlack from '../assets/icon_gear_black.png';
-import toolsIconWhite from '../assets/icon_tools_white.png';
-import toolsIconBlack from '../assets/icon_tools.png';
+import requestIconWhite from '../assets/icon_request_white.png';
+import requestIconBlack from '../assets/icon_request.png';
 import chatIconWhite from '../assets/icon_chatbubble_white.png';
 import chatIconBlack from '../assets/icon_chatbubble.png';
 import historyIconWhite from '../assets/icon_history_white.png';
 import historyIconBlack from '../assets/icon_history.png';
-import logoutIcon from '../assets/icon_logout.png';
 import hamburgerIcon from '../assets/icon_hamburger.png';
+import bellIcon from '../assets/icon_ringbell.png';
+import dropdownIcon from '../assets/icon_dropdown.png';
 
 const EXPANDED_WIDTH = 229;
 const COLLAPSED_WIDTH = 84;
@@ -24,6 +25,25 @@ const AUTO_COLLAPSE_QUERY = '(max-width: 900px)';
 
 // Fallback shown when no logged-in customer data is available yet (matches the Figma design).
 const DEFAULT_INITIALS = 'CG';
+
+// Screens of the "create service request" flow. Creating a request starts from the Dashboard,
+// so these routes highlight the Dashboard tab (not Track Requests). Add any other step routes
+// of the flow here (e.g. the AI diagnosis / AI result screens) if they live under other paths.
+const CREATE_REQUEST_PATHS = [
+  '/customer/requests/new',
+  '/customer/recommended-providers',
+  '/customer/request-submitted',
+];
+
+const isCreateRequestFlow = (pathname) =>
+  CREATE_REQUEST_PATHS.some((path) => pathname.startsWith(path));
+
+const isNavItemActive = (item, pathname) => {
+  const inCreateFlow = isCreateRequestFlow(pathname);
+  if (item.to === '/customer/dashboard') return pathname.startsWith(item.to) || inCreateFlow;
+  if (item.to === '/customer/requests') return pathname.startsWith(item.to) && !inCreateFlow;
+  return pathname.startsWith(item.to);
+};
 
 const NAV_ITEMS = [
   {
@@ -41,8 +61,8 @@ const NAV_ITEMS = [
   {
     label: 'Track Requests',
     to: '/customer/requests',
-    iconActive: toolsIconWhite,
-    iconInactive: toolsIconBlack,
+    iconActive: requestIconWhite,
+    iconInactive: requestIconBlack,
   },
   {
     label: 'Messages',
@@ -64,7 +84,10 @@ export default function CustomerSidebar({ children, initials = DEFAULT_INITIALS 
   );
   const location = useLocation();
   const navigate = useNavigate();
-  const { setUser } = useAuth();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+  const { user, setUser } = useAuth();
+  const firstName = user?.name?.trim().split(/\s+/)[0] || '';
   const width = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH;
 
   // Responsive: collapse the sidebar automatically on small screens, expand again on large ones.
@@ -75,15 +98,34 @@ export default function CustomerSidebar({ children, initials = DEFAULT_INITIALS 
     return () => mq.removeEventListener('change', onChange);
   }, []);
 
+  // Close the account dropdown when clicking outside of it or pressing Escape.
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onMouseDown = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
+
   const handleLogout = () => {
+    setMenuOpen(false);
     logout(); // removes the saved login token
     setUser(null); // clears the logged-in user in the app
     navigate('/login', { replace: true });
   };
 
-  const handleAccountClick = () => {
-    // TODO: wire up an account menu (profile / log out)
-    console.log('Account menu clicked');
+  const handleNotificationsClick = () => {
+    // TODO: open a notifications panel once the backend notifications endpoint exists
+    // (e.g. GET /api/customer/notifications).
+    console.log('Notifications clicked');
   };
 
   return (
@@ -101,14 +143,65 @@ export default function CustomerSidebar({ children, initials = DEFAULT_INITIALS 
           />
         </div>
 
-        <button
-          type="button"
-          onClick={handleAccountClick}
-          className="mr-4 flex flex-none cursor-pointer items-center gap-1 border-none bg-transparent p-0 sm:mr-8"
-        >
-          <span className="font-[Quicksand] text-[22px] font-bold text-black">{initials}</span>
-          <ChevronDown size={18} color="#000000" />
-        </button>
+        {/* Upper right: notification bell, user avatar, name + role, dropdown */}
+        <div className="mr-4 flex flex-none items-center gap-4 sm:mr-[46px] sm:gap-[33px]">
+          <button
+            type="button"
+            onClick={handleNotificationsClick}
+            aria-label="Notifications"
+            className="flex cursor-pointer items-center justify-center border-none bg-transparent p-0"
+          >
+            <img src={bellIcon} alt="" className="h-[27px] w-[27px]" />
+          </button>
+
+          <div ref={menuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((open) => !open)}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              className="flex cursor-pointer items-center gap-3 border-none bg-transparent p-0"
+            >
+              <span className="flex h-[50px] w-[50px] flex-none items-center justify-center rounded-full bg-[#0255AF] font-[Inter] text-[24px] font-bold leading-[29px] text-white">
+                {initials}
+              </span>
+
+              <span className="hidden flex-col items-start text-left sm:flex">
+                <span className="font-[Inter] text-[16px] font-bold leading-[19px] text-black">
+                  {firstName}
+                </span>
+                <span className="font-[Inter] text-[15px] font-normal leading-[18px] text-[#7C7979]">
+                  customer
+                </span>
+              </span>
+
+              <img src={dropdownIcon} alt="" className="ml-1 h-2 w-[14px] flex-none" />
+            </button>
+
+            {menuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full z-50 mt-2 box-border w-[260px] rounded-[4px] border border-black/15 bg-white px-5 py-4 font-[Inter] shadow-[0_4px_12px_rgba(0,0,0,0.08)]"
+              >
+                <p className="m-0 truncate text-[18px] font-bold leading-[22px] text-black">
+                  {user?.name}
+                </p>
+                <p className="m-0 mb-4 truncate text-[16px] leading-[24px] text-[#5B5959]">
+                  {user?.email}
+                </p>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={handleLogout}
+                  className="flex cursor-pointer items-center gap-3 border-none bg-transparent p-0 text-[16px] font-normal leading-[19px] text-[#7B1E12]"
+                >
+                  <LogOut size={22} color="#7B1E12" />
+                  Log out
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -118,7 +211,7 @@ export default function CustomerSidebar({ children, initials = DEFAULT_INITIALS 
           style={{ width }}
         >
           {NAV_ITEMS.map((item) => {
-            const active = location.pathname.startsWith(item.to);
+            const active = isNavItemActive(item, location.pathname);
             return (
               <Link
                 key={item.to}
@@ -149,21 +242,6 @@ export default function CustomerSidebar({ children, initials = DEFAULT_INITIALS 
           <hr className="mx-[10px] mb-0 mt-[6px] border-0 border-t border-black/15" />
 
           <div className="flex-1" />
-
-          <button
-            type="button"
-            onClick={handleLogout}
-            className={`mb-[6px] flex cursor-pointer items-center gap-3 rounded-md border-none bg-transparent p-[7px] text-left ${
-              collapsed ? 'justify-center' : 'justify-start'
-            }`}
-          >
-            <img src={logoutIcon} alt="" className="h-[18px] w-[18px]" />
-            {!collapsed && (
-              <span className="whitespace-nowrap font-[Quicksand] text-[14px] font-bold leading-[130%] text-black">
-                Log Out
-              </span>
-            )}
-          </button>
 
           <button
             type="button"

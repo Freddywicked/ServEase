@@ -4,7 +4,7 @@ const { unwrap } = require('../utils/db');
 // The users table's primary key is `id`. Rows are also given a `user_id` copy
 // (see withUserId) so any other code that reads user.user_id keeps working.
 // Only select `password_hash` when you must check it (login). Never send it to the client.
-const PUBLIC_FIELDS = 'id, name, username, email, phone_number, role, address, birthdate, gender';
+const PUBLIC_FIELDS = 'id, name, username, email, phone_number, role, address, birthdate, gender, active_mode';
 
 const withUserId = (row) => (row ? { ...row, user_id: row.id } : row);
 
@@ -43,6 +43,14 @@ const createCustomer = async (fields) => {
   return user;
 };
 
+// Which side of the app the account is using: 'customer' | 'service_provider'.
+const setActiveMode = async (id, mode) =>
+  withUserId(
+    unwrap(
+      await supabase.from('users').update({ active_mode: mode }).eq('id', id).select(PUBLIC_FIELDS).single()
+    )
+  );
+
 const toPublic = ({ password, password_hash, ...rest }) => rest;
 
-module.exports = { findByEmail, findByUsername, findById, findProvider, createCustomer, toPublic };
+module.exports = { findByEmail, findByUsername, findById, findProvider, createCustomer, setActiveMode, toPublic };

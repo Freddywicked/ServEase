@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { submitProviderApplication, me } from '../api/client';
+import { useState } from 'react';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { X } from 'lucide-react';
+import { submitProviderApplication } from '../api/client';
 import { useAuth } from '../context/auth_context';
 import iconLogo from '../assets/servease_logo.png';
 import iconUpload from '../assets/icon_upload.png';
@@ -107,35 +108,70 @@ function AgreementBox({ checked, onChange, children }) {
   );
 }
 
+// "Application sent!" popup shown after a successful submit.
+function ApplicationSentModal({ onGoToDashboard }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="application-sent-title"
+    >
+      <div className="relative box-border flex min-h-[338px] w-[628px] max-w-full flex-col items-center rounded-[10px] bg-white px-6 pb-10 pt-[88px] text-center">
+        <button
+          type="button"
+          onClick={onGoToDashboard}
+          aria-label="Close"
+          className="absolute right-[34px] top-[26px] flex cursor-pointer border-none bg-transparent p-0"
+        >
+          <X size={18} color="#000000" />
+        </button>
+
+        <h2
+          id="application-sent-title"
+          className="m-0 font-['Roboto',sans-serif] text-[24px] font-bold leading-[30px] text-[#1E1E1E]"
+        >
+          Application sent!
+        </h2>
+        <p className="m-0 mt-[18px] font-['Roboto',sans-serif] text-[16px] leading-[20px] text-[#1E1E1E]">
+          Please wait for your role approval.
+        </p>
+
+        <button
+          type="button"
+          onClick={onGoToDashboard}
+          className="mt-[52px] cursor-pointer border-none bg-transparent p-0 font-['Roboto',sans-serif] text-[20px] font-bold leading-[24px] text-[#18315B] underline"
+        >
+          Go to Customer Dashboard
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Step 2 of 2 of the Service Provider application (after ServiceCategory).
-//
-// TODO (routing): like RoleSelection, ServiceCategory and this screen must only show up
-// while the provider's application hasn't been submitted. Gate both routes on the backend's
-// user record (e.g. user.role === 'service-provider' && !user.applicationSubmitted) in a
-// protected-route wrapper, and redirect everyone else to their dashboard. Once the submit
-// below succeeds the backend should flag the application as submitted, so no local
-// "seen it once" flag is needed and these screens never appear again after login.
+// Step 1's answers arrive through router state and are sent to the backend together
+// with the uploaded images when the provider submits.
 export default function VerificationRequirements() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { setUser } = useAuth();
+  const { user, loading } = useAuth();
 
-// Step 1 data arrives via router state. If missing (e.g. page refresh), go back.
-useEffect(() => {
-  if (!location.state) {
-    navigate('/serviceprovider/service-category', { replace: true });
-  }
-}, [location.state, navigate]);
   const [validId, setValidId] = useState([]);
   const [selfie, setSelfie] = useState([]);
   const [supportingDocs, setSupportingDocs] = useState([]);
   const [certified, setCertified] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
   const [error, setError] = useState(null);
 
-  // Rejects oversized files before they are stored in state.
+  // Rejects non-image and oversized files before they are stored in state.
   const pick = (setter) => (picked) => {
+    if (picked.some((file) => !file.type.startsWith('image/'))) {
+      setError('Please upload image files only (JPG, PNG, etc.).');
+      return;
+    }
     if (picked.some((file) => file.size > MAX_FILE_SIZE_BYTES)) {
       setError(`Each file must be ${MAX_FILE_SIZE_MB} MB or smaller.`);
       return;
@@ -143,6 +179,11 @@ useEffect(() => {
     setError(null);
     setter(picked);
   };
+
+  if (loading) return null;
+  if (!user) return <Navigate to="/login" replace />;
+  // Step 1 answers are missing (e.g. the page was refreshed): go back to step 1.
+  if (!location.state) return <Navigate to="/serviceprovider/service-category" replace />;
 
   const handleSubmit = async () => {
     if (validId.length === 0) {
@@ -161,17 +202,17 @@ useEffect(() => {
     setIsSubmitting(true);
     setError(null);
     try {
-  await submitProviderApplication(location.state, {
-    validId: validId[0],
-    selfie: selfie[0],
-    supportingDocs,
-  });
-  const data = await me(); // refresh the user so the app knows the application is in
-  setUser(data.user);
-  navigate(AFTER_SUBMIT_ROUTE);
-} catch (err) {
-  setError(err.message || "Couldn't submit your application. Please try again.");
-}
+      await submitProviderApplication(location.state, {
+        validId: validId[0],
+        selfie: selfie[0],
+        supportingDocs,
+      });
+      setIsSubmitted(true);
+    } catch (err) {
+      setError(err.message || "Couldn't submit your application. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -209,8 +250,8 @@ useEffect(() => {
         <div className="mt-7 sm:mx-[15px]">
           <UploadField
             label="Upload valid ID"
-            hint="Government-issued ID"
-            accept="image/*,application/pdf"
+            hint="Government-issued ID (image)"
+            accept="image/*"
             files={validId}
             onChange={pick(setValidId)}
           />
@@ -227,7 +268,7 @@ useEffect(() => {
           <UploadField
             className="mt-4"
             label="Supporting documents (optional)"
-            accept="image/*,application/pdf"
+            accept="image/*"
             multiple
             files={supportingDocs}
             onChange={pick(setSupportingDocs)}
@@ -256,19 +297,23 @@ useEffect(() => {
       {/* Submit */}
       <button
         type="button"
-        disabled={isSubmitting}
+        disabled={isSubmitting || isSubmitted}
         onClick={handleSubmit}
         className={`mt-[30px] box-border flex h-[39px] w-[325px] max-w-full items-center justify-center rounded-lg border border-black/30 bg-gradient-to-r from-[#0255AF] to-[#04A5A5] font-['Quicksand',sans-serif] text-[16px] font-bold leading-[23px] text-white ${
-          isSubmitting ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'
+          isSubmitting || isSubmitted ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'
         }`}
       >
-        SUBMIT
+        {isSubmitting ? 'SUBMITTING…' : 'SUBMIT'}
       </button>
 
       {error && (
         <p role="alert" className="m-0 mt-4 text-center font-['Roboto',sans-serif] text-[13px] text-[#B91C1C]">
           {error}
         </p>
+      )}
+
+      {isSubmitted && (
+        <ApplicationSentModal onGoToDashboard={() => navigate('/customer/dashboard', { replace: true })} />
       )}
     </div>
   );

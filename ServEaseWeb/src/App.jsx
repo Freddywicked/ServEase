@@ -11,7 +11,11 @@ import CustomerDashboard from './customer/CustomerDashboard'
 import CreateServiceRequest from './customer/CreateServiceRequest'
 import AIDiagnosis_Skip from './customer/AIDiagnosis_Skip'
 import AIResult from './customer/AIResult'
+import RecommendServiceProvider from './customer/RecommendServiceProvider'
+import SubmitServiceRequest from './customer/SubmitServiceRequest'
 import ServiceProviderDashboard from './serviceprovider/ServiceProviderDashboard'
+import IncomingServiceRequest from './serviceprovider/IncomingServiceRequest'
+import ServiceRequestDetails from './serviceprovider/ServiceRequestDetails'
 
 function App() {
   return (
@@ -37,13 +41,17 @@ function App() {
         <Route path="/customer/requests/new" element={<CreateServiceRequest />} />
         <Route path="/customer/requests/new/diagnosis" element={<AIDiagnosis_Skip />} />
         <Route path="/customer/requests/new/ai-result" element={<AIResult />} />
+        <Route path="/customer/requests/new/recommend-providers" element={<AIResult />} />
+        <Route path="/customer/requests/new/request-submitted" element={<AIResult />} />
         {/* TODO: add more customer routes here as they're built, e.g. /customer/providers, /customer/requests, /customer/messages, /customer/history */}
 
         {/* Service Provider */}
         <Route path="/serviceprovider/service-category" element={<ServiceCategory />} />
         <Route path="/serviceprovider/service-category/verification-requirements" element={<VerificationRequirements />} />
         <Route path="/serviceprovider/dashboard" element={<ServiceProviderDashboard />} />
-        {/* TODO: import and add more service provider routes here as they're built, e.g. /serviceprovider/requests, /serviceprovider/jobs, /serviceprovider/messages, /serviceprovider/earnings */}
+        <Route path="/serviceprovider/requests" element={<IncomingServiceRequest />} />
+        <Route path="/serviceprovider/requests/:requestId" element={<ServiceRequestDetails />} />
+        {/* TODO: import and add more service provider routes here as they're built, e.g. /serviceprovider/jobs, /serviceprovider/messages, /serviceprovider/earnings */}
       </Routes>
     </BrowserRouter>
     

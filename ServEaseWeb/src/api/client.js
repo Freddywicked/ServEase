@@ -1,6 +1,6 @@
 // Talks to ServEaseBackend. Adjust BASE_URL for your dev/prod setup
 // (e.g. swap for an env var once you know if you're on CRA or Vite).
-  const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 const getToken = () => localStorage.getItem('token');
 const setToken = (token) => localStorage.setItem('token', token);
@@ -27,11 +27,11 @@ async function request(path, { method = 'GET', body, auth = true } = {}) {
     window.location.href = '/login'; // point this at your actual login route
   }
   if (!res.ok) {
-  const err = new Error(data?.error?.message || data?.message || 'Request failed');
-  err.status = res.status;
-  err.details = data?.error?.details || data?.details;
-  throw err;
-}
+    const err = new Error(data?.error?.message || data?.message || 'Request failed');
+    err.status = res.status;
+    err.details = data?.error?.details || data?.details;
+    throw err;
+  }
   return data;
 }
 
@@ -72,6 +72,7 @@ export const login = async (identifier, password) => {
 
 export const logout = () => clearToken();
 export const me = () => request('/auth/me');
+export const getAdminStats = () => request('/admin/stats');
 
 export const submitProviderApplication = (step1, files) => {
   const body = new FormData();
@@ -84,3 +85,13 @@ export const submitProviderApplication = (step1, files) => {
   files.supportingDocs.forEach((f) => body.append('supportingDocs', f));
   return request('/providers/application', { method: 'POST', body });
 };
+
+// --- Admin: user management ---
+export const getAdminUsers = ({ tab = 'all', page = 1, pageSize = 5 } = {}) =>
+  request(`/admin/users?tab=${encodeURIComponent(tab)}&page=${page}&pageSize=${pageSize}`);
+export const approveProvider = (id) => request(`/admin/users/${id}/approve`, { method: 'PATCH' });
+export const rejectProvider = (id, reason) =>
+  request(`/admin/users/${id}/reject`, { method: 'PATCH', body: { reason } });
+export const disableUser = (id) => request(`/admin/users/${id}/disable`, { method: 'PATCH' });
+export const enableUser = (id) => request(`/admin/users/${id}/enable`, { method: 'PATCH' });
+export const getProviderDocuments = (id, kind) => request(`/admin/users/${id}/documents/${kind}`);

@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react';
 import AdminSidebar from '../components/AdminSidebar.jsx';
+import {
+  approveProvider,
+  disableUser,
+  enableUser,
+  getAdminUsers,
+  getProviderDocuments,
+  rejectProvider,
+} from '../api/client';
 import eyeIcon from '../assets/icon_eye_view.png';
 import editIcon from '../assets/icon_edit.png';
 import eyeWhiteIcon from '../assets/icon_eye_view_white.png';
@@ -294,13 +302,15 @@ const TABS = [
 
 const ROLE_COLOR = { Customer: '#04A5A5', 'Service Provider': '#021E79' };
 
+const STATUS_COLOR = { Active: '#167713', Pending: '#F9C082', Rejected: '#B91C1C', Disabled: '#7C7979' };
+
 function StatusBadge({ status }) {
   const isActive = status === 'Active';
   return (
     <span
       style={{
         ...styles.badge,
-        backgroundColor: isActive ? '#167713' : '#F9C082',
+        backgroundColor: STATUS_COLOR[status] || '#F9C082',
         fontWeight: isActive ? 400 : 700,
       }}
     >
@@ -371,14 +381,23 @@ function ProviderDetailsModal({ user, onClose, onAccept, onReject }) {
     ['Years of Experience', user.yearsExperience],
   ];
 
-  // ── BACKEND-READY BLOCK: START ────────────────────────────────────────
-  // TODO: once the backend and Supabase Storage are connected and the applicant has
-  // uploaded their documents, open the matching file here (e.g. fetch a signed URL for
-  // that document and show it in a viewer). Until then these buttons are display-only.
-  const handleViewDocument = (docKey) => {
-    console.log('View document', docKey, 'for user', user.id);
+  // Opens the uploaded image(s) in a new tab through short-lived links from the backend.
+  const handleViewDocument = async (docKey) => {
+    const win = window.open('', '_blank'); // opened first so the browser doesn't block it
+    try {
+      const { urls } = await getProviderDocuments(user.id, docKey);
+      if (!urls || urls.length === 0) {
+        if (win) win.close();
+        window.alert('No file was uploaded for this document.');
+        return;
+      }
+      if (win) win.location.href = urls[0];
+      urls.slice(1).forEach((url) => window.open(url, '_blank'));
+    } catch (err) {
+      if (win) win.close();
+      window.alert(err.message || "Couldn't open the document.");
+    }
   };
-  // ── BACKEND-READY BLOCK: END ──────────────────────────────────────────
 
   return (
     <div style={styles.modalOverlay} onClick={onClose}>
@@ -467,19 +486,34 @@ function UserDetailsModal(props) {
   );
 }
 
+// Doubles as the enable prompt: an account that is already Disabled can be turned back on.
 function DisableAccountModal({ user, onClose, onConfirm }) {
+  const isDisabled = user.status === 'Disabled';
   return (
     <div style={styles.modalOverlay} onClick={onClose}>
       <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
         <button type="button" style={styles.modalCloseBtn} onClick={onClose} aria-label="Close">✕</button>
-        <p style={styles.confirmText}>Are you sure you want to disable this account?</p>
+        <p style={styles.confirmText}>
+          {isDisabled
+            ? 'Are you sure you want to enable this account?'
+            : 'Are you sure you want to disable this account?'}
+        </p>
         <div style={styles.modalNameRow}>
           <p style={styles.modalName}>{user.name}</p>
         </div>
         <p style={styles.modalRole}>{user.role}</p>
         <div style={styles.modalActionsRow}>
-          <button type="button" style={styles.acceptBtn} onClick={onClose}>No</button>
-          <button type="button" style={styles.rejectBtn} onClick={() => onConfirm(user)}>Disable</button>
+          {isDisabled ? (
+            <>
+              <button type="button" style={{ ...styles.acceptBtn, backgroundColor: '#7C7979' }} onClick={onClose}>No</button>
+              <button type="button" style={styles.acceptBtn} onClick={() => onConfirm(user)}>Enable</button>
+            </>
+          ) : (
+            <>
+              <button type="button" style={styles.acceptBtn} onClick={onClose}>No</button>
+              <button type="button" style={styles.rejectBtn} onClick={() => onConfirm(user)}>Disable</button>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -491,59 +525,95 @@ export default function UserManagement() {
   const [viewingUser, setViewingUser] = useState(null);
   const [disablingUser, setDisablingUser] = useState(null);
 
-  // TODO: replace with data fetched from the backend (e.g. GET /api/admin/users,
-  // paginated and filtered server-side by activeTab and currentPage). Each user is
-  // expected to look like: { id, name, email, role, status, dateRegistered (ISO string),
-  // phone, address, birthdate, and — for Service Providers — serviceCategory,
-  // yearsExperience, servicesOffered }.
+  // The list is filtered and paginated by the backend (GET /api/admin/users).
   const [users, setUsers] = useState([]);
   const [totalUsers, setTotalUsers] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0); // bump to re-fetch after an action
 
   useEffect(() => {
-    // TODO: fetch the users for `activeTab` / `currentPage`, then call
-    // setUsers([...]) and setTotalUsers(<total matching count from the backend>)
-  }, [activeTab, currentPage]);
+    let cancelled = false;
+    setIsLoading(true);
+    getAdminUsers({ tab: activeTab, page: currentPage, pageSize: PAGE_SIZE })
+      .then((data) => {
+        if (cancelled) return;
+        setUsers(data.users || []);
+        setTotalUsers(data.total || 0);
+        setError('');
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message || "Couldn't load the users.");
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, currentPage, reloadKey]);
 
   // Reset to page 1 whenever the tab changes, since a filtered list has its own page count.
   useEffect(() => {
     setCurrentPage(1);
   }, [activeTab]);
 
-  const filteredUsers = users.filter((u) => {
-    if (activeTab === 'customers') return u.role === 'Customer';
-    if (activeTab === 'providers') return u.role === 'Service Provider';
-    if (activeTab === 'pending') return u.status === 'Pending';
-    return true;
-  });
+  const filteredUsers = users;
 
   const totalPages = Math.max(1, Math.ceil(totalUsers / PAGE_SIZE));
   const rangeStart = totalUsers === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const rangeEnd = Math.min(currentPage * PAGE_SIZE, totalUsers);
   const resultsText = `Showing ${rangeStart} to ${rangeEnd} of ${totalUsers} users`;
 
-  const handleAccept = (user) => {
-    // TODO: call PATCH /api/admin/users/:id/approve once the backend is set up
-    console.log('Accept', user.id);
-    setViewingUser(null);
+  const reload = () => setReloadKey((k) => k + 1);
+
+  const handleAccept = async (user) => {
+    try {
+      await approveProvider(user.id);
+      setViewingUser(null);
+      reload();
+    } catch (err) {
+      window.alert(err.message || "Couldn't approve this account.");
+    }
   };
 
-  const handleReject = (user, reason) => {
-    // TODO: call PATCH /api/admin/users/:id/reject with { reason } once the backend is set up
-    console.log('Reject', user.id, reason);
-    setViewingUser(null);
+  const handleReject = async (user, reason) => {
+    if (!reason || !reason.trim()) {
+      window.alert('Please enter a reason for rejection.');
+      return;
+    }
+    try {
+      await rejectProvider(user.id, reason.trim());
+      setViewingUser(null);
+      reload();
+    } catch (err) {
+      window.alert(err.message || "Couldn't reject this account.");
+    }
   };
 
-  const handleDisable = (user) => {
-    // TODO: call PATCH /api/admin/users/:id/disable once the backend is set up
-    console.log('Disable', user.id);
-    setDisablingUser(null);
+  // Disables an active account, or re-enables one that is currently Disabled.
+  const handleDisable = async (user) => {
+    const enabling = user.status === 'Disabled';
+    try {
+      await (enabling ? enableUser(user.id) : disableUser(user.id));
+      setDisablingUser(null);
+      reload();
+    } catch (err) {
+      window.alert(err.message || `Couldn't ${enabling ? 'enable' : 'disable'} this account.`);
+    }
   };
 
   return (
     <AdminSidebar>
       <div style={styles.content}>
         <h1 style={styles.heading}>User Management</h1>
+
+        {error && (
+          <p style={{ color: '#E53935', fontFamily: "'Roboto', sans-serif", fontSize: 13, margin: '0 0 12px' }}>
+            {error}
+          </p>
+        )}
 
         <div style={styles.tabsRow}>
           {TABS.map((tab) => (
@@ -568,6 +638,10 @@ export default function UserManagement() {
             <span style={styles.headerCell}>Actions</span>
           </div>
 
+          {!isLoading && !error && filteredUsers.length === 0 && (
+            <p style={{ ...styles.cellText, padding: '16px 8px' }}>No users found.</p>
+          )}
+
           {filteredUsers.map((user) => (
             <div key={user.id} style={styles.row}>
               <p style={styles.cellText}>{user.name}</p>
@@ -579,7 +653,7 @@ export default function UserManagement() {
                 <button type="button" style={styles.iconBtn} onClick={() => setViewingUser(user)} aria-label="View user">
                   <img src={eyeIcon} alt="" width={18} height={18} />
                 </button>
-                <button type="button" style={styles.iconBtn} onClick={() => setDisablingUser(user)} aria-label="Disable user">
+                <button type="button" style={styles.iconBtn} onClick={() => setDisablingUser(user)} aria-label={user.status === 'Disabled' ? 'Enable user' : 'Disable user'}>
                   <img src={editIcon} alt="" width={18} height={18} />
                 </button>
               </div>

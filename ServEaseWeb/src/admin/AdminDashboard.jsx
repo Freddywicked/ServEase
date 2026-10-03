@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import AdminSidebar from '../components/AdminSidebar.jsx';
+import { getAdminStats } from '../api/client';
+import { useAuth } from '../context/auth_context';
 
 const styles = {
   content: { padding: '24px 36px', boxSizing: 'border-box' },
@@ -181,30 +184,53 @@ function RegistrationChart({ data, hasData }) {
 }
 
 export default function AdminDashboard() {
-  // TODO: replace these with data fetched from the backend once it's ready
-  // (e.g. GET /api/admin/stats for the five stat cards, and GET /api/admin/users
-  // — or a dedicated endpoint — for each user's account-creation timestamp).
-  const [admin, setAdmin] = useState(null); // { firstName }
+  const { user, loading } = useAuth();
   const [stats, setStats] = useState(null); // { totalUsers, activeUsers, customers, serviceProviders, pendingAccounts }
-  const [registrationDates, setRegistrationDates] = useState(null); // array of ISO created_at timestamps, one per user; null = not fetched yet
+  const [registrationDates, setRegistrationDates] = useState(null); // ISO timestamps, one per recent registration
+  const [error, setError] = useState('');
+
+  const isAdmin = user?.role === 'admin';
 
   useEffect(() => {
-    // TODO: fetch admin, stats and the list of user registration timestamps, then call
-    // setAdmin(...), setStats(...), setRegistrationDates([...])
-  }, []);
+    if (!isAdmin) return undefined;
+    let cancelled = false;
+    getAdminStats()
+      .then((data) => {
+        if (cancelled) return;
+        setStats(data.stats);
+        setRegistrationDates(data.registration_dates || []);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message || "Couldn't load the dashboard data.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin]);
 
-  const firstName = admin?.firstName || 'Admin';
   const hasRegistrationData = Array.isArray(registrationDates) && registrationDates.length > 0;
   const registrationTrend = useMemo(
     () => buildRegistrationTrend(registrationDates || [], TREND_DAYS),
     [registrationDates]
   );
 
+  if (loading) return null;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isAdmin) return <Navigate to="/customer/dashboard" replace />;
+
+  const firstName = user.name?.trim().split(/\s+/)[0] || 'Admin';
+
   return (
     <AdminSidebar>
       <div style={styles.content}>
         <h1 style={styles.welcomeHeading}>Welcome, {firstName}!</h1>
         <p style={styles.welcomeSubtext}>Here&apos;s what&apos;s happening today.</p>
+
+        {error && (
+          <p style={{ color: '#E53935', fontFamily: "'Roboto', sans-serif", fontSize: 13, margin: '0 0 16px' }}>
+            {error}
+          </p>
+        )}
 
         <div style={styles.statsRow}>
           {STAT_CARD_DEFS.map((card) => (

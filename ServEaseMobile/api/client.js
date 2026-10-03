@@ -50,7 +50,11 @@ const toFormErrors = (details) => {
 
 async function request(path, { method = 'GET', body, auth = true } = {}) {
   const url = `${BASE_URL}${path}`;
-  const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
+  // FormData (file uploads) must NOT get a manual Content-Type — fetch needs
+  // to generate its own multipart boundary, which a hardcoded header breaks.
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+  const headers = { Accept: 'application/json' };
+  if (!isFormData) headers['Content-Type'] = 'application/json';
   if (auth) {
     const token = await AsyncStorage.getItem(TOKEN_KEY);
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -67,7 +71,7 @@ async function request(path, { method = 'GET', body, auth = true } = {}) {
     res = await fetch(url, {
       method,
       headers,
-      body: body ? JSON.stringify(body) : undefined,
+      body: isFormData ? body : body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
   } catch (networkError) {
@@ -150,3 +154,20 @@ export const login = async (identifier, password) => {
 
 export const logout = () => AsyncStorage.removeItem(TOKEN_KEY);
 export const me = () => request('/auth/me');
+
+// Confirmed against provider_routes.js: the real path is /apply, and it
+// expects the files under validId/selfie/supportingDocs — see the matching
+// fix in ServiceProviderVerificationRequirements.js.
+export const submitServiceProviderApplication = (formData) =>
+  request('/providers/apply', { method: 'POST', body: formData });
+
+// Logged-in provider's own profile (experience, specializations, photo, status).
+// Returns { provider } — provider is null when the user has not applied.
+export const getProviderProfile = () => request('/providers/me');
+
+// Persists which side of the app the account is using, so it opens in the same
+// mode on the next login. mode: 'customer' | 'service_provider'.
+// BACKEND: needs PATCH /api/users/me to accept { activeMode } and store it on the user.
+// Returns the backend's response (ideally the updated user).
+export const setActiveMode = (mode) =>
+  request('/users/me', { method: 'PATCH', body: { activeMode: mode } });

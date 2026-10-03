@@ -30,6 +30,7 @@ if (config.nodeEnv !== 'production') app.use(morgan('dev'));
 
 app.use('/api', apiRoutes);
 app.use('/api/providers', require('./routes/provider_routes'));
+app.use('/api/admin', require('./routes/admin_routes'));
 
 app.use((req, res, next) => {
   next(new ApiError(404, `Cannot ${req.method} ${req.originalUrl}`));

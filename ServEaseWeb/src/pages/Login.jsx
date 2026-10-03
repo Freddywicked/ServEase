@@ -246,7 +246,7 @@ export default function Login() {
       setUser(user);
       if (user.role === 'admin') {
         navigate('/admin/dashboard');
-      } else if (provider?.verification_status === 'verified') {
+      } else if (provider) {
         navigate('/serviceprovider/dashboard');
       } else {
         navigate('/customer/dashboard');

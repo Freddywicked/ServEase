@@ -1,8 +1,11 @@
-import React from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth, VERIFIED_STATUS } from '../context/auth_context';
+import { getProviderProfile, setActiveMode } from '../api/client';
 
-const ACTIVE_TAB = 'Profile';
+// Must match the `key` of the Profile tab below so it is highlighted.
+const ACTIVE_TAB = 'ServiceProviderProfile';
 
 // Bottom tab definitions — identical set/route names to ServiceProviderDashboard.js
 // and IncomingServiceRequest.js, with Profile as the active tab this time.
@@ -15,7 +18,59 @@ const TAB_ITEMS = [
     { key: 'ServiceProviderProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
 ];
 
+// Specializations are saved as one list (categories + chosen services); these
+// are the category names, used to pick the provider's role line.
+const SERVICE_CATEGORIES = [
+    'IT-Related Device Repair',
+    'Phone Repair',
+    'Automotive Services',
+    'Home Repair Services',
+];
+
 const ServiceProviderProfile = ({ navigation }) => {
+    // `user` and `provider` ({ verification_status }) come from auth_context.
+    // The provider's own details come from GET /api/providers/me:
+    //   { verification_status, years_of_experience, profile_photo,
+    //     offers_home_services, specializations: [] }
+    const { user, provider, refreshUser, signOut } = useAuth();
+    const [profile, setProfile] = useState(null);
+    const [switching, setSwitching] = useState(false);
+
+    const isVerified = provider?.verification_status === VERIFIED_STATUS;
+    const specializations = profile?.specializations || [];
+    const categories = specializations.filter((item) => SERVICE_CATEGORIES.includes(item));
+
+    const name = user?.name || 'Service Provider';
+    const role = categories[0] ? `${categories[0]} Provider` : 'Service Provider';
+    const years = profile?.years_of_experience;
+    const photoUri = /^https?:\/\//.test(profile?.profile_photo || '') ? profile.profile_photo : null;
+
+    const loadProfile = useCallback(async () => {
+        try {
+            const data = await getProviderProfile();
+            setProfile(data?.provider ?? null);
+        } catch (error) {
+            // Keep the last known data. A 401 is already handled by api/client.
+        }
+    }, []);
+
+    useEffect(() => {
+        loadProfile();
+    }, [loadProfile]);
+
+    // Keep the profile in sync with the backend whenever the screen is focused.
+    useEffect(() => {
+        const unsubscribe = navigation.addListener('focus', async () => {
+            try {
+                await refreshUser();
+            } catch (error) {
+                // Non-fatal: keep showing the last known data.
+            }
+            loadProfile();
+        });
+        return unsubscribe;
+    }, [navigation, refreshUser, loadProfile]);
+
     const handleTabPress = (tabKey) => {
         if (tabKey === ACTIVE_TAB) return;
         // TODO: confirm these screen names once the rest of the tabs are built
@@ -27,8 +82,40 @@ const ServiceProviderProfile = ({ navigation }) => {
         navigation.navigate('EditProfile');
     };
 
-    const handleLogout = () => {
-        // TODO: hook this up to real sign-out logic (clear auth/session) once auth is integrated
+    const handleSwitchAccount = async () => {
+        if (switching) return;
+        setSwitching(true);
+        try {
+            // Persist the active mode on the backend (PATCH /api/users/me
+            // { activeMode: 'customer' }) so the account also opens in Customer
+            // mode on future logins. A single account holds both roles, so this
+            // only flips which side of the app is shown.
+            await setActiveMode('customer');
+
+            // Re-sync user/provider in auth_context with what the backend now says.
+            try {
+                await refreshUser();
+            } catch (error) {
+                // Non-fatal: the mode was already saved.
+            }
+
+            navigation.reset({
+                index: 0,
+                routes: [{ name: 'CustomerDashboard' }],
+            });
+        } catch (error) {
+            // Stay on this screen so the user remains in Service Provider mode,
+            // matching what the backend still has saved.
+            Alert.alert('Unable to switch account', 'Please check your connection and try again.');
+        } finally {
+            setSwitching(false);
+        }
+    };
+
+    const handleLogout = async () => {
+        // signOut() (auth_context.js) clears the persisted token and resets
+        // user/provider to null.
+        await signOut();
         navigation.reset({
             index: 0,
             routes: [{ name: 'LoginScreen' }],
@@ -41,53 +128,70 @@ const ServiceProviderProfile = ({ navigation }) => {
                 <Text style={styles.headerTitle}>Profile</Text>
 
                 <View style={styles.profileHeader}>
-                    <Image source={require('../assets/icon_ellipse.png')} style={styles.avatar} />
-                    <Text style={styles.name}>Sylvia Lee</Text>
-                    <Text style={styles.role}>Automotive Repair Service Provider</Text>
+                    <Image
+                        source={photoUri ? { uri: photoUri } : require('../assets/icon_ellipse.png')}
+                        style={styles.avatar}
+                    />
+                    <Text style={styles.name}>{name}</Text>
+                    <Text style={styles.role}>{role}</Text>
 
                     <View style={styles.verifiedRow}>
-                        <View style={styles.verifiedBadge}>
-                            <View style={styles.checkCircle}>
-                                <Image source={require('../assets/icon_check.png')} style={styles.checkIcon} />
+                        {isVerified && (
+                            <View style={styles.verifiedBadge}>
+                                <View style={styles.checkCircle}>
+                                    <Image source={require('../assets/icon_check.png')} style={styles.checkIcon} />
+                                </View>
+                                <Text style={styles.verifiedText}>Verified</Text>
                             </View>
-                            <Text style={styles.verifiedText}>Verified</Text>
-                        </View>
-                        <Text style={styles.experienceText}>5 years experience</Text>
+                        )}
+                        {years != null && (
+                            <Text style={styles.experienceText}>
+                                {years} {Number(years) === 1 ? 'year' : 'years'} experience
+                            </Text>
+                        )}
                     </View>
                 </View>
 
                 <View style={styles.detailsBlock}>
-                    <Text style={styles.detailLine}>
-                        <Text style={styles.detailLabel}>Specialities: </Text>
-                        IT and Phone Repair
-                    </Text>
-                    <Text style={styles.detailLine}>
-                        <Text style={styles.detailLabel}>Location: </Text>
-                        Naga City · 2.5 km away
-                    </Text>
-                    <Text style={styles.detailLine}>
-                        <Text style={styles.detailLabel}>Available: </Text>
-                        Mon-Fri, 8AM-6PM
-                    </Text>
+                    {specializations.length > 0 && (
+                        <Text style={styles.detailLine}>
+                            <Text style={styles.detailLabel}>Specialities: </Text>
+                            {specializations.join(', ')}
+                        </Text>
+                    )}
+                    {user?.address ? (
+                        <Text style={styles.detailLine}>
+                            <Text style={styles.detailLabel}>Location: </Text>
+                            {user.address}
+                        </Text>
+                    ) : null}
+                    {profile?.offers_home_services != null && (
+                        <Text style={styles.detailLine}>
+                            <Text style={styles.detailLabel}>Home services: </Text>
+                            {profile.offers_home_services ? 'Yes' : 'No'}
+                        </Text>
+                    )}
                 </View>
 
                 <View style={styles.aiSection}>
                     <Text style={styles.aiHeading}>AI Summary Insights</Text>
-                    <Text style={styles.aiFeedback}>92% Positive Feedback</Text>
-                    <View style={styles.tagRow}>
-                        <View style={styles.tag}>
-                            <Text style={styles.tagText}>Professional</Text>
-                        </View>
-                        <View style={styles.tag}>
-                            <Text style={styles.tagText}>Always on Time</Text>
-                        </View>
-                    </View>
+                    {/* TODO: show feedback % and tags once a reviews/ratings API exists. */}
+                    <Text style={styles.aiFeedback}>No feedback yet</Text>
                 </View>
 
                 <View style={styles.menuList}>
                     <TouchableOpacity style={styles.menuItem} onPress={handleEditProfile}>
                         <Image source={require('../assets/icon_edit_profile.png')} style={styles.menuIcon} />
                         <Text style={styles.menuLabel}>Edit Profile</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={[styles.menuItem, switching && styles.menuItemDisabled]}
+                        onPress={handleSwitchAccount}
+                        disabled={switching}
+                    >
+                        <Image source={require('../assets/icon_switch_account.png')} style={styles.menuIcon} />
+                        <Text style={styles.menuLabel}>Switch Account</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.menuItem} onPress={handleLogout}>
@@ -230,6 +334,8 @@ const styles = StyleSheet.create({
     },
     tagRow: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
     },
     tag: {
         borderWidth: 1,
@@ -238,6 +344,7 @@ const styles = StyleSheet.create({
         paddingVertical: 6,
         paddingHorizontal: 14,
         marginHorizontal: 5,
+        marginBottom: 6,
     },
     tagText: {
         fontSize: 12,
@@ -251,6 +358,9 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingVertical: 14,
+    },
+    menuItemDisabled: {
+        opacity: 0.5,
     },
     menuIcon: {
         width: 22,

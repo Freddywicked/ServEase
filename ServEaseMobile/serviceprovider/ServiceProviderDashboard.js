@@ -1,9 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
+import { useAuth, VERIFIED_STATUS } from '../context/auth_context';
+import { getProviderProfile } from '../api/client';
 
-const ACTIVE_TAB = 'Home';
+// Must match the `key` of the Home tab below so it is highlighted.
+const ACTIVE_TAB = 'ServiceProviderDashboard';
 
 // Bottom tab definitions — each tab carries both its active (white) and
 // inactive (colored) icon so the same list can drive the bar regardless of
@@ -17,19 +20,66 @@ const TAB_ITEMS = [
     { key: 'ServiceProviderProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
 ];
 
+const EMPTY_STATS = { activeJobs: 0, jobsThisMonth: 0, rating: 0 };
+
+// Specializations are saved as one list (categories + chosen services); these
+// are the category names, used to pick the provider's title.
+const SERVICE_CATEGORIES = [
+    'IT-Related Device Repair',
+    'Phone Repair',
+    'Automotive Services',
+    'Home Repair Services',
+];
+
 const ServiceProviderDashboard = ({ navigation }) => {
-    const [providerName, setProviderName] = useState('');
-    const [providerTitle, setProviderTitle] = useState('');
-    const [stats, setStats] = useState({ activeJobs: 0, jobsThisMonth: 0, rating: 0 });
+    // `user` (name, email, ...) and `provider` ({ verification_status }) come from
+    // auth_context. The provider's own details (years, specializations, ...) come
+    // from GET /api/providers/me. Once the admin approves the application on the
+    // web dashboard, refreshUser() returns 'verified' and the screen updates.
+    const { user, provider, refreshUser } = useAuth();
+    const isVerified = provider?.verification_status === VERIFIED_STATUS;
+
+    const [profile, setProfile] = useState(null);
+    const [stats, setStats] = useState(EMPTY_STATS);
     const [activeRepair, setActiveRepair] = useState(null);
     const [notifications, setNotifications] = useState([]);
     const [pendingRequests, setPendingRequests] = useState([]);
 
-    useEffect(() => {
-        // TODO: fetch the logged-in provider's name/title, job stats, active
-        // repair, notifications, and pending requests from the backend once
-        // the API is integrated.
+    const providerName = user?.name || 'Provider';
+    const categories = (profile?.specializations || []).filter((item) => SERVICE_CATEGORIES.includes(item));
+    const providerTitle = categories[0] ? `${categories[0]} Provider` : 'Service Provider';
+
+    const loadProfile = useCallback(async () => {
+        try {
+            const data = await getProviderProfile();
+            setProfile(data?.provider ?? null);
+        } catch (error) {
+            // Keep the last known data. A 401 is already handled by api/client
+            // (token cleared + setOnUnauthorized callback).
+        }
     }, []);
+
+    useEffect(() => {
+        // TODO: stats, active repair, notifications and pending requests need
+        // backend endpoints (there is no service-request/jobs API yet). When
+        // they exist, fetch them here and call setStats / setActiveRepair /
+        // setNotifications / setPendingRequests. Empty states show until then.
+        loadProfile();
+    }, [loadProfile]);
+
+    // Re-sync whenever this screen comes into focus, so an admin approval shows
+    // up without logging out and back in.
+    useEffect(() => {
+        const unsubscribe = navigation.addListener('focus', async () => {
+            try {
+                await refreshUser();
+            } catch (error) {
+                // Non-fatal: keep showing the last known data.
+            }
+            loadProfile();
+        });
+        return unsubscribe;
+    }, [navigation, refreshUser, loadProfile]);
 
     const handleManageCalendar = () => {
         // TODO: point this to the actual calendar management screen once it exists
@@ -52,13 +102,23 @@ const ServiceProviderDashboard = ({ navigation }) => {
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.headerRow}>
                     <View style={styles.headerTextWrap}>
-                        <Text style={styles.welcomeText}>Welcome, {providerName || 'Provider'}!</Text>
-                        <Text style={styles.subtitle}>{providerTitle || 'Service Provider'}</Text>
+                        <Text style={styles.welcomeText}>Welcome, {providerName}!</Text>
+                        <Text style={styles.subtitle}>{providerTitle}</Text>
                     </View>
                     <TouchableOpacity onPress={handleNotificationsPress}>
                         <Image source={require('../assets/icon_ringbell.png')} style={styles.bellIcon} />
                     </TouchableOpacity>
                 </View>
+
+                {!isVerified && (
+                    <View style={styles.pendingBanner}>
+                        <Text style={styles.pendingBannerText}>
+                            {provider?.verification_status === 'rejected'
+                                ? 'Your Service Provider application was not approved.'
+                                : 'Your Service Provider application is under review. Your details will appear here once the admin approves it.'}
+                        </Text>
+                    </View>
+                )}
 
                 <View style={styles.statsRow}>
                     <View style={styles.statCard}>
@@ -187,6 +247,18 @@ const styles = StyleSheet.create({
         height: 24,
         resizeMode: 'contain',
         marginTop: 4,
+    },
+    pendingBanner: {
+        borderWidth: 1,
+        borderColor: '#E0E0E0',
+        borderRadius: 12,
+        backgroundColor: '#F9F9F9',
+        padding: 14,
+        marginTop: 4,
+    },
+    pendingBannerText: {
+        fontSize: 13,
+        color: '#555555',
     },
     statsRow: {
         flexDirection: 'row',
