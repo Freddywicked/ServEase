@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { getProviderJob, updateJobStatus } from '../api/providerWork_api';
 
 const ACTIVE_TAB = 'Jobs';
 
@@ -10,19 +11,48 @@ const TAB_ITEMS = [
     { key: 'Requests', label: 'Requests', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
     { key: 'Jobs', label: 'Jobs', activeIcon: require('../assets/icon_gear_white.png'), inactiveIcon: require('../assets/icon_gear_colored.png') },
     { key: 'Chat', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'Earnings', label: 'Earnings', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
+    { key: 'Earnings', label: 'Earnings', activeIcon: require('../assets/icon_dollar_white.png'), inactiveIcon: require('../assets/icon_dollar_colored.png') },
     { key: 'ServiceProviderProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
 ];
 
-// Placeholder stage list for the dropdown — the design only shows "Repairing"
-// as the current value, so this is a reasonable stand-in set. Swap it for the
-// real list of job stages once the backend defines one.
-const STAGE_OPTIONS = ['Assessing', 'Repairing', 'Testing', 'Completed'];
+const JobUpdateStatus = ({ navigation, route }) => {
+    const jobId = route?.params?.jobId;
 
-const JobUpdateStatus = ({ navigation }) => {
-    const [currentStage, setCurrentStage] = useState('Repairing');
+    // The stage list and the job's current stage come from GET /provider/jobs/:id.
+    const [stages, setStages] = useState([]);
+    const [currentStage, setCurrentStage] = useState('');
     const [isStageMenuOpen, setIsStageMenuOpen] = useState(false);
     const [notes, setNotes] = useState('');
+    const [photo, setPhoto] = useState(null); // { uri, type, fileName }
+    const [loading, setLoading] = useState(true);
+    const [loadFailed, setLoadFailed] = useState(false);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        const loadJob = async () => {
+            if (!jobId) {
+                setLoadFailed(true);
+                setLoading(false);
+                return;
+            }
+            try {
+                const data = await getProviderJob(jobId);
+                if (cancelled) return;
+                setStages(data?.job?.stages ?? []);
+                setCurrentStage(data?.job?.currentStage ?? '');
+                setLoadFailed(false);
+            } catch (error) {
+                if (!cancelled) setLoadFailed(true);
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        };
+        loadJob();
+        return () => {
+            cancelled = true;
+        };
+    }, [jobId]);
 
     const handleBack = () => {
         navigation.goBack();
@@ -38,11 +68,30 @@ const JobUpdateStatus = ({ navigation }) => {
     };
 
     const handleUploadImage = () => {
-        // TODO: wire up an image picker package (e.g. react-native-image-picker) once one is approved/installed
+        // TODO: wire up an image picker package once one is approved/installed, then
+        // call setPhoto with the picked asset. With react-native-image-picker:
+        //   const result = await launchImageLibrary({ mediaType: 'photo' });
+        //   const asset = result?.assets?.[0];
+        //   if (asset) setPhoto({ uri: asset.uri, type: asset.type, fileName: asset.fileName });
     };
 
-    const handlePushUpdate = () => {
-        // TODO: call the update-job-status endpoint once it exists, sending currentStage/notes/photo
+    const handlePushUpdate = async () => {
+        if (saving) return;
+        if (!currentStage) {
+            Alert.alert('Select a stage', 'Please choose the current stage of the job.');
+            return;
+        }
+        setSaving(true);
+        try {
+            await updateJobStatus(jobId, { stage: currentStage, notes: notes.trim(), photo });
+            Alert.alert('Status updated', 'The customer has been notified of the update.', [
+                { text: 'OK', onPress: () => navigation.goBack() },
+            ]);
+        } catch (error) {
+            Alert.alert('Unable to update status', 'Please check your connection and try again.');
+        } finally {
+            setSaving(false);
+        }
     };
 
     const handleTabPress = (tabKey) => {
@@ -53,54 +102,76 @@ const JobUpdateStatus = ({ navigation }) => {
 
     return (
         <SafeAreaView style={styles.safeArea}>
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+            <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
                 <TouchableOpacity style={styles.backButton} onPress={handleBack}>
                     <Text style={styles.backArrow}>‹</Text>
                 </TouchableOpacity>
 
                 <Text style={styles.headerTitle}>Update Status</Text>
 
-                <Text style={styles.fieldLabel}>Current stage</Text>
-                <TouchableOpacity style={styles.dropdownField} onPress={handleToggleStageMenu} activeOpacity={0.8}>
-                    <Text style={styles.dropdownValueText}>{currentStage}</Text>
-                    <Image
-                        source={require('../assets/icon_dropdown.png')}
-                        style={[styles.dropdownIcon, isStageMenuOpen && styles.dropdownIconOpen]}
-                    />
-                </TouchableOpacity>
-                {isStageMenuOpen ? (
-                    <View style={styles.dropdownMenu}>
-                        {STAGE_OPTIONS.map((stage) => (
-                            <TouchableOpacity
-                                key={stage}
-                                style={styles.dropdownOption}
-                                onPress={() => handleSelectStage(stage)}
-                            >
-                                <Text style={styles.dropdownOptionText}>{stage}</Text>
-                            </TouchableOpacity>
-                        ))}
+                {loading ? (
+                    <ActivityIndicator style={styles.loader} color="#0255AF" />
+                ) : loadFailed ? (
+                    <View style={styles.errorBanner}>
+                        <Text style={styles.errorBannerText}>Couldn't load this job. Go back and try again.</Text>
                     </View>
-                ) : null}
+                ) : (
+                    <>
+                        <Text style={styles.fieldLabel}>Current stage</Text>
+                        <TouchableOpacity style={styles.dropdownField} onPress={handleToggleStageMenu} activeOpacity={0.8}>
+                            <Text style={styles.dropdownValueText}>{currentStage || 'Select stage'}</Text>
+                            <Image
+                                source={require('../assets/icon_dropdown.png')}
+                                style={[styles.dropdownIcon, isStageMenuOpen && styles.dropdownIconOpen]}
+                            />
+                        </TouchableOpacity>
+                        {isStageMenuOpen ? (
+                            <View style={styles.dropdownMenu}>
+                                {stages.map((stage) => (
+                                    <TouchableOpacity
+                                        key={stage}
+                                        style={styles.dropdownOption}
+                                        onPress={() => handleSelectStage(stage)}
+                                    >
+                                        <Text style={styles.dropdownOptionText}>{stage}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        ) : null}
 
-                <Text style={styles.fieldLabel}>Notes</Text>
-                <TextInput
-                    style={styles.notesInput}
-                    placeholder="Timeline, update, etc..."
-                    placeholderTextColor="#AAAAAA"
-                    multiline
-                    numberOfLines={4}
-                    value={notes}
-                    onChangeText={setNotes}
-                />
+                        <Text style={styles.fieldLabel}>Notes</Text>
+                        <TextInput
+                            style={styles.notesInput}
+                            placeholder="Timeline, update, etc..."
+                            placeholderTextColor="#AAAAAA"
+                            multiline
+                            numberOfLines={4}
+                            value={notes}
+                            onChangeText={setNotes}
+                        />
 
-                <TouchableOpacity style={styles.uploadBox} onPress={handleUploadImage} activeOpacity={0.8}>
-                    <Image source={require('../assets/icon_image.png')} style={styles.uploadIcon} />
-                    <Text style={styles.uploadText}>Upload Image</Text>
-                </TouchableOpacity>
+                        <TouchableOpacity style={styles.uploadBox} onPress={handleUploadImage} activeOpacity={0.8}>
+                            {photo ? (
+                                <Image source={{ uri: photo.uri }} style={styles.uploadPreview} />
+                            ) : (
+                                <Image source={require('../assets/icon_image.png')} style={styles.uploadIcon} />
+                            )}
+                            <Text style={styles.uploadText}>{photo ? 'Change Image' : 'Upload Image'}</Text>
+                        </TouchableOpacity>
 
-                <TouchableOpacity style={styles.pushUpdateButton} onPress={handlePushUpdate}>
-                    <Text style={styles.pushUpdateText}>Push Update</Text>
-                </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.pushUpdateButton, saving && styles.pushUpdateButtonDisabled]}
+                            onPress={handlePushUpdate}
+                            disabled={saving}
+                        >
+                            {saving ? (
+                                <ActivityIndicator color="#111111" />
+                            ) : (
+                                <Text style={styles.pushUpdateText}>Push Update</Text>
+                            )}
+                        </TouchableOpacity>
+                    </>
+                )}
             </ScrollView>
 
             <View style={styles.tabBar}>
@@ -290,6 +361,30 @@ const styles = StyleSheet.create({
         fontSize: 11,
         color: '#FFFFFF',
         fontWeight: '600',
+    },
+    loader: {
+        marginTop: 30,
+    },
+    errorBanner: {
+        borderWidth: 1,
+        borderColor: '#E0E0E0',
+        borderRadius: 12,
+        backgroundColor: '#F9F9F9',
+        padding: 14,
+        marginBottom: 16,
+    },
+    errorBannerText: {
+        fontSize: 13,
+        color: '#555555',
+    },
+    uploadPreview: {
+        width: 120,
+        height: 90,
+        borderRadius: 8,
+        marginBottom: 8,
+    },
+    pushUpdateButtonDisabled: {
+        opacity: 0.5,
     },
 });
 

@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { X } from 'lucide-react';
 import ServiceProviderSidebar from '../components/ServiceProviderSidebar.jsx';
 import { useAuth } from '../context/auth_context';
+import { getProviderServiceRequest, rejectServiceRequest, sendQuote } from '../api/client';
 import lightningIcon from '../assets/icon_lightning.png';
 import pinIcon from '../assets/icon_pinloc.png';
 import ellipseIcon from '../assets/icon_ellipse.png';
@@ -11,68 +12,22 @@ import photoIcon from '../assets/icon_photo.png';
 const SF_PRO = 'font-[SF_Pro,system-ui,sans-serif]';
 const SECTION_LABEL = `m-0 ${SF_PRO} text-[12px] font-bold leading-[16px] text-[#292727]`;
 
-// ---------------------------------------------------------------------------------------------
-// HARD-CODED DATA (visualization only)
-// Keyed by request id so the View button on the list opens the matching request.
-// Delete this once the backend is ready and use the BACKEND INTEGRATION block in the component.
+// The request comes from the backend: GET /api/providers/requests/:requestId -> { request: {...} }
 //
-// Shape of one request (what the backend should return):
+// Shape of the request:
 // {
 //   id: 'SR-0000',
 //   status: 'new' | 'quoted',
 //   customer: {
 //     name: 'Dominic Alcantara',
 //     address: '123 Maple St QC Manila',
-//     distanceKm: 1.2,
+//     distanceKm: 1.2 | null,          // null until the backend can compute it
 //     avatarUrl: null,                 // optional profile picture URL
 //   },
 //   concern: 'Customer narration of the device problem...',
-//   photos: [],                        // array of image URLs uploaded by the customer
-//   ai: {
-//     diagnosis: 'capacitor failure',
-//     confidence: 82,                  // percent
-//     possibleCauses: ['Dirty air filter', 'Refrigerant leak', 'Compressor issue'],
-//   },
+//   photos: [],                        // image URLs uploaded by the customer
+//   ai: { diagnosis, confidence, possibleCauses: [] } | null,   // null when the customer skipped the AI step
 // }
-// ---------------------------------------------------------------------------------------------
-const MOCK_REQUEST_DETAILS = {
-  'SR-0000': {
-    id: 'SR-0000',
-    status: 'new',
-    customer: {
-      name: 'Dominic Alcantara',
-      address: '123 Maple St QC Manila',
-      distanceKm: 1.2,
-      avatarUrl: null,
-    },
-    concern:
-      'Customer Narration about the devices problem lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
-    photos: [],
-    ai: {
-      diagnosis: 'capacitor failure',
-      confidence: 82,
-      possibleCauses: ['Dirty air filter', 'Refrigerant leak', 'Compressor issue'],
-    },
-  },
-  'SR-0001': {
-    id: 'SR-0001',
-    status: 'quoted',
-    customer: {
-      name: 'Nick Duran',
-      address: '45 Acacia St QC Manila',
-      distanceKm: 1,
-      avatarUrl: null,
-    },
-    concern:
-      'Customer Narration about the devices problem lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
-    photos: [],
-    ai: {
-      diagnosis: 'drain panel replacement',
-      confidence: 91,
-      possibleCauses: ['Clogged drain line', 'Cracked drain panel', 'Loose drain fitting'],
-    },
-  },
-};
 
 function ModalShell({ onClose, children }) {
   return (
@@ -211,70 +166,61 @@ export default function ServiceRequestDetails() {
   const { requestId } = useParams();
   const navigate = useNavigate();
 
-  // Hard-coded for now. Swap for the BACKEND INTEGRATION block below once the endpoint exists.
-  const [request, setRequest] = useState(() => MOCK_REQUEST_DETAILS[requestId] || null);
-  useEffect(() => {
-    setRequest(MOCK_REQUEST_DETAILS[requestId] || null);
-  }, [requestId]);
-
+  const [request, setRequest] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [modal, setModal] = useState(null); // null | 'approve' | 'reject'
   const [isSaving, setIsSaving] = useState(false);
+  const [actionError, setActionError] = useState('');
 
-  /* ------------------------------ BACKEND INTEGRATION (ready) ------------------------------
-   Uncomment this block, add the imports + API helpers, and delete MOCK_REQUEST_DETAILS above
-   along with the hard-coded useState/useEffect that read from it.
-
-   // import { getProviderServiceRequest, sendQuote, rejectServiceRequest } from '../api/client';
-
-   // const [request, setRequest] = useState(null);
-   // const [isLoading, setIsLoading] = useState(true);
-   // const [loadError, setLoadError] = useState('');
-
-   // useEffect(() => {
-   //   let cancelled = false;
-   //   setIsLoading(true);
-   //   getProviderServiceRequest(requestId) // GET /api/provider/requests/:requestId
-   //     .then((data) => {
-   //       if (!cancelled) setRequest(data.request); // object shaped like MOCK_REQUEST_DETAILS above
-   //     })
-   //     .catch((err) => {
-   //       if (!cancelled) setLoadError(err.message || "Couldn't load this request.");
-   //     })
-   //     .finally(() => {
-   //       if (!cancelled) setIsLoading(false);
-   //     });
-   //   return () => {
-   //     cancelled = true;
-   //   };
-   // }, [requestId]);
-
-   // Approve ("Send Quote") -> inside handleSendQuote:
-   //   await sendQuote(requestId, { laborPrice, itemPrice, notes }); // POST /api/provider/requests/:requestId/quote
-   // Decline ("Send") -> inside handleReject:
-   //   await rejectServiceRequest(requestId, { reason });            // POST /api/provider/requests/:requestId/reject
-  ------------------------------------------------------------------------------------------- */
+  useEffect(() => {
+    if (!user) return undefined;
+    let cancelled = false;
+    setIsLoading(true);
+    getProviderServiceRequest(requestId)
+      .then((data) => {
+        if (!cancelled) setRequest(data.request);
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError(err.message || "Couldn't load this request.");
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [requestId, user]);
 
   const goBackToList = () => navigate('/serviceprovider/requests', { replace: true });
 
+  // Approve = send the pre-repair quotation: POST /api/providers/requests/:requestId/quote
   const handleSendQuote = async ({ laborPrice, itemPrice, notes }) => {
     setIsSaving(true);
+    setActionError('');
     try {
-      // TODO: await sendQuote(requestId, { laborPrice, itemPrice, notes });
-      console.log('Quote to send:', { requestId, laborPrice, itemPrice, notes });
+      await sendQuote(requestId, { laborPrice, itemPrice, notes });
       setModal(null);
       goBackToList();
+    } catch (err) {
+      setModal(null);
+      setActionError(err.message || "Couldn't send the quotation. Please try again.");
     } finally {
       setIsSaving(false);
     }
   };
 
+  // Decline: POST /api/providers/requests/:requestId/reject
   const handleReject = async ({ reason }) => {
     setIsSaving(true);
+    setActionError('');
     try {
-      // TODO: await rejectServiceRequest(requestId, { reason });
-      console.log('Rejection to send:', { requestId, reason });
+      await rejectServiceRequest(requestId, { reason });
       setModal(null);
       goBackToList();
+    } catch (err) {
+      setModal(null);
+      setActionError(err.message || "Couldn't send your response. Please try again.");
     } finally {
       setIsSaving(false);
     }
@@ -288,7 +234,7 @@ export default function ServiceRequestDetails() {
       <ServiceProviderSidebar>
         <div className="box-border px-4 pt-[25px] sm:px-[54px]">
           <p className="m-0 font-[Roboto] text-[14px] font-medium text-[#817C7C]">
-            Service request not found.
+            {isLoading ? 'Loading…' : loadError || 'Service request not found.'}
           </p>
           <Link
             to="/serviceprovider/requests"
@@ -333,12 +279,14 @@ export default function ServiceRequestDetails() {
                 {customer.address}
               </p>
             </div>
-            <div className="flex items-center gap-[6px]">
-              <img src={pinIcon} alt="" className="h-[15px] w-[12px] flex-none object-contain" />
-              <span className="text-[10px] font-normal leading-[17px] text-[#5B5959] underline">
-                {customer.distanceKm} km away
-              </span>
-            </div>
+            {customer.distanceKm != null && (
+              <div className="flex items-center gap-[6px]">
+                <img src={pinIcon} alt="" className="h-[15px] w-[12px] flex-none object-contain" />
+                <span className="text-[10px] font-normal leading-[17px] text-[#5B5959] underline">
+                  {customer.distanceKm} km away
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Customer concern */}
@@ -366,21 +314,35 @@ export default function ServiceRequestDetails() {
 
           {/* AI diagnosis */}
           <p className={`${SECTION_LABEL} mt-6`}>AI Diagnosis (Preliminary)</p>
-          <div className="mt-[7px] box-border flex h-[34px] w-full max-w-[641px] items-center rounded-[10px] bg-[#262728] pl-[30px]">
-            <img src={lightningIcon} alt="" className="h-[13px] w-[10px] flex-none object-contain" />
-            <span className="ml-[10px] text-[9px] font-normal leading-[15px] text-white">
-              AI suggests {ai.diagnosis} ({ai.confidence}% confidence)
-            </span>
-          </div>
+          {ai ? (
+            <>
+              <div className="mt-[7px] box-border flex h-[34px] w-full max-w-[641px] items-center rounded-[10px] bg-[#262728] pl-[30px]">
+                <img src={lightningIcon} alt="" className="h-[13px] w-[10px] flex-none object-contain" />
+                <span className="ml-[10px] text-[9px] font-normal leading-[15px] text-white">
+                  AI suggests {ai.diagnosis} ({ai.confidence}% confidence)
+                </span>
+              </div>
 
-          <div className="mt-[19px] text-[9px] leading-[15px] text-[#292727]">
-            <p className="m-0 font-normal">Possible causes:</p>
-            {ai.possibleCauses.map((cause) => (
-              <p key={cause} className="m-0 font-bold">
-                {cause}
-              </p>
-            ))}
-          </div>
+              <div className="mt-[19px] text-[9px] leading-[15px] text-[#292727]">
+                <p className="m-0 font-normal">Possible causes:</p>
+                {ai.possibleCauses.map((cause) => (
+                  <p key={cause} className="m-0 font-bold">
+                    {cause}
+                  </p>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="m-0 mt-[7px] text-[10px] leading-[15px] text-[#5B5959]">
+              The customer skipped the AI diagnosis.
+            </p>
+          )}
+
+          {actionError && (
+            <p role="alert" className="m-0 mt-4 text-[11px] text-[#B91C1C]">
+              {actionError}
+            </p>
+          )}
 
           {/* Decline / Approve */}
           {canRespond && (

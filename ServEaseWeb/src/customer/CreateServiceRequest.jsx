@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, X, MapPin } from 'lucide-react';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
+import { createServiceRequest, setDraftRequestId } from '../api/client';
 import calendarIcon from '../assets/icon_calendar.png';
 import photoIcon from '../assets/icon_photo.png';
 
@@ -231,10 +232,10 @@ export default function CreateServiceRequest() {
   const [photo, setPhoto] = useState(null); // File object, TODO uploaded to backend on submit
   const [appointment, setAppointment] = useState(null); // { date: Date, time: string }
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
-  // Device geolocation. TODO: once permission is granted and coordinates are read, send
-  // { lat, lng } to the backend (e.g. POST /api/service-requests/location) so it can be
-  // reverse-geocoded into an address and stored with the request.
+  // Device geolocation. The coordinates are sent with the request when the customer presses Next.
   const [coords, setCoords] = useState(null);
   const [locationStatus, setLocationStatus] = useState('loading'); // 'loading' | 'ready' | 'denied' | 'unsupported'
 
@@ -265,19 +266,42 @@ export default function CreateServiceRequest() {
     setIsCalendarOpen(false);
   };
 
-  const handleNext = () => {
-    // TODO: once the backend is ready, submit the draft request here first, e.g.
-    // const formData = new FormData();
-    // formData.append('category', category);
-    // formData.append('description', description);
-    // if (photo) formData.append('photo', photo);
-    // formData.append('appointmentDate', appointment?.date?.toISOString() ?? '');
-    // formData.append('appointmentTime', appointment?.time ?? '');
-    // formData.append('latitude', coords?.lat ?? '');
-    // formData.append('longitude', coords?.lng ?? '');
-    // const { requestId } = await api.createServiceRequest(formData);
-    // then navigate to the diagnosis step with that requestId.
-    navigate('/customer/requests/new/diagnosis');
+  // Creates the draft request on the backend (POST /api/service-requests), remembers its id for the
+  // next steps of the flow (AI diagnosis -> choose provider -> submit), then continues.
+  const handleNext = async () => {
+    if (!category) {
+      setError('Please pick a category.');
+      return;
+    }
+    if (!description.trim()) {
+      setError('Please describe the problem.');
+      return;
+    }
+
+    setError('');
+    setIsSubmitting(true);
+    try {
+      const formData = new FormData();
+      formData.append('category', category);
+      formData.append('description', description.trim());
+      if (photo) formData.append('photo', photo);
+      if (appointment) {
+        formData.append('appointmentDate', toDateKey(appointment.date)); // "YYYY-MM-DD"
+        formData.append('appointmentTime', appointment.time);
+      }
+      if (coords) {
+        formData.append('latitude', coords.lat);
+        formData.append('longitude', coords.lng);
+      }
+
+      const { request } = await createServiceRequest(formData);
+      setDraftRequestId(request.id); // e.g. "SR-0007"
+      navigate('/customer/requests/new/diagnosis');
+    } catch (err) {
+      setError(err.message || "Couldn't save your request. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -382,10 +406,16 @@ export default function CreateServiceRequest() {
         <button
           type="button"
           onClick={handleNext}
-          className="mx-auto box-border flex h-[46px] w-full max-w-[348px] cursor-pointer items-center justify-center rounded-lg border border-black/30 bg-gradient-to-r from-[#0255AF] to-[#04A5A5] font-[Quicksand] text-[16px] font-bold text-white"
+          disabled={isSubmitting}
+          className="mx-auto box-border flex h-[46px] w-full max-w-[348px] cursor-pointer items-center justify-center rounded-lg border border-black/30 bg-gradient-to-r from-[#0255AF] to-[#04A5A5] font-[Quicksand] text-[16px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-70"
         >
-          Next
+          {isSubmitting ? 'Saving…' : 'Next'}
         </button>
+        {error && (
+          <p role="alert" className="m-0 mt-3 text-center font-[Roboto] text-[13px] text-[#B91C1C]">
+            {error}
+          </p>
+        )}
       </div>
 
       {isCalendarOpen && (

@@ -1,66 +1,69 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet, Animated, Easing } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Image, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
+import { ROUTES } from '../navigation/routes';
+import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
+import { createServiceRequest } from '../api/servicerequest_api';
+
+/* ============================================================================
+ * AIResult (step 2 of 4 — shows the diagnosis)
+ * ----------------------------------------------------------------------------
+ * Displays draft.aiDiagnosis, which AIDiagnosis.js stored after calling the AI
+ * endpoint. Two ways out:
+ *
+ *   "Yes, solved"            -> POST /service-requests with resolvedByAi: true.
+ *                               The backend stores it as 'resolved_self_ai' with no
+ *                               provider, so AI-handled requests can be tracked. Then the
+ *                               draft is cleared and the customer returns home.
+ *   "Find Service Providers" -> RecommendServiceProvider, with the diagnosis still in
+ *                               the draft so it is saved on SERVICE_REQUEST.ai_diagnosis
+ *                               (and visible to the provider) when the request is sent.
+ *
+ * The diagnosis is sent as an object — store it as jsonb in the single
+ * SERVICE_REQUEST.ai_diagnosis column (or split it out later if providers need to query it).
+ * ========================================================================== */
 
 const TOTAL_STEPS = 4;
 const CURRENT_STEP = 2;
 
-const AIResult = ({ navigation, route }) => {
-    const [result, setResult] = useState(null);
-    const spinValue = useRef(new Animated.Value(0)).current;
+const AIResult = ({ navigation }) => {
+    const diagnosis = useServiceRequestDraftStore((state) => state.aiDiagnosis);
+    const resetDraft = useServiceRequestDraftStore((state) => state.resetDraft);
+    const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
-        const spinAnimation = Animated.loop(
-            Animated.timing(spinValue, {
-                toValue: 1,
-                duration: 1000,
-                easing: Easing.linear,
-                useNativeDriver: true,
-            })
-        );
-        spinAnimation.start();
-        return () => spinAnimation.stop();
-    }, [spinValue]);
-
-    useEffect(() => {
-        // TEMPORARY: simulates the AI diagnosis request until the real backend
-        // endpoint is integrated. Replace this timeout with an actual API call
-        // that sends route.params (category, description, photo, location) and
-        // sets the response here.
-        const timeout = setTimeout(() => {
-            setResult({
-                probableCause: 'Liquid damage to charging circuit',
-                confidence: 82,
-                tags: ['Power jack', 'Motherboard Check', 'Safety test'],
-                troubleshootingSteps: [
-                    { title: 'Check your Power Adapter', description: 'Try another charger or wall outlet.' },
-                    { title: 'Disconnect Peripherals', description: 'Remove USB devices other peripherals.' },
-                ],
-            });
-        }, 2000);
-
-        return () => clearTimeout(timeout);
-    }, []);
-
-    const spin = spinValue.interpolate({
-        inputRange: [0, 1],
-        outputRange: ['0deg', '360deg'],
-    });
+        // Landed here without a diagnosis (e.g. restored navigation state): nothing to show,
+        // so continue to the provider step instead of rendering an empty screen.
+        if (!diagnosis) {
+            navigation.replace(ROUTES.RECOMMEND_SERVICE_PROVIDER);
+        }
+    }, [diagnosis, navigation]);
 
     const handleClose = () => {
         navigation.goBack();
     };
 
-    const handleProblemSolved = () => {
-        // TODO: mark the service request as resolved via the backend once it's ready
-        navigation.navigate('CustomerHome');
+    const handleProblemSolved = async () => {
+        if (isSaving) return;
+        setIsSaving(true);
+        try {
+            await createServiceRequest(useServiceRequestDraftStore.getState(), { resolvedByAi: true });
+            resetDraft();
+            navigation.navigate(ROUTES.CUSTOMER_HOME);
+        } catch (error) {
+            setIsSaving(false);
+            Alert.alert('Could not save your request', error.message);
+        }
     };
 
     const handleFindServiceProviders = () => {
-        // TODO: confirm this is the right screen for browsing service providers
-        navigation.navigate('Find', { ...route.params, diagnosis: result });
+        navigation.navigate(ROUTES.RECOMMEND_SERVICE_PROVIDER);
     };
+
+    if (!diagnosis) {
+        return null;
+    }
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -92,65 +95,57 @@ const AIResult = ({ navigation, route }) => {
                 </Text>
                 <Text style={styles.questionSubtitle}>Let AI analyze your problem before booking.</Text>
 
-                {result === null ? (
-                    <View style={styles.loadingSection}>
-                        <Animated.Image
-                            source={require('../assets/icon_loading.png')}
-                            style={[styles.loadingIcon, { transform: [{ rotate: spin }] }]}
-                        />
-                        <Text style={styles.loadingText}>
-                            Reading your description and running AI diagnosis…
-                        </Text>
-                    </View>
-                ) : (
-                    <View>
-                        <Text style={styles.resultTitle}>Here's what we found</Text>
-                        <Text style={styles.resultSubtitle}>
-                            This is a suggestion — you'll always choose your own service provider if you'd rather not use it.
-                        </Text>
+                <View>
+                    <Text style={styles.resultTitle}>Here's what we found</Text>
+                    <Text style={styles.resultSubtitle}>
+                        This is a suggestion — you'll always choose your own service provider if you'd rather not use it.
+                    </Text>
 
-                        <View style={styles.resultCard}>
-                            <Text style={styles.cardLabel}>Probable Cause</Text>
-                            <Text style={styles.probableCauseText}>{result.probableCause}</Text>
-                            <View style={styles.confidenceRow}>
-                                <View style={styles.confidenceBarTrack}>
-                                    <View style={[styles.confidenceBarFill, { width: `${result.confidence}%` }]} />
+                    <View style={styles.resultCard}>
+                        <Text style={styles.cardLabel}>Probable Cause</Text>
+                        <Text style={styles.probableCauseText}>{diagnosis.probableCause}</Text>
+                        <View style={styles.confidenceRow}>
+                            <View style={styles.confidenceBarTrack}>
+                                <View style={[styles.confidenceBarFill, { width: `${diagnosis.confidence}%` }]} />
+                            </View>
+                            <Text style={styles.confidencePercent}>{diagnosis.confidence}%</Text>
+                        </View>
+                        <Text style={styles.confidenceCaption}>Confidence based on similar reported cases</Text>
+                        <View style={styles.tagRow}>
+                            {(diagnosis.tags || []).map((tag) => (
+                                <View key={tag} style={styles.tagPill}>
+                                    <Text style={styles.tagText}>{tag}</Text>
                                 </View>
-                                <Text style={styles.confidencePercent}>{result.confidence}%</Text>
-                            </View>
-                            <Text style={styles.confidenceCaption}>Confidence based on similar reported cases</Text>
-                            <View style={styles.tagRow}>
-                                {result.tags.map((tag) => (
-                                    <View key={tag} style={styles.tagPill}>
-                                        <Text style={styles.tagText}>{tag}</Text>
-                                    </View>
-                                ))}
-                            </View>
-                        </View>
-
-                        <Text style={styles.sectionLabel}>Troubleshooting Suggestions</Text>
-                        {result.troubleshootingSteps.map((step) => (
-                            <View key={step.title} style={styles.stepCard}>
-                                <Text style={styles.stepTitle}>{step.title}</Text>
-                                <Text style={styles.stepDescription}>{step.description}</Text>
-                            </View>
-                        ))}
-
-                        <Text style={styles.sectionLabel}>Is the problem solved?</Text>
-                        <View style={styles.actionRow}>
-                            <TouchableOpacity style={styles.actionButtonHalf} onPress={() => navigation.navigate('CustomerDashboard')}>
-                                <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.actionButton}>
-                                    <Text style={styles.actionButtonText}>Yes, solved</Text>
-                                </LinearGradient>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.actionButtonHalf} onPress={() => navigation.navigate('RecommendServiceProvider')}>
-                                <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.actionButton}>
-                                    <Text style={styles.actionButtonText}>Find Service Providers</Text>
-                                </LinearGradient>
-                            </TouchableOpacity>
+                            ))}
                         </View>
                     </View>
-                )}
+
+                    <Text style={styles.sectionLabel}>Troubleshooting Suggestions</Text>
+                    {(diagnosis.troubleshootingSteps || []).map((step) => (
+                        <View key={step.title} style={styles.stepCard}>
+                            <Text style={styles.stepTitle}>{step.title}</Text>
+                            <Text style={styles.stepDescription}>{step.description}</Text>
+                        </View>
+                    ))}
+
+                    <Text style={styles.sectionLabel}>Is the problem solved?</Text>
+                    <View style={styles.actionRow}>
+                        <TouchableOpacity style={styles.actionButtonHalf} onPress={handleProblemSolved} disabled={isSaving}>
+                            <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.actionButton}>
+                                {isSaving ? (
+                                    <ActivityIndicator color="#FFFFFF" />
+                                ) : (
+                                    <Text style={styles.actionButtonText}>Yes, solved</Text>
+                                )}
+                            </LinearGradient>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.actionButtonHalf} onPress={handleFindServiceProviders} disabled={isSaving}>
+                            <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.actionButton}>
+                                <Text style={styles.actionButtonText}>Find Service Providers</Text>
+                            </LinearGradient>
+                        </TouchableOpacity>
+                    </View>
+                </View>
             </ScrollView>
         </SafeAreaView>
     );
@@ -209,21 +204,6 @@ const styles = StyleSheet.create({
         color: '#666666',
         lineHeight: 18,
         marginBottom: 24,
-    },
-    loadingSection: {
-        alignItems: 'center',
-        paddingVertical: 30,
-    },
-    loadingIcon: {
-        width: 48,
-        height: 48,
-        resizeMode: 'contain',
-        marginBottom: 16,
-    },
-    loadingText: {
-        fontSize: 13,
-        color: '#666666',
-        textAlign: 'center',
     },
     resultTitle: {
         fontSize: 16,

@@ -1,76 +1,64 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet, Animated, Easing } from 'react-native';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { View, Image, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, StyleSheet, Animated, Easing } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
+import { ROUTES } from '../navigation/routes';
+import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
+import { getRecommendedProviders, createServiceRequest } from '../api/servicerequest_api';
 
 /* ============================================================================
- * BACKEND-READY — RecommendServiceProvider (step 3 of 4)
+ * RecommendServiceProvider (step 3 of 4)
  * ----------------------------------------------------------------------------
- * This is the first screen in the flow where the OTHER user (the service
- * provider) enters the picture — picking a provider here and tapping
- * "Request Quotation" is what should create their side of this transaction.
- * See the note on the request button below for what that needs to trigger.
+ * Customer <-> provider handoff.
+ *
+ *   Loads    GET /service-providers/recommended using the draft (category,
+ *            latitude/longitude, preferred date/time). Matching and sorting by
+ *            specialization, ratings/sentiment, distance and availability is done
+ *            server-side. "Find another" re-calls it with `exclude` = ids already shown.
+ *
+ *   Request  POST /service-requests with the full draft (category, description, photo URL,
+ *   Quotation  lat/long, preferred date/time, ai_diagnosis) + the chosen providerId. The
+ *            backend creates the SERVICE_REQUEST ('pending_quotation') and — on the
+ *            provider's side — notifies them (see the PROVIDER COMMUNICATION comment in
+ *            handleRequestQuotation). The POST lives here, so SubmitServiceRequest is a
+ *            pure confirmation screen.
  * ========================================================================== */
 
 const TOTAL_STEPS = 4;
 const CURRENT_STEP = 3;
 
-// Hardcoded per instructions for this round of frontend review — swap this
-// out for a backend fetch of matched providers once that API is ready.
-//
-// BACKEND-READY: GET /service-providers/recommended
-//   Query params:  category, latitude, longitude (from the draft request)
-//   Response fields map onto:
-//     name, specialty          → USER.name / SERVICE_PROVIDER_SPECIALIZATION
-//     verified                 → SERVICE_PROVIDER.verification_status === 'verified'
-//     available                → SERVICE_PROVIDER.availability
-//     rating, reviews          → aggregated from RATING (avg rating, count)
-//                                 where provider_id = this provider
-//     experienceYears          → SERVICE_PROVIDER.experience
-//     specialities             → SERVICE_PROVIDER_SPECIALIZATION.specialization_name (joined)
-//     location                 → distance computed server-side (or via Google
-//                                 Maps Platform) from SERVICE_PROVIDER.latitude/
-//                                 longitude vs. the customer's request location
-//     availability (schedule)  → SERVICE_PROVIDER.availability
-//   Sorting/matching should reflect the subtitle text below: specialization
-//   match, sentiment/rating, and distance.
-const SERVICE_PROVIDERS = [
-    {
-        id: 'mark-rivera',
-        name: 'Mark Rivera',
-        specialty: 'Phone Repair',
-        verified: true,
-        available: true,
-        rating: 4.8,
-        reviews: 95,
-        experienceYears: 5,
-        specialities: 'IT and Phone Repair',
-        location: 'Naga City · 2.5 km away',
-        availability: 'Mon-Fri, 8AM-6PM',
-    },
-    {
-        id: 'sylvia-lee',
-        name: 'Sylvia Lee',
-        specialty: 'Phone Repair',
-        verified: true,
-        available: true,
-        rating: 4.8,
-        reviews: 95,
-        experienceYears: 5,
-        specialities: 'IT and Phone Repair',
-        location: 'Naga City · 2.5 km away',
-        availability: 'Mon-Fri, 8AM-6PM',
-    },
-];
+const formatLocation = (provider) =>
+    [
+        provider.locationName,
+        provider.distanceKm !== null && provider.distanceKm !== undefined
+            ? `${Number(provider.distanceKm).toFixed(1)} km away`
+            : null,
+    ]
+        .filter(Boolean)
+        .join(' · ');
 
-const RecommendServiceProvider = ({ navigation, route }) => {
-    const [selectedProviderId, setSelectedProviderId] = useState(SERVICE_PROVIDERS[0].id);
-    const [isReloading, setIsReloading] = useState(false);
+const RecommendServiceProvider = ({ navigation }) => {
+    const setDraft = useServiceRequestDraftStore((state) => state.setDraft);
+
+    const [providers, setProviders] = useState([]);
+    const [selectedProviderId, setSelectedProviderId] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
+    const [notice, setNotice] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const spinValue = useRef(new Animated.Value(0)).current;
-    const reloadTimeoutRef = useRef(null);
+    const seenProviderIdsRef = useRef(new Set());
+    const isMountedRef = useRef(true);
 
     useEffect(() => {
-        if (!isReloading) {
+        isMountedRef.current = true;
+        return () => {
+            isMountedRef.current = false;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!isLoading) {
             return undefined;
         }
         spinValue.setValue(0);
@@ -84,15 +72,43 @@ const RecommendServiceProvider = ({ navigation, route }) => {
         );
         spinAnimation.start();
         return () => spinAnimation.stop();
-    }, [isReloading, spinValue]);
+    }, [isLoading, spinValue]);
+
+    // `findAnother` = true re-queries excluding every provider already shown, instead of
+    // looping back to the same result set.
+    const loadProviders = useCallback(async ({ findAnother = false } = {}) => {
+        setIsLoading(true);
+        setLoadError('');
+        setNotice('');
+        try {
+            const draft = useServiceRequestDraftStore.getState();
+            const list = await getRecommendedProviders({
+                categoryKey: draft.categoryKey,
+                latitude: draft.location?.latitude,
+                longitude: draft.location?.longitude,
+                preferredDate: draft.preferredDate,
+                preferredTime: draft.preferredTime,
+                exclude: findAnother ? Array.from(seenProviderIdsRef.current) : [],
+            });
+            if (!isMountedRef.current) return;
+
+            if (findAnother && list.length === 0) {
+                setNotice('No other service providers are available right now.');
+                return;
+            }
+            list.forEach((provider) => seenProviderIdsRef.current.add(provider.id));
+            setProviders(list);
+            setSelectedProviderId(list.length > 0 ? list[0].id : null);
+        } catch (error) {
+            if (isMountedRef.current) setLoadError(error.message);
+        } finally {
+            if (isMountedRef.current) setIsLoading(false);
+        }
+    }, []);
 
     useEffect(() => {
-        return () => {
-            if (reloadTimeoutRef.current) {
-                clearTimeout(reloadTimeoutRef.current);
-            }
-        };
-    }, []);
+        loadProviders();
+    }, [loadProviders]);
 
     const spin = spinValue.interpolate({
         inputRange: [0, 1],
@@ -108,22 +124,60 @@ const RecommendServiceProvider = ({ navigation, route }) => {
     };
 
     const handleFindAnother = () => {
-        // TEMPORARY: simulates re-searching for matched providers until the
-        // real backend search endpoint is integrated. Shows the same
-        // hardcoded providers again once the reload finishes.
-        //
-        // BACKEND-READY: re-call GET /service-providers/recommended with an
-        // `exclude` list of provider ids already shown (or a page/offset), so
-        // this doesn't just loop back to the same result set.
-        setIsReloading(true);
-        reloadTimeoutRef.current = setTimeout(() => {
-            setSelectedProviderId(SERVICE_PROVIDERS[0].id);
-            setIsReloading(false);
-        }, 1500);
+        loadProviders({ findAnother: true });
+    };
+
+    const handleRequestQuotation = async () => {
+        if (!selectedProviderId || isSubmitting) return;
+        const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
+        setIsSubmitting(true);
+        setDraft({ providerId: selectedProviderId, providerName: selectedProvider?.name ?? null });
+
+        try {
+            const created = await createServiceRequest(useServiceRequestDraftStore.getState(), {
+                providerId: selectedProviderId,
+            });
+            setDraft({ submittedRequestId: created.requestId });
+
+            // ---------------------------------------------------------------------
+            // PROVIDER COMMUNICATION (comment block — nothing to call from the app here)
+            //
+            // The app does NOT notify the provider directly. When POST /service-requests
+            // succeeds, the backend, in the same transaction, should:
+            //   1. insert the SERVICE_REQUEST (request_status = 'pending_quotation',
+            //      provider_id = selectedProviderId) and its SERVICE_REQUEST_ATTACHMENT;
+            //   2. insert a NOTIFICATION row for the provider's user
+            //      ("New service request: <category>");
+            //   3. send an FCM push to the provider's registered device token(s).
+            //
+            // On the provider's device that surfaces as:
+            //   - the request appearing on their dashboard (getIncomingRequests() and/or
+            //     subscribeToIncomingRequests(providerId, ...) — see serviceRequestApi.js);
+            //   - they then call submitQuotation() (labor_cost, parts_cost, remarks) or
+            //     declineRequest(), and nothing else in this flow proceeds until they do.
+            //
+            // Customer side, once they answer: subscribeToServiceRequest(requestId, ...)
+            // (see SubmitServiceRequest.js / CustomerDashboard.js) updates the
+            // "Active Repair" card without polling.
+            // ---------------------------------------------------------------------
+
+            // replace (not navigate) so Back from the confirmation can't land here and re-send.
+            navigation.replace(ROUTES.SUBMIT_SERVICE_REQUEST);
+        } catch (error) {
+            setIsSubmitting(false);
+            if (error.status === 409) {
+                // The provider became unavailable between listing and requesting.
+                Alert.alert('Provider unavailable', 'This service provider can no longer take your request. Please pick another.');
+                loadProviders({ findAnother: true });
+            } else {
+                Alert.alert('Could not send your request', error.message);
+            }
+        }
     };
 
     const renderProviderCard = (provider) => {
         const isSelected = provider.id === selectedProviderId;
+        const specialties = Array.isArray(provider.specialties) ? provider.specialties.join(', ') : provider.specialties;
         return (
             <TouchableOpacity
                 key={provider.id}
@@ -132,7 +186,10 @@ const RecommendServiceProvider = ({ navigation, route }) => {
                 activeOpacity={0.85}
             >
                 <View style={styles.providerHeaderRow}>
-                    <Image source={require('../assets/icon_profile_photo.png')} style={styles.providerPhoto} />
+                    <Image
+                        source={provider.photoUrl ? { uri: provider.photoUrl } : require('../assets/icon_profile_photo.png')}
+                        style={styles.providerPhoto}
+                    />
                     <View style={styles.providerNameWrap}>
                         <Text style={styles.providerName}>{provider.name}</Text>
                         <Text style={styles.providerSpecialty}>{provider.specialty}</Text>
@@ -140,13 +197,15 @@ const RecommendServiceProvider = ({ navigation, route }) => {
                 </View>
 
                 <View style={styles.badgeRow}>
-                    <View style={styles.verifiedBadge}>
-                        <View style={styles.verifiedIconWrap}>
-                            <Image source={require('../assets/icon_ellipse.png')} style={styles.verifiedEllipse} />
-                            <Image source={require('../assets/icon_check.png')} style={styles.verifiedCheck} />
+                    {provider.verified && (
+                        <View style={styles.verifiedBadge}>
+                            <View style={styles.verifiedIconWrap}>
+                                <Image source={require('../assets/icon_ellipse.png')} style={styles.verifiedEllipse} />
+                                <Image source={require('../assets/icon_check.png')} style={styles.verifiedCheck} />
+                            </View>
+                            <Text style={styles.verifiedText}>Verified</Text>
                         </View>
-                        <Text style={styles.verifiedText}>Verified</Text>
-                    </View>
+                    )}
                     {provider.available && (
                         <View style={styles.availableBadge}>
                             <Text style={styles.availableText}>Available</Text>
@@ -156,24 +215,99 @@ const RecommendServiceProvider = ({ navigation, route }) => {
 
                 <View style={styles.ratingRow}>
                     <Image source={require('../assets/icon_star.png')} style={styles.starIcon} />
-                    <Text style={styles.ratingText}>{provider.rating}</Text>
-                    <Text style={styles.ratingDetail}>{provider.reviews} reviews</Text>
-                    <Text style={styles.ratingDetail}>{provider.experienceYears} years experience</Text>
+                    <Text style={styles.ratingText}>
+                        {provider.rating !== null && provider.rating !== undefined ? Number(provider.rating).toFixed(1) : 'New'}
+                    </Text>
+                    <Text style={styles.ratingDetail}>{provider.reviewCount ?? 0} reviews</Text>
+                    {provider.experienceYears !== null && provider.experienceYears !== undefined && (
+                        <Text style={styles.ratingDetail}>{provider.experienceYears} years experience</Text>
+                    )}
                 </View>
 
-                <Text style={styles.detailLine}>
-                    <Text style={styles.detailLabel}>Specialities: </Text>
-                    {provider.specialities}
-                </Text>
-                <Text style={styles.detailLine}>
-                    <Text style={styles.detailLabel}>Location: </Text>
-                    {provider.location}
-                </Text>
-                <Text style={styles.detailLine}>
-                    <Text style={styles.detailLabel}>Available: </Text>
-                    {provider.availability}
-                </Text>
+                {!!specialties && (
+                    <Text style={styles.detailLine}>
+                        <Text style={styles.detailLabel}>Specialities: </Text>
+                        {specialties}
+                    </Text>
+                )}
+                {!!formatLocation(provider) && (
+                    <Text style={styles.detailLine}>
+                        <Text style={styles.detailLabel}>Location: </Text>
+                        {formatLocation(provider)}
+                    </Text>
+                )}
+                {!!provider.availabilitySchedule && (
+                    <Text style={styles.detailLine}>
+                        <Text style={styles.detailLabel}>Available: </Text>
+                        {provider.availabilitySchedule}
+                    </Text>
+                )}
             </TouchableOpacity>
+        );
+    };
+
+    const renderBody = () => {
+        if (isLoading) {
+            return (
+                <View style={styles.reloadingSection}>
+                    <Animated.Image
+                        source={require('../assets/icon_loading.png')}
+                        style={[styles.reloadingIcon, { transform: [{ rotate: spin }] }]}
+                    />
+                    <Text style={styles.reloadingText}>Finding service providers…</Text>
+                </View>
+            );
+        }
+
+        if (loadError) {
+            return (
+                <View style={styles.reloadingSection}>
+                    <Text style={styles.reloadingText}>{loadError}</Text>
+                    <TouchableOpacity onPress={() => loadProviders()} style={styles.findAnotherWrap}>
+                        <Text style={styles.findAnotherText}>Try again</Text>
+                    </TouchableOpacity>
+                </View>
+            );
+        }
+
+        if (providers.length === 0) {
+            return (
+                <View style={styles.reloadingSection}>
+                    <Text style={styles.reloadingText}>
+                        No service providers are available for this request yet.
+                    </Text>
+                    <TouchableOpacity onPress={() => loadProviders()} style={styles.findAnotherWrap}>
+                        <Text style={styles.findAnotherText}>Search again</Text>
+                    </TouchableOpacity>
+                </View>
+            );
+        }
+
+        return (
+            <>
+                {providers.map(renderProviderCard)}
+
+                {!!notice && <Text style={styles.noticeText}>{notice}</Text>}
+
+                <TouchableOpacity onPress={handleRequestQuotation} disabled={isSubmitting || !selectedProviderId}>
+                    <LinearGradient
+                        colors={['#0255AF', '#04A5A5']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={styles.requestButton}
+                    >
+                        {isSubmitting ? (
+                            <ActivityIndicator color="#FFFFFF" />
+                        ) : (
+                            <Text style={styles.requestButtonText}>Request Quotation</Text>
+                        )}
+                    </LinearGradient>
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={handleFindAnother} disabled={isSubmitting} style={styles.findAnotherWrap}>
+                    <Text style={styles.findAnotherText}>Find another Service Provider</Text>
+                </TouchableOpacity>
+            </>
         );
     };
 
@@ -207,56 +341,7 @@ const RecommendServiceProvider = ({ navigation, route }) => {
                     Matched by specialization, customer satisfaction sentiments, ratings and distance from you.
                 </Text>
 
-                {isReloading ? (
-                    <View style={styles.reloadingSection}>
-                        <Animated.Image
-                            source={require('../assets/icon_loading.png')}
-                            style={[styles.reloadingIcon, { transform: [{ rotate: spin }] }]}
-                        />
-                        <Text style={styles.reloadingText}>Finding service providers…</Text>
-                    </View>
-                ) : (
-                    <>
-                        {SERVICE_PROVIDERS.map(renderProviderCard)}
-
-                        {/*
-                         * BACKEND-READY — "Request Quotation" (customer → provider handoff)
-                         * This is the key moment this whole flow has been building the
-                         * draft request for. On press, before navigating:
-                         *   1. POST /service-requests with the full assembled draft
-                         *      (category, description, photo url, lat/long, ai_diagnosis)
-                         *      plus provider_id = selectedProviderId. This is the actual
-                         *      SERVICE_REQUEST row — request_status starts something like
-                         *      'pending_quotation'.
-                         *   2. Provider-side effect: the selected provider needs to see
-                         *      this as a new incoming request on their dashboard, and get
-                         *      an FCM push notification — they're the one who now has to
-                         *      act (submit a QUOTATION with labor_cost/parts_cost/remarks,
-                         *      or decline). Nothing else in this flow proceeds until they do.
-                         *   3. Subscribe the customer's app (Supabase Realtime, on
-                         *      request_id) so that when the provider's QUOTATION comes in,
-                         *      CustomerDashboard / RequestDetails update without polling.
-                         * Currently `selectedProviderId` isn't passed to SubmitServiceRequest
-                         * at all — the onPress below will need
-                         * `{ ...route.params, providerId: selectedProviderId }` added once
-                         * this is wired up.
-                         */}
-                        <TouchableOpacity onPress={() => navigation.navigate('SubmitServiceRequest')}>
-                            <LinearGradient
-                                colors={['#0255AF', '#04A5A5']}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 0 }}
-                                style={styles.requestButton}
-                            >
-                                <Text style={styles.requestButtonText}>Request Quotation</Text>
-                            </LinearGradient>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity onPress={handleFindAnother} style={styles.findAnotherWrap}>
-                            <Text style={styles.findAnotherText}>Find another Service Provider</Text>
-                        </TouchableOpacity>
-                    </>
-                )}
+                {renderBody()}
             </ScrollView>
         </SafeAreaView>
     );
@@ -466,6 +551,12 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: '#111111',
         textDecorationLine: 'underline',
+    },
+    noticeText: {
+        fontSize: 12,
+        color: '#666666',
+        textAlign: 'center',
+        marginBottom: 12,
     },
 });
 

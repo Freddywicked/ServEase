@@ -10,7 +10,7 @@ const otp = require('../services/otp');
 
 // BR-01: one account per email.
 const assertEmailAvailable = async (email) => {
-  if (await User.findByEmail(email, 'id')) throw new ApiError(409, 'Email is already registered');
+  if (await User.findByEmail(email, 'user_id')) throw new ApiError(409, 'Email is already registered');
 };
 
 // One account per phone number. Checks both "+639..." and older "09..." rows,
@@ -18,7 +18,7 @@ const assertEmailAvailable = async (email) => {
 const assertPhoneAvailable = async (phoneE164) => {
   const variants = [phoneE164, `0${phoneE164.slice(3)}`]; // +639XXXXXXXXX, 09XXXXXXXXX
   const rows = unwrap(
-    await supabase.from('users').select('id').in('phone_number', variants).limit(1)
+    await supabase.from('users').select('user_id').in('phone_number', variants).limit(1)
   );
   if (rows && rows.length) throw new ApiError(409, 'Phone number is already registered');
 };
@@ -32,7 +32,7 @@ const generateUsername = async (email) => {
   const base = usernameFromEmail(email);
   let candidate = base;
   let suffix = 1;
-  while (await User.findByUsername(candidate, 'id')) {
+  while (await User.findByUsername(candidate, 'user_id')) {
     suffix += 1;
     candidate = `${base}${suffix}`;
   }

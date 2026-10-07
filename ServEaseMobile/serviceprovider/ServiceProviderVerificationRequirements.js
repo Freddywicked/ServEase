@@ -110,20 +110,33 @@ const ServiceProviderVerification = ({ navigation, route }) => {
             // are approved/rejected from the admin web dashboard (AdminDashboard.jsx /
             // UserManagement.jsx), not from this app.
             //
-            // Field names below are CONFIRMED against provider_routes.js for the three
-            // files (validId/selfie/supportingDocs — not snake_case, and posts to /apply,
-            // not /application). selectedCategories/yearsOfExperience/otherService are a
-            // best-effort match, not confirmed — I haven't seen provider_controllers.js,
-            // so these could still be off; share it to lock this down exactly.
+            // Field names match provider_controllers.js parseBody: the three files are
+            // validId/selfie/supportingDocs; lists go up JSON-encoded; companyName and
+            // companyAddress land on service_providers.company_name / company_address and
+            // offersHomeServices on offers_home_service.
             // certifyTrue/agreeTerms stay client-side only — they're a submit gate, not
             // something service_providers has a column for.
-            const { selectedCategories = [], othersSelected, otherService, yearsOfExperience } =
-                route.params?.serviceCategory || {};
+            const {
+                selectedCategories = [],
+                companyName = '',
+                companyAddress = '',
+                homeRepairServices = [],
+                otherServices = [],
+                otherService,
+                yearsOfExperience,
+                offersHomeServices,
+            } = route.params?.serviceCategory || {};
 
             const formData = new FormData();
             formData.append('selectedCategories', JSON.stringify(selectedCategories));
+            formData.append('companyName', companyName);
+            formData.append('companyAddress', companyAddress);
+            formData.append('homeRepairServices', JSON.stringify(homeRepairServices));
+            formData.append('otherServices', JSON.stringify(otherServices));
+            // Older category screens passed a single otherService string — keep sending it.
+            if (otherService) formData.append('otherService', otherService);
             formData.append('yearsOfExperience', String(yearsOfExperience ?? ''));
-            if (othersSelected && otherService) formData.append('otherService', otherService);
+            formData.append('offersHomeServices', offersHomeServices === 'yes' ? 'yes' : 'no');
             formData.append('validId', toFormDataFile(validId, 'valid_id.jpg'));
             formData.append('selfie', toFormDataFile(selfie, 'selfie.jpg'));
             supportingDocs.forEach((doc, index) => {

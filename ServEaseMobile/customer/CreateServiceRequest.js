@@ -1,85 +1,48 @@
-import React, { useState } from 'react';
-import { View, Image, Text, TouchableOpacity, Pressable, ScrollView, TextInput, Modal, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Image, Text, TouchableOpacity, Pressable, ScrollView, TextInput, Modal, ActivityIndicator, Alert, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
+import { launchImageLibrary } from 'react-native-image-picker';
+import { ROUTES } from '../navigation/routes';
+import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
+import {
+    getCategories,
+    getAppointmentTimeSlots,
+    uploadServiceRequestPhoto,
+    reverseGeocode,
+} from '../api/servicerequest_api';
+import { getCurrentCoordinates } from '../utils/deviceLocation';
 
 /* ============================================================================
- * BACKEND-READY — CreateServiceRequest (step 1 of 4)
+ * CreateServiceRequest (step 1 of 4)
  * ----------------------------------------------------------------------------
- * This screen only COLLECTS fields into local state — it doesn't create a
- * SERVICE_REQUEST row yet (that happens once a provider is picked, in
- * SubmitServiceRequest.js). Because the flow spans 4 screens
- * (CreateServiceRequest → AIDiagnosis → AIResult → RecommendServiceProvider →
- * SubmitServiceRequest), the values gathered here need to survive across all
- * of them.
+ * Collects the request details into the shared draft store
+ * (store/serviceRequestDraftStore.js) so every later screen —
+ * AIDiagnosis -> AIResult -> RecommendServiceProvider -> SubmitServiceRequest —
+ * can read them. Nothing is written to SERVICE_REQUEST yet; that happens once
+ * the customer picks a provider (RecommendServiceProvider) or marks the problem
+ * solved by the AI suggestions (AIResult).
  *
- * Two ways to thread that data through — pick one:
- *   1. Keep passing an ever-growing `route.params` object forward at every
- *      `navigation.navigate(...)` call (what the screens currently attempt,
- *      inconsistently — see the per-handler notes below).
- *   2. Add a Zustand store, e.g. `useServiceRequestDraftStore`, holding
- *      { category, description, photoUri, location, aiDiagnosis, providerId }
- *      that every screen in this flow reads/writes. Zustand is already in
- *      the planned stack, and this is exactly the kind of cross-screen state
- *      it's meant for — recommended over stuffing everything into route
- *      params 4 screens deep.
+ * Backend data used here:
+ *   GET  /categories                  -> category buttons
+ *   GET  /appointment-time-slots      -> preferred-time pills
+ *   POST /service-requests/photos     -> uploads the chosen photo, returns its URL
+ *   GET  /location/reverse-geocode    -> address + map thumbnail for the coordinates
  *
- * Whichever is picked, do it consistently — right now several buttons call
- * `navigation.navigate(...)` directly instead of the handler defined for
- * them, so the params being carefully assembled here don't actually reach
- * the next screen. Flagged inline at each spot below.
- *
- * Preferred Appointment (added below): this is a THIRD date concept for
- * SERVICE_REQUEST, distinct from the other two already in play elsewhere:
- *   1. SERVICE_REQUEST.date/time — when the request was submitted (audit trail)
- *   2. preferred_date/preferred_time (NEW — this field) — the customer's
- *      stated preference, given upfront before any provider is involved
- *   3. the CONFIRMED appointment set in RequestDetails.js after a quotation
- *      is approved (REPAIR_SERVICE.start_date or dedicated
- *      scheduled_date/scheduled_time fields, per that file's note) — which
- *      may end up different from what's picked here if it doesn't work for
- *      the assigned provider
- * SERVICE_REQUEST needs preferred_date/preferred_time columns added to hold
- * #2. It's also worth having RecommendServiceProvider.js factor this
- * preference into matching/sorting, since a provider who's free at the
- * customer's preferred time is a better match than one who isn't.
+ * Preferred Appointment is the customer's stated preference
+ * (SERVICE_REQUEST.preferred_date / preferred_time). It is distinct from the
+ * submission timestamp and from the appointment confirmed later in RequestDetails.js.
  * ========================================================================== */
 
 const TOTAL_STEPS = 4;
 const CURRENT_STEP = 1;
 
-// Hardcoded for now — swap this out for a backend fetch once the categories
-// API is integrated.
-//
-// BACKEND-READY: GET /categories (or a static enum shared with the backend).
-// Whatever `key` values are used here must match SERVICE_REQUEST.category
-// exactly (or a lookup table's category code), since this value is written
-// straight to that column with no transformation. If a provider's
-// specialization list (SERVICE_PROVIDER_SPECIALIZATION.specialization_name)
-// is meant to be matched against this category in RecommendServiceProvider,
-// the two vocabularies need to agree on categories now, before either side
-// is built out further.
-const CATEGORIES = [
-    { key: 'HomeRepair', label: 'Home Repair' },
-    { key: 'Automotive', label: 'Automotive' },
-    { key: 'ITAndPhoneDeviceRepair', label: 'IT and Phone Device Repair' },
-];
-
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
-// Placeholder slot list for the picker below — no provider is chosen yet at
-// this point in the flow (that happens in RecommendServiceProvider.js), so
-// this can't be validated against any one provider's real availability. See
-// the BACKEND-READY note above handleConfirmAppointment for what this is
-// actually for.
-const APPOINTMENT_TIME_SLOTS = ['8:00 AM', '10:00 AM', '1:00 PM', '3:00 PM', '5:00 PM'];
-
-// Same grid-building approach as RequestDetails.js's appointment calendar —
-// pads the leading cells with `null` so day 1 lands under the correct
-// weekday column. Duplicated here rather than shared since there's no
-// existing shared-components file in this project yet; worth extracting into
-// one `CalendarPicker` component now that two screens need this same widget.
+// Pads the leading cells with `null` so day 1 lands under the correct weekday
+// column. Worth extracting into one shared `CalendarPicker` along with
+// RequestDetails.js's calendar.
 const getCalendarDays = (year, monthIndex) => {
     const startWeekday = new Date(year, monthIndex, 1).getDay();
     const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
@@ -89,87 +52,142 @@ const getCalendarDays = (year, monthIndex) => {
     return days;
 };
 
-const CreateServiceRequest = ({ navigation }) => {
-    const [selectedCategory, setSelectedCategory] = useState(null);
-    const [hoveredCategory, setHoveredCategory] = useState(null);
-    const [problemDescription, setProblemDescription] = useState('');
-    const [photo, setPhoto] = useState(null);
-    const [location, setLocation] = useState(null);
+// The draft stores the preferred date as 'YYYY-MM-DD' (what the backend wants).
+const toIsoDate = (year, monthIndex, day) =>
+    `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
-    // Preferred appointment — unlike RequestDetails.js's calendar (which
-    // defaults to a specific hardcoded demo date since it's confirming a
-    // slot already in motion), this one has nothing to default to yet, so it
-    // opens on today's real month/year with nothing selected.
-    //
-    // `viewed*` is just which month the grid is currently showing — it moves
-    // independently as the customer taps ‹ › to browse. `confirmed*` is the
-    // committed appointment shown in the field once "Confirm" is pressed.
-    // Keeping these separate (rather than reusing one pair of state
-    // variables for both) avoids a real bug: if the customer reopens the
-    // picker and browses to a different month without picking a new day,
-    // the already-confirmed date's label would otherwise silently pick up
-    // whatever month the grid happens to be showing.
+const parseIsoDate = (iso) => {
+    if (!iso) return null;
+    const [year, month, day] = iso.split('-').map(Number);
+    return { year, monthIndex: month - 1, day };
+};
+
+// "Sep 24, 2026" — for display in the field once a date is picked.
+const formatAppointmentDate = ({ year, monthIndex, day }) => `${MONTH_NAMES[monthIndex].slice(0, 3)} ${day}, ${year}`;
+
+const CreateServiceRequest = ({ navigation }) => {
+    // The draft lives in the shared store, so going back from a later step keeps what was typed.
+    const draft = useServiceRequestDraftStore((state) => state);
+    const setDraft = useServiceRequestDraftStore((state) => state.setDraft);
+
+    const [categories, setCategories] = useState([]);
+    const [timeSlots, setTimeSlots] = useState([]);
+    const [optionsStatus, setOptionsStatus] = useState('loading'); // 'loading' | 'ready' | 'error'
+    const [optionsError, setOptionsError] = useState(''); // why loading failed (shown under the retry hint)
+    const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+    const [isLocating, setIsLocating] = useState(false);
+
+    // Preferred appointment picker.
+    // `viewed*` is which month the grid is showing (moves as the customer taps ‹ ›).
+    // The committed appointment is draft.preferredDate / draft.preferredTime.
+    // `draftAppointment*` holds the in-progress pick while the modal is open, so
+    // closing without confirming never overwrites an already-confirmed appointment.
     const today = new Date();
     const [isAppointmentModalVisible, setIsAppointmentModalVisible] = useState(false);
     const [viewedAppointmentYear, setViewedAppointmentYear] = useState(today.getFullYear());
     const [viewedAppointmentMonth, setViewedAppointmentMonth] = useState(today.getMonth());
-    const [confirmedAppointmentYear, setConfirmedAppointmentYear] = useState(null);
-    const [confirmedAppointmentMonth, setConfirmedAppointmentMonth] = useState(null);
-    const [confirmedAppointmentDay, setConfirmedAppointmentDay] = useState(null);
-    const [confirmedAppointmentTime, setConfirmedAppointmentTime] = useState(null);
-    // Holds the in-progress pick while the modal is open, so canceling out
-    // (closing without confirming) never overwrites an already-confirmed
-    // appointment with a half-made selection.
     const [draftAppointmentDay, setDraftAppointmentDay] = useState(null);
     const [draftAppointmentTime, setDraftAppointmentTime] = useState(null);
 
+    const confirmedDate = parseIsoDate(draft.preferredDate);
+    const confirmedTimeLabel = timeSlots.find((slot) => slot.value === draft.preferredTime)?.label ?? draft.preferredTime;
     const appointmentCalendarDays = getCalendarDays(viewedAppointmentYear, viewedAppointmentMonth);
+    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+    const loadOptions = useCallback(async () => {
+        setOptionsStatus('loading');
+        setOptionsError('');
+        try {
+            const [categoryList, slotList] = await Promise.all([getCategories(), getAppointmentTimeSlots()]);
+            setCategories(categoryList);
+            setTimeSlots(slotList);
+            setOptionsStatus('ready');
+        } catch (error) {
+            // Kept on screen (not just the console) so connection problems can be
+            // diagnosed on a physical device without a logcat setup.
+            setOptionsError(error?.message || String(error));
+            setOptionsStatus('error');
+        }
+    }, []);
+
+    useEffect(() => {
+        loadOptions();
+    }, [loadOptions]);
 
     const handleClose = () => {
         navigation.goBack();
     };
 
     const handleSelectCategory = (categoryKey) => {
-        setSelectedCategory(categoryKey);
+        setDraft({ categoryKey });
     };
 
-    const handleUploadImage = () => {
-        // TODO: hook this up to an image picker once the backend/storage is ready
-        //
-        // BACKEND-READY:
-        //   1. Open an image picker (e.g. react-native-image-picker), get a local URI.
-        //   2. Upload to a Supabase Storage bucket (e.g. `service-request-photos`)
-        //      under a path like `${customerId}/${draftRequestId or uuid}.jpg`.
-        //   3. Store the resulting public/signed URL — not the raw local URI —
-        //      in state, since that's what ultimately needs to travel to
-        //      SERVICE_REQUEST_ATTACHMENT.file_url / filename once the request
-        //      is submitted. This screen only stages it; the actual
-        //      SERVICE_REQUEST_ATTACHMENT row is created once request_id exists.
+    const handleUploadImage = async () => {
+        if (isUploadingPhoto) return;
+        const result = await launchImageLibrary({
+            mediaType: 'photo',
+            selectionLimit: 1,
+            quality: 0.8,
+            // The server rejects images over 5 MB; resizing on the device keeps phone photos under that.
+            maxWidth: 1600,
+            maxHeight: 1600,
+        });
+        if (result.didCancel) return;
+        if (result.errorCode) {
+            Alert.alert('Could not open photos', result.errorMessage || 'Please check photo permissions and try again.');
+            return;
+        }
+        const asset = result.assets?.[0];
+        if (!asset?.uri) return;
+
+        // Show the local preview right away, then upload; the uploaded storage path (not the
+        // local URI) is what travels to SERVICE_REQUEST_ATTACHMENT.file_url.
+        setDraft({ photoUri: asset.uri, photoPath: null });
+        setIsUploadingPhoto(true);
+        try {
+            const { path } = await uploadServiceRequestPhoto(asset);
+            setDraft({ photoPath: path });
+        } catch (error) {
+            setDraft({ photoUri: null, photoPath: null });
+            Alert.alert('Photo upload failed', error.message);
+        } finally {
+            setIsUploadingPhoto(false);
+        }
     };
 
-    const handleTurnOnLocation = () => {
-        // TODO: request device location permission / fetch coordinates once
-        // location services are integrated
-        //
-        // BACKEND-READY:
-        //   1. Request device location permission, read current coordinates.
-        //   2. Use Google Maps Platform (Geocoding API) to reverse-geocode into
-        //      a human-readable address for display, and/or a static map
-        //      thumbnail (`location.mapImageUri` below) for the preview.
-        //   3. Persist raw latitude/longitude — these map directly onto
-        //      SERVICE_REQUEST.latitude / SERVICE_REQUEST.longitude and are
-        //      what RecommendServiceProvider will need to sort providers by
-        //      distance, so don't discard them once the address is displayed.
+    const handleTurnOnLocation = async () => {
+        if (isLocating) return;
+        setIsLocating(true);
+        try {
+            // Raw latitude/longitude are kept — they map to SERVICE_REQUEST.latitude/longitude
+            // and RecommendServiceProvider needs them to sort providers by distance.
+            const { latitude, longitude } = await getCurrentCoordinates();
+            let address = null;
+            let mapImageUri = null;
+            try {
+                ({ address, mapImageUri } = await reverseGeocode({ latitude, longitude }));
+            } catch (geocodeError) {
+                // Non-fatal: coordinates alone are enough to continue.
+            }
+            setDraft({ location: { latitude, longitude, address, mapImageUri } });
+        } catch (error) {
+            if (error.message === 'LOCATION_PERMISSION_DENIED') {
+                Alert.alert('Location permission needed', 'Allow location access so we can find service providers near you.');
+            } else {
+                Alert.alert('Could not get your location', 'Make sure location services are on and try again.');
+            }
+        } finally {
+            setIsLocating(false);
+        }
     };
 
     const handleOpenAppointmentPicker = () => {
-        // Re-open showing whatever was last confirmed (or today, if nothing
-        // has been picked yet) rather than always resetting to the current month.
-        if (confirmedAppointmentDay !== null) {
-            setViewedAppointmentYear(confirmedAppointmentYear);
-            setViewedAppointmentMonth(confirmedAppointmentMonth);
-            setDraftAppointmentDay(confirmedAppointmentDay);
-            setDraftAppointmentTime(confirmedAppointmentTime);
+        // Re-open on whatever was last confirmed (or the current month if nothing is picked).
+        if (confirmedDate) {
+            setViewedAppointmentYear(confirmedDate.year);
+            setViewedAppointmentMonth(confirmedDate.monthIndex);
+            setDraftAppointmentDay(confirmedDate.day);
+            setDraftAppointmentTime(draft.preferredTime);
         } else {
             setDraftAppointmentDay(null);
             setDraftAppointmentTime(null);
@@ -201,74 +219,101 @@ const CreateServiceRequest = ({ navigation }) => {
         });
     };
 
+    const isPastDay = (day) => new Date(viewedAppointmentYear, viewedAppointmentMonth, day) < startOfToday;
+
     const handleConfirmAppointment = () => {
-        setConfirmedAppointmentYear(viewedAppointmentYear);
-        setConfirmedAppointmentMonth(viewedAppointmentMonth);
-        setConfirmedAppointmentDay(draftAppointmentDay);
-        setConfirmedAppointmentTime(draftAppointmentTime);
+        // This is the customer's PREFERRED slot, not a confirmed one — it travels with the
+        // draft and lands in SERVICE_REQUEST.preferred_date / preferred_time on submit.
+        setDraft({
+            preferredDate: toIsoDate(viewedAppointmentYear, viewedAppointmentMonth, draftAppointmentDay),
+            preferredTime: draftAppointmentTime,
+        });
         setIsAppointmentModalVisible(false);
-        //
-        // BACKEND-READY: this is the customer's PREFERRED slot, not a
-        // confirmed one — no provider has been matched yet at this point in
-        // the flow, so there's nothing to check this against server-side
-        // yet. It just needs to travel forward with the rest of this draft
-        // (see the file-level note on the two ways to thread that data) and
-        // eventually land in SERVICE_REQUEST.preferred_date /
-        // .preferred_time when the request is actually created in
-        // SubmitServiceRequest.js.
     };
 
-    // "Sep 24, 2026" — for display in the field once a date is picked.
-    const formatAppointmentDate = (year, monthIndex, day) =>
-        day === null ? '' : `${MONTH_NAMES[monthIndex].slice(0, 3)} ${day}, ${year}`;
-
     const handleNext = () => {
-        // TODO: validate the fields above and navigate to the next step of the
-        // service request flow once it exists
-        navigation.navigate('CreateServiceRequestStepTwo');
-        //
-        // NOTE: this handler isn't actually wired to the "Next" button below —
-        // that button calls navigation.navigate('AIDiagnosis') directly, and
-        // neither call forwards { selectedCategory, problemDescription, photo,
-        // location } as route params. Reconcile these before building the
-        // backend integration: pick one target screen name, and either pass
-        // this draft forward as params or write it into the shared draft
-        // store described in the file-level comment above. AIDiagnosis.js and
-        // everything after it currently has no way to receive what was
-        // collected on this screen.
+        if (!draft.categoryKey) {
+            Alert.alert('Pick a category', 'Choose what kind of repair you need.');
+            return;
+        }
+        if (!draft.description.trim()) {
+            Alert.alert('Describe the problem', 'Tell us what is going on so we can diagnose it.');
+            return;
+        }
+        if (isUploadingPhoto) {
+            Alert.alert('Please wait', 'Your photo is still uploading.');
+            return;
+        }
+        if (!draft.location) {
+            Alert.alert('Turn on location', 'We need your location to find service providers near you.');
+            return;
+        }
+        // Everything collected here is already in the draft store; AIDiagnosis reads it from there.
+        navigation.navigate(ROUTES.AI_DIAGNOSIS);
     };
 
     const renderCategoryButton = (category, containerStyle) => {
-        // Gradient on select or hover (hover only fires on platforms/pointers
-        // that support it, e.g. web or a trackpad — it's a no-op on touch-only
-        // devices), plain white otherwise.
-        const isActive = category.key === selectedCategory || category.key === hoveredCategory;
+        // Every category is a gradient pill (matches the design). The selected one is
+        // marked with a navy ring around it; the ring is always reserved (transparent
+        // when not selected) so selecting never shifts the layout.
+        const isSelected = category.key === draft.categoryKey;
 
         return (
             <Pressable
                 key={category.key}
-                style={containerStyle}
+                style={[containerStyle, styles.categoryRing, isSelected && styles.categoryRingSelected]}
                 onPress={() => handleSelectCategory(category.key)}
-                onHoverIn={() => setHoveredCategory(category.key)}
-                onHoverOut={() => setHoveredCategory(null)}
             >
-                {isActive ? (
-                    <LinearGradient
-                        colors={['#0255AF', '#04A5A5']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={styles.categoryButton}
-                    >
-                        <Text style={styles.categoryButtonTextSelected}>{category.label}</Text>
-                    </LinearGradient>
-                ) : (
-                    <View style={[styles.categoryButton, styles.categoryButtonInactive]}>
-                        <Text style={styles.categoryButtonText}>{category.label}</Text>
-                    </View>
-                )}
+                <LinearGradient
+                    colors={['#0255AF', '#04A5A5']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.categoryButton}
+                >
+                    <Text style={styles.categoryButtonText} numberOfLines={2}>
+                        {category.label}
+                    </Text>
+                </LinearGradient>
             </Pressable>
         );
     };
+
+    // Two half-width buttons per row; a leftover odd one gets a full-width row.
+    const renderCategoryRows = () => {
+        const rows = [];
+        for (let i = 0; i < categories.length; i += 2) {
+            const pair = categories.slice(i, i + 2);
+            rows.push(
+                pair.length === 2 ? (
+                    <View key={pair[0].key} style={styles.categoryRow}>
+                        {pair.map((category) => renderCategoryButton(category, styles.categoryHalf))}
+                    </View>
+                ) : (
+                    renderCategoryButton(pair[0], styles.categoryFull)
+                ),
+            );
+        }
+        return rows;
+    };
+
+    const renderCategorySection = () => {
+        if (optionsStatus === 'loading') {
+            return <ActivityIndicator color="#0255AF" style={styles.optionsLoading} />;
+        }
+        if (optionsStatus === 'error') {
+            return (
+                <TouchableOpacity onPress={loadOptions} style={styles.optionsLoading}>
+                    <Text style={styles.turnOnLocationText}>Couldn't load categories. Tap to retry.</Text>
+                    {optionsError ? (
+                        <Text style={styles.optionsErrorText}>{optionsError}</Text>
+                    ) : null}
+                </TouchableOpacity>
+            );
+        }
+        return renderCategoryRows();
+    };
+
+    const canPickAppointment = optionsStatus === 'ready';
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -301,28 +346,29 @@ const CreateServiceRequest = ({ navigation }) => {
                 </Text>
 
                 <Text style={styles.sectionLabel}>Category</Text>
-                <View style={styles.categoryList}>
-                    <View style={styles.categoryRow}>
-                        {renderCategoryButton(CATEGORIES[0], styles.categoryHalf)}
-                        {renderCategoryButton(CATEGORIES[1], styles.categoryHalf)}
-                    </View>
-                    {renderCategoryButton(CATEGORIES[2], styles.categoryFull)}
-                </View>
+                <View style={styles.categoryList}>{renderCategorySection()}</View>
 
                 <Text style={styles.sectionLabel}>Describe the Problem</Text>
                 <TextInput
                     style={styles.problemInput}
                     placeholder="e.g. Screen cracked"
                     placeholderTextColor="#999999"
-                    value={problemDescription}
-                    onChangeText={setProblemDescription}
+                    value={draft.description}
+                    onChangeText={(description) => setDraft({ description })}
                     multiline
                 />
 
                 <Text style={styles.sectionLabel}>Photo (optional)</Text>
                 <TouchableOpacity style={styles.uploadBox} onPress={handleUploadImage} activeOpacity={0.85}>
-                    {photo ? (
-                        <Image source={{ uri: photo }} style={styles.uploadedImage} />
+                    {draft.photoUri ? (
+                        <>
+                            <Image source={{ uri: draft.photoUri }} style={styles.uploadedImage} />
+                            {isUploadingPhoto && (
+                                <View style={styles.uploadOverlay}>
+                                    <ActivityIndicator color="#FFFFFF" />
+                                </View>
+                            )}
+                        </>
                     ) : (
                         <>
                             <Image source={require('../assets/icon_image.png')} style={styles.uploadIcon} />
@@ -334,31 +380,46 @@ const CreateServiceRequest = ({ navigation }) => {
                 <TouchableOpacity
                     style={styles.appointmentBox}
                     onPress={handleOpenAppointmentPicker}
+                    disabled={!canPickAppointment}
                     activeOpacity={0.85}
                 >
                     <Image source={require('../assets/icon_calendar.png')} style={styles.calendarIcon} />
                     <View style={styles.appointmentTextWrap}>
                         <Text style={styles.appointmentTitle}>Preferred Appointment</Text>
                         <Text style={styles.appointmentSubtitle}>
-                            {confirmedAppointmentDay !== null
-                                ? `${formatAppointmentDate(confirmedAppointmentYear, confirmedAppointmentMonth, confirmedAppointmentDay)} · ${confirmedAppointmentTime}`
+                            {confirmedDate && draft.preferredTime
+                                ? `${formatAppointmentDate(confirmedDate)} · ${confirmedTimeLabel}`
                                 : 'Choose a date and time'}
                         </Text>
                     </View>
                 </TouchableOpacity>
 
                 <Text style={styles.sectionLabel}>Location</Text>
-                {location ? (
-                    <Image source={{ uri: location.mapImageUri }} style={styles.locationImage} />
+                {draft.location ? (
+                    <View>
+                        {draft.location.mapImageUri ? (
+                            <Image source={{ uri: draft.location.mapImageUri }} style={styles.locationImage} />
+                        ) : null}
+                        {draft.location.address ? (
+                            <Text style={styles.locationAddressText}>{draft.location.address}</Text>
+                        ) : null}
+                        <TouchableOpacity onPress={handleTurnOnLocation} disabled={isLocating}>
+                            <Text style={styles.turnOnLocationText}>{isLocating ? 'Updating…' : 'Update location'}</Text>
+                        </TouchableOpacity>
+                    </View>
                 ) : (
-                    <TouchableOpacity onPress={handleTurnOnLocation}>
-                        <Text style={styles.turnOnLocationText}>Turn on location</Text>
+                    <TouchableOpacity onPress={handleTurnOnLocation} disabled={isLocating}>
+                        {isLocating ? (
+                            <ActivityIndicator color="#0255AF" />
+                        ) : (
+                            <Text style={styles.turnOnLocationText}>Turn on location</Text>
+                        )}
                     </TouchableOpacity>
                 )}
             </ScrollView>
 
             <View style={styles.footer}>
-                <TouchableOpacity onPress={() => navigation.navigate('AIDiagnosis')}>
+                <TouchableOpacity onPress={handleNext}>
                     <LinearGradient
                         colors={['#0255AF', '#04A5A5']}
                         start={{ x: 0, y: 0 }}
@@ -383,7 +444,6 @@ const CreateServiceRequest = ({ navigation }) => {
                         </TouchableOpacity>
 
                         <Text style={styles.modalTitle}>Preferred Appointment</Text>
-                        
 
                         <Text style={styles.modalSectionLabel}>Select Date</Text>
                         <View style={styles.calendarCard}>
@@ -408,15 +468,24 @@ const CreateServiceRequest = ({ navigation }) => {
                             <View style={styles.daysGrid}>
                                 {appointmentCalendarDays.map((day, index) => {
                                     const isSelected = day !== null && day === draftAppointmentDay;
+                                    const isDisabled = day === null || isPastDay(day);
                                     return (
                                         <TouchableOpacity
                                             key={`${index}-${day}`}
-                                            disabled={day === null}
+                                            disabled={isDisabled}
                                             style={[styles.dayCell, isSelected && styles.dayCellSelected]}
-                                            onPress={() => day !== null && setDraftAppointmentDay(day)}
+                                            onPress={() => setDraftAppointmentDay(day)}
                                         >
                                             {day !== null && (
-                                                <Text style={[styles.dayCellText, isSelected && styles.dayCellTextSelected]}>{day}</Text>
+                                                <Text
+                                                    style={[
+                                                        styles.dayCellText,
+                                                        isSelected && styles.dayCellTextSelected,
+                                                        isDisabled && styles.dayCellTextDisabled,
+                                                    ]}
+                                                >
+                                                    {day}
+                                                </Text>
                                             )}
                                         </TouchableOpacity>
                                     );
@@ -426,10 +495,11 @@ const CreateServiceRequest = ({ navigation }) => {
 
                         <Text style={styles.modalSectionLabel}>Select Time</Text>
                         <View style={styles.timeSlotRow}>
-                            {APPOINTMENT_TIME_SLOTS.map((time) => {
-                                const isSelected = time === draftAppointmentTime;
+                            {timeSlots.length === 0 && <Text style={styles.uploadText}>No time slots available.</Text>}
+                            {timeSlots.map((slot) => {
+                                const isSelected = slot.value === draftAppointmentTime;
                                 return (
-                                    <TouchableOpacity key={time} onPress={() => setDraftAppointmentTime(time)}>
+                                    <TouchableOpacity key={slot.value} onPress={() => setDraftAppointmentTime(slot.value)}>
                                         {isSelected ? (
                                             <LinearGradient
                                                 colors={['#0255AF', '#04A5A5']}
@@ -437,11 +507,11 @@ const CreateServiceRequest = ({ navigation }) => {
                                                 end={{ x: 1, y: 0 }}
                                                 style={styles.timeSlotPill}
                                             >
-                                                <Text style={styles.timeSlotTextSelected}>{time}</Text>
+                                                <Text style={styles.timeSlotTextSelected}>{slot.label}</Text>
                                             </LinearGradient>
                                         ) : (
                                             <View style={[styles.timeSlotPill, styles.timeSlotPillInactive]}>
-                                                <Text style={styles.timeSlotText}>{time}</Text>
+                                                <Text style={styles.timeSlotText}>{slot.label}</Text>
                                             </View>
                                         )}
                                     </TouchableOpacity>
@@ -547,28 +617,28 @@ const styles = StyleSheet.create({
     categoryFull: {
         width: '100%',
     },
+    categoryRing: {
+        borderWidth: 2,
+        borderColor: 'transparent',
+        borderRadius: 14,
+    },
+    categoryRingSelected: {
+        borderColor: '#1B2A8C',
+    },
     categoryButton: {
-        borderRadius: 12,
-        paddingVertical: 16,
-        paddingHorizontal: 12,
+        minHeight: 44,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#B8C4D6',
+        paddingVertical: 10,
+        paddingHorizontal: 10,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    categoryButtonInactive: {
-        backgroundColor: '#FFFFFF',
-        borderWidth: 1,
-        borderColor: '#DDDDDD',
-    },
     categoryButtonText: {
-        fontSize: 15,
-        color: '#333333',
-        fontWeight: '700',
-        textAlign: 'center',
-    },
-    categoryButtonTextSelected: {
-        fontSize: 15,
+        fontSize: 14,
         color: '#FFFFFF',
-        fontWeight: '700',
+        fontWeight: '500',
         textAlign: 'center',
     },
     problemInput: {
@@ -813,6 +883,32 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 16,
         fontWeight: '700',
+    },
+    optionsLoading: {
+        paddingVertical: 16,
+        alignItems: 'center',
+    },
+    uploadOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0, 0, 0, 0.35)',
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    locationAddressText: {
+        fontSize: 12,
+        color: '#555555',
+        marginBottom: 8,
+    },
+    optionsErrorText: {
+        marginTop: 6,
+        fontSize: 11,
+        color: '#B00020',
+        textAlign: 'center',
+        paddingHorizontal: 24,
+    },
+    dayCellTextDisabled: {
+        color: '#CCCCCC',
     },
 });
 

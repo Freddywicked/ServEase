@@ -104,7 +104,7 @@ const getUsers = async (req, res, next) => {
 
     const { data: users, error: usersError } = await supabase
       .from('users')
-      .select('id, name, email, role, phone_number, address, birthdate, created_at, is_disabled')
+      .select('user_id, name, email, role, phone_number, address, birthdate, created_at, is_disabled')
       .neq('role', 'admin')
       .order('created_at', { ascending: false });
     if (usersError) throw fail(`Could not load users: ${usersError.message}`);
@@ -134,9 +134,9 @@ const getUsers = async (req, res, next) => {
     const isCategory = (name) => name in CATEGORY_LABELS || knownLabels.includes(String(name).toLowerCase());
 
     const rows = users.map((user) => {
-      const provider = providerByUser.get(user.id);
+      const provider = providerByUser.get(user.user_id);
       const row = {
-        id: user.id,
+        id: user.user_id,
         name: user.name,
         email: user.email,
         role: provider ? 'Service Provider' : 'Customer',
@@ -147,12 +147,12 @@ const getUsers = async (req, res, next) => {
         birthdate: user.birthdate,
       };
       if (provider) {
-        const specs = specsByProvider.get(user.id) || [];
+        const specs = specsByProvider.get(user.user_id) || [];
         row.serviceCategory = specs
           .filter(isCategory)
           .map((name) => CATEGORY_LABELS[name] || name)
           .join(', ');
-        row.yearsExperience = provider.experience ?? '';
+        row.yearsExperience = provider.years_of_experience ?? '';
         row.servicesOffered = specs.filter((name) => !isCategory(name));
         row.rejectionReason = provider.rejection_reason || null;
       }
@@ -204,14 +204,14 @@ const disableUser = async (req, res, next) => {
   try {
     const { data: target, error: findError } = await supabase
       .from('users')
-      .select('id, role')
-      .eq('id', req.params.id)
+      .select('user_id, role')
+      .eq('user_id', req.params.id)
       .maybeSingle();
     if (findError) throw fail(findError.message);
     if (!target) throw httpError(404, 'User not found.');
     if (target.role === 'admin') throw httpError(400, 'Admin accounts cannot be disabled.');
 
-    const { error } = await supabase.from('users').update({ is_disabled: true }).eq('id', req.params.id);
+    const { error } = await supabase.from('users').update({ is_disabled: true }).eq('user_id', req.params.id);
     if (error) throw fail(error.message);
 
     res.json({ message: 'Account disabled' });
@@ -227,13 +227,13 @@ const enableUser = async (req, res, next) => {
   try {
     const { data: target, error: findError } = await supabase
       .from('users')
-      .select('id')
-      .eq('id', req.params.id)
+      .select('user_id')
+      .eq('user_id', req.params.id)
       .maybeSingle();
     if (findError) throw fail(findError.message);
     if (!target) throw httpError(404, 'User not found.');
 
-    const { error } = await supabase.from('users').update({ is_disabled: false }).eq('id', req.params.id);
+    const { error } = await supabase.from('users').update({ is_disabled: false }).eq('user_id', req.params.id);
     if (error) throw fail(error.message);
 
     res.json({ message: 'Account enabled' });

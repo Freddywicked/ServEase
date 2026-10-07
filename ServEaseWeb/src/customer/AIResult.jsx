@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
+import {
+  clearDraftRequestId,
+  getDraftRequestId,
+  resolveServiceRequest,
+  runAiDiagnosis,
+} from '../api/client';
 import loadingIcon from '../assets/icon_loading.png';
 
 // Same step progress visual as the previous two screens — this screen is step 3 of 4.
@@ -17,81 +23,49 @@ function StepProgress({ activeStep, totalSteps = 4 }) {
   );
 }
 
-// ── HARD-CODED CONTENT: START ─────────────────────────────────────────────
-// The shape below is what the AI diagnosis result is expected to look like once the
-// backend is wired up. It's hard-coded here per the current task so the screen has
-// something real to render, but it should be deleted once the fetch below is live.
-//
-// TODO (backend-ready): replace this constant and the fake delay in the effect below with
-// a real request, e.g.:
-//
-//   useEffect(() => {
-//     let cancelled = false;
-//     async function runDiagnosis() {
-//       try {
-//         // const result = await api.getAiDiagnosis(requestId); // requestId from route state
-//         // if (!cancelled) { setDiagnosis(result); setStatus('done'); }
-//       } catch (err) {
-//         // if (!cancelled) setStatus('error');
-//       }
-//     }
-//     runDiagnosis();
-//     return () => { cancelled = true; };
-//   }, [requestId]);
-//
-// Expected response shape (adjust to match the actual API contract):
-//   {
-//     probableCause: string,
-//     confidencePercent: number,       // 0–100
-//     relatedChecks: string[],         // short chip labels, e.g. ['Power Jack', ...]
-//     troubleshootingSuggestions: [{ title: string, description: string }],
-//   }
-const MOCK_DIAGNOSIS = {
-  probableCause: 'Liquid damage to charging circuit',
-  confidencePercent: 87,
-  relatedChecks: ['Power Jack', 'Motherboard Check', 'Safety Test'],
-  troubleshootingSuggestions: [
-    { title: 'Check your Power Adapter', description: 'Try another charger or wall outlet.' },
-    { title: 'Disconnect Peripherals', description: 'Remove USB devices and other peripherals.' },
-  ],
-};
-// ── HARD-CODED CONTENT: END ───────────────────────────────────────────────
-
-// How long the loading state is shown before the mock result appears. Remove once the
-// real fetch above drives the loading/done transition instead of a timer.
-const MOCK_LOADING_MS = 1600;
-
 export default function AIResult() {
   const navigate = useNavigate();
-
-  // TODO: this screen is reached after AIDiagnosis_Skip.jsx triggers the backend's AI
-  // diagnosis for the current service request. If the request id is needed to fetch the
-  // result, read it here (e.g. from route state / params: const { requestId } = useParams();).
+  const requestId = getDraftRequestId(); // saved by CreateServiceRequest.jsx
 
   const [status, setStatus] = useState('loading'); // 'loading' | 'done' | 'error'
   const [diagnosis, setDiagnosis] = useState(null);
+  const [actionError, setActionError] = useState('');
 
+  // Runs the AI diagnosis on the backend (POST /api/service-requests/:id/ai-diagnosis).
+  // Response: { diagnosis: { probableCause, confidencePercent, relatedChecks, troubleshootingSuggestions } }
+  // The backend saves the result, so calling it again (e.g. a refresh) returns the same one.
   useEffect(() => {
-    // TODO (backend-ready): see the comment block above MOCK_DIAGNOSIS for the real
-    // fetch this timer is standing in for.
-    const timer = setTimeout(() => {
-      setDiagnosis(MOCK_DIAGNOSIS);
-      setStatus('done');
-    }, MOCK_LOADING_MS);
-    return () => clearTimeout(timer);
-  }, []);
+    if (!requestId) return undefined;
+    let cancelled = false;
+    runAiDiagnosis(requestId)
+      .then((data) => {
+        if (cancelled) return;
+        setDiagnosis(data.diagnosis);
+        setStatus('done');
+      })
+      .catch(() => {
+        if (!cancelled) setStatus('error');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [requestId]);
 
-  const handleSolved = () => {
-    // TODO: call the backend to close out this request as resolved, e.g.
-    // await api.updateServiceRequest(requestId, { status: 'resolved_by_ai' });
-    navigate('/customer/dashboard');
+  if (!requestId) return <Navigate to="/customer/requests/new" replace />;
+
+  const handleSolved = async () => {
+    setActionError('');
+    try {
+      await resolveServiceRequest(requestId);
+      clearDraftRequestId();
+      navigate('/customer/dashboard');
+    } catch (err) {
+      setActionError(err.message || "Couldn't close this request. Please try again.");
+    }
   };
 
-  const handleFindProviders = () => {
-    // TODO: carry the diagnosis along so a matched provider can see it, e.g.
-    // navigate('/customer/providers', { state: { requestId, diagnosis } });
-    navigate('/customer/providers');
-  };
+  // The provider will see this diagnosis together with the request, so nothing needs to be carried along.
+  const handleFindProviders = () => navigate('/customer/requests/new/recommend-providers');
 
   return (
     <CustomerSidebar>
@@ -203,6 +177,11 @@ export default function AIResult() {
                 Find Service Providers
               </button>
             </div>
+            {actionError && (
+              <p role="alert" className="m-0 mt-3 font-[Roboto] text-[13px] text-[#B91C1C]">
+                {actionError}
+              </p>
+            )}
           </>
         )}
       </div>

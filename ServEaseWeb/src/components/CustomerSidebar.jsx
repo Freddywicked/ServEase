@@ -11,19 +11,18 @@ import gearIconWhite from '../assets/icon_gear_white.png';
 import gearIconBlack from '../assets/icon_gear_black.png';
 import requestIconWhite from '../assets/icon_request_white.png';
 import requestIconBlack from '../assets/icon_request.png';
-import chatIconWhite from '../assets/icon_chatbubble_white.png';
-import chatIconBlack from '../assets/icon_chatbubble.png';
 import historyIconWhite from '../assets/icon_history_white.png';
 import historyIconBlack from '../assets/icon_history.png';
 import hamburgerIcon from '../assets/icon_hamburger.png';
-import bellIcon from '../assets/icon_ringbell.png';
 import dropdownIcon from '../assets/icon_dropdown.png';
+import MessagingWidget from './MessagingWidget';
+import Notifications from './Notifications';
 
 const EXPANDED_WIDTH = 229;
 const COLLAPSED_WIDTH = 84;
 const AUTO_COLLAPSE_QUERY = '(max-width: 900px)';
 
-// Fallback shown when no logged-in customer data is available yet (matches the Figma design).
+// Fallback shown when no logged-in customer data is available yet.
 const DEFAULT_INITIALS = 'CG';
 
 // Screens of the "create service request" flow. Creating a request starts from the Dashboard,
@@ -38,6 +37,8 @@ const CREATE_REQUEST_PATHS = [
 const isCreateRequestFlow = (pathname) =>
   CREATE_REQUEST_PATHS.some((path) => pathname.startsWith(path));
 
+// Track Requests stays highlighted for everything under /customer/requests, including the
+// quotation page and the payment screen (/customer/requests/:requestId/payment).
 const isNavItemActive = (item, pathname) => {
   const inCreateFlow = isCreateRequestFlow(pathname);
   if (item.to === '/customer/dashboard') return pathname.startsWith(item.to) || inCreateFlow;
@@ -45,6 +46,8 @@ const isNavItemActive = (item, pathname) => {
   return pathname.startsWith(item.to);
 };
 
+// Matches the Figma sidebar: Dashboard, Find Service Providers, Track Requests, History.
+// Messages is not a tab: it is the floating message button (MessagingWidget) at the bottom-right.
 const NAV_ITEMS = [
   {
     label: 'Dashboard',
@@ -65,12 +68,6 @@ const NAV_ITEMS = [
     iconInactive: requestIconBlack,
   },
   {
-    label: 'Messages',
-    to: '/customer/messages',
-    iconActive: chatIconWhite,
-    iconInactive: chatIconBlack,
-  },
-  {
     label: 'History',
     to: '/customer/history',
     iconActive: historyIconWhite,
@@ -78,7 +75,7 @@ const NAV_ITEMS = [
   },
 ];
 
-export default function CustomerSidebar({ children, initials = DEFAULT_INITIALS }) {
+export default function CustomerSidebar({ children, initials }) {
   const [collapsed, setCollapsed] = useState(
     () => typeof window !== 'undefined' && window.matchMedia(AUTO_COLLAPSE_QUERY).matches
   );
@@ -88,6 +85,8 @@ export default function CustomerSidebar({ children, initials = DEFAULT_INITIALS 
   const menuRef = useRef(null);
   const { user, setUser } = useAuth();
   const firstName = user?.name?.trim().split(/\s+/)[0] || '';
+  // Figma shows the first letter of the customer's name (e.g. "J" for Juan).
+  const avatarInitials = initials || (firstName ? firstName[0].toUpperCase() : DEFAULT_INITIALS);
   const width = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH;
 
   // Responsive: collapse the sidebar automatically on small screens, expand again on large ones.
@@ -115,17 +114,17 @@ export default function CustomerSidebar({ children, initials = DEFAULT_INITIALS 
     };
   }, [menuOpen]);
 
+  // Name + email in the dropdown open the customer's profile.
+  const handleProfileClick = () => {
+    setMenuOpen(false);
+    navigate('/customer/profile');
+  };
+
   const handleLogout = () => {
     setMenuOpen(false);
     logout(); // removes the saved login token
     setUser(null); // clears the logged-in user in the app
     navigate('/login', { replace: true });
-  };
-
-  const handleNotificationsClick = () => {
-    // TODO: open a notifications panel once the backend notifications endpoint exists
-    // (e.g. GET /api/customer/notifications).
-    console.log('Notifications clicked');
   };
 
   return (
@@ -145,14 +144,7 @@ export default function CustomerSidebar({ children, initials = DEFAULT_INITIALS 
 
         {/* Upper right: notification bell, user avatar, name + role, dropdown */}
         <div className="mr-4 flex flex-none items-center gap-4 sm:mr-[46px] sm:gap-[33px]">
-          <button
-            type="button"
-            onClick={handleNotificationsClick}
-            aria-label="Notifications"
-            className="flex cursor-pointer items-center justify-center border-none bg-transparent p-0"
-          >
-            <img src={bellIcon} alt="" className="h-[27px] w-[27px]" />
-          </button>
+          <Notifications viewer="customer" />
 
           <div ref={menuRef} className="relative">
             <button
@@ -163,7 +155,7 @@ export default function CustomerSidebar({ children, initials = DEFAULT_INITIALS 
               className="flex cursor-pointer items-center gap-3 border-none bg-transparent p-0"
             >
               <span className="flex h-[50px] w-[50px] flex-none items-center justify-center rounded-full bg-[#0255AF] font-[Inter] text-[24px] font-bold leading-[29px] text-white">
-                {initials}
+                {avatarInitials}
               </span>
 
               <span className="hidden flex-col items-start text-left sm:flex">
@@ -183,12 +175,19 @@ export default function CustomerSidebar({ children, initials = DEFAULT_INITIALS 
                 role="menu"
                 className="absolute right-0 top-full z-50 mt-2 box-border w-[260px] rounded-[4px] border border-black/15 bg-white px-5 py-4 font-[Inter] shadow-[0_4px_12px_rgba(0,0,0,0.08)]"
               >
-                <p className="m-0 truncate text-[18px] font-bold leading-[22px] text-black">
-                  {user?.name}
-                </p>
-                <p className="m-0 mb-4 truncate text-[16px] leading-[24px] text-[#5B5959]">
-                  {user?.email}
-                </p>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={handleProfileClick}
+                  className="m-0 mb-4 block w-full cursor-pointer border-none bg-transparent p-0 text-left"
+                >
+                  <span className="block truncate text-[18px] font-bold leading-[22px] text-black">
+                    {user?.name}
+                  </span>
+                  <span className="block truncate text-[16px] font-normal leading-[24px] text-[#5B5959]">
+                    {user?.email}
+                  </span>
+                </button>
                 <button
                   type="button"
                   role="menuitem"
@@ -219,7 +218,7 @@ export default function CustomerSidebar({ children, initials = DEFAULT_INITIALS 
                 title={collapsed ? item.label : undefined}
                 className={`mb-[14px] box-border flex items-center gap-[10px] rounded-[10px] p-[10px] no-underline ${
                   collapsed ? 'justify-center' : 'justify-start'
-                } ${active ? 'bg-gradient-to-r from-[#005FCA] to-[#04A5A5]' : ''}`}
+                } ${active ? 'bg-gradient-to-r from-[#0255AF] to-[#04A5A5]' : ''}`}
               >
                 <img
                   src={active ? item.iconActive : item.iconInactive}
@@ -262,6 +261,9 @@ export default function CustomerSidebar({ children, initials = DEFAULT_INITIALS 
 
         <main className="min-w-0 flex-1 overflow-y-auto bg-white">{children}</main>
       </div>
+
+      {/* Floating messages button + chat popups (bottom-right of every customer screen) */}
+      <MessagingWidget viewer="customer" />
     </div>
   );
 }

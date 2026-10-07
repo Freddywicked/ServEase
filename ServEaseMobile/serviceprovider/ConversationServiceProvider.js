@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
-import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import { getConversationMessages, sendConversationMessage } from '../api/providerWork_api';
+import { formatDateTime } from '../utils/provider_formatters';
 
 const ACTIVE_TAB = 'Chat';
 
@@ -10,44 +13,86 @@ const TAB_ITEMS = [
     { key: 'Requests', label: 'Requests', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
     { key: 'Jobs', label: 'Jobs', activeIcon: require('../assets/icon_gear_white.png'), inactiveIcon: require('../assets/icon_gear_colored.png') },
     { key: 'Chat', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'Earnings', label: 'Earnings', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
+    { key: 'Earnings', label: 'Earnings', activeIcon: require('../assets/icon_dollar_white.png'), inactiveIcon: require('../assets/icon_dollar_colored.png') },
     { key: 'ServiceProviderProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
 ];
 
-// Hardcoded thread — backend isn't integrated yet. Swap this out for a live
-// message list (e.g. a Firestore onSnapshot on this conversation's messages
-// subcollection) once that's wired up; the shape to match is:
-// { id, text, sender ('provider' | 'customer'), timestamp }
-const INITIAL_MESSAGES = [
-    {
-        id: 'm1',
-        text: 'Hi! Matatagalan pa to since sa Manila pa kukuning yung screen.',
-        sender: 'provider',
-        timestamp: 'Jun 24 9:12 AM',
-    },
-];
+// How often the open thread checks for new messages (ms). Replace the polling with a
+// realtime subscription (Supabase Realtime / Firestore onSnapshot) once that is enabled.
+const POLL_INTERVAL_MS = 5000;
 
 const ConversationServiceProvider = ({ navigation, route }) => {
-    const contactName = route?.params?.contactName || 'Nick Duran';
-    const jobTitle = route?.params?.jobTitle || 'Laptop Screen Repair';
-    const isOnline = route?.params?.isOnline ?? true;
+    const conversationId = route?.params?.conversationId;
+    const contactName = route?.params?.contactName || 'Conversation';
+    const jobTitle = route?.params?.jobTitle || '';
+    const isOnline = route?.params?.isOnline ?? false;
 
-    const [messages, setMessages] = useState(INITIAL_MESSAGES);
+    // Messages come from GET /conversations/:id/messages.
+    const [messages, setMessages] = useState([]);
     const [messageText, setMessageText] = useState('');
+    const [loading, setLoading] = useState(true);
+    const [loadFailed, setLoadFailed] = useState(false);
+    const [sending, setSending] = useState(false);
+    const scrollRef = useRef(null);
+
+    const loadMessages = useCallback(async () => {
+        if (!conversationId) {
+            setLoadFailed(true);
+            return;
+        }
+        try {
+            const data = await getConversationMessages(conversationId);
+            setMessages(data?.messages ?? []);
+            setLoadFailed(false);
+        } catch (error) {
+            // Keep the last known messages. A 401 is already handled by api/client.
+            setLoadFailed(true);
+        }
+    }, [conversationId]);
+
+    // Load when the screen is focused and keep checking for new messages while it is.
+    useFocusEffect(
+        useCallback(() => {
+            loadMessages().finally(() => setLoading(false));
+            const timer = setInterval(loadMessages, POLL_INTERVAL_MS);
+            return () => clearInterval(timer);
+        }, [loadMessages]),
+    );
+
+    useEffect(() => {
+        scrollRef.current?.scrollToEnd({ animated: true });
+    }, [messages.length]);
 
     const handleBack = () => {
         navigation.goBack();
     };
 
-    const handleSendMessage = () => {
+    const handleSendMessage = async () => {
         const trimmed = messageText.trim();
-        if (!trimmed) return;
+        if (!trimmed || sending || !conversationId) return;
+
+        // Show the message right away, then swap in the saved one from the backend.
+        const tempId = `temp-${Date.now()}`;
         setMessages((prev) => [
             ...prev,
-            { id: String(prev.length + 1), text: trimmed, sender: 'provider', timestamp: 'Just now' },
+            { id: tempId, text: trimmed, sender: 'provider', createdAt: new Date().toISOString() },
         ]);
         setMessageText('');
-        // TODO: call the send-message endpoint (or Firestore write) once the backend exists
+        setSending(true);
+        try {
+            const data = await sendConversationMessage(conversationId, trimmed);
+            if (data?.message) {
+                setMessages((prev) => prev.map((item) => (item.id === tempId ? data.message : item)));
+            } else {
+                loadMessages();
+            }
+        } catch (error) {
+            setMessages((prev) => prev.filter((item) => item.id !== tempId));
+            setMessageText(trimmed);
+            Alert.alert('Message not sent', 'Please check your connection and try again.');
+        } finally {
+            setSending(false);
+        }
     };
 
     const handleTabPress = (tabKey) => {
@@ -73,27 +118,40 @@ const ConversationServiceProvider = ({ navigation, route }) => {
                             <Text style={styles.statusBadgeText}>{isOnline ? 'Online' : 'Offline'}</Text>
                         </View>
                     </View>
-                    <Text style={styles.jobSubtitle}>{jobTitle}</Text>
+                    {jobTitle ? <Text style={styles.jobSubtitle}>{jobTitle}</Text> : null}
                     <View style={styles.cardDivider} />
 
-                    <ScrollView style={styles.messagesScroll} contentContainerStyle={styles.messagesContent}>
-                        {messages.map((message) => {
-                            const isOutgoing = message.sender === 'provider';
-                            return (
-                                <View
-                                    key={message.id}
-                                    style={isOutgoing ? styles.messageRowOutgoing : styles.messageRowIncoming}
-                                >
-                                    <View style={[styles.messageBubble, isOutgoing ? styles.bubbleOutgoing : styles.bubbleIncoming]}>
-                                        <Text style={isOutgoing ? styles.bubbleTextOutgoing : styles.bubbleTextIncoming}>
-                                            {message.text}
-                                        </Text>
+                    {loading ? (
+                        <ActivityIndicator style={styles.loader} color="#0255AF" />
+                    ) : (
+                        <ScrollView
+                            ref={scrollRef}
+                            style={styles.messagesScroll}
+                            contentContainerStyle={styles.messagesContent}
+                        >
+                            {loadFailed && messages.length === 0 ? (
+                                <TouchableOpacity onPress={loadMessages}>
+                                    <Text style={styles.errorBannerText}>Couldn't load messages. Tap to retry.</Text>
+                                </TouchableOpacity>
+                            ) : null}
+                            {messages.map((message) => {
+                                const isOutgoing = message.sender === 'provider';
+                                return (
+                                    <View
+                                        key={message.id}
+                                        style={isOutgoing ? styles.messageRowOutgoing : styles.messageRowIncoming}
+                                    >
+                                        <View style={[styles.messageBubble, isOutgoing ? styles.bubbleOutgoing : styles.bubbleIncoming]}>
+                                            <Text style={isOutgoing ? styles.bubbleTextOutgoing : styles.bubbleTextIncoming}>
+                                                {message.text}
+                                            </Text>
+                                        </View>
+                                        <Text style={styles.timestampText}>{formatDateTime(message.createdAt)}</Text>
                                     </View>
-                                    <Text style={styles.timestampText}>{message.timestamp}</Text>
-                                </View>
-                            );
-                        })}
-                    </ScrollView>
+                                );
+                            })}
+                        </ScrollView>
+                    )}
                 </View>
 
                 <View style={styles.inputRow}>
@@ -104,7 +162,7 @@ const ConversationServiceProvider = ({ navigation, route }) => {
                         value={messageText}
                         onChangeText={setMessageText}
                     />
-                    <TouchableOpacity style={styles.sendButton} onPress={handleSendMessage}>
+                    <TouchableOpacity style={styles.sendButton} onPress={handleSendMessage} disabled={sending}>
                         <Text style={styles.sendButtonText}>Send</Text>
                     </TouchableOpacity>
                 </View>
@@ -318,6 +376,21 @@ const styles = StyleSheet.create({
         fontSize: 11,
         color: '#FFFFFF',
         fontWeight: '600',
+    },
+    loader: {
+        marginTop: 30,
+    },
+    errorBanner: {
+        borderWidth: 1,
+        borderColor: '#E0E0E0',
+        borderRadius: 12,
+        backgroundColor: '#F9F9F9',
+        padding: 14,
+        marginBottom: 16,
+    },
+    errorBannerText: {
+        fontSize: 13,
+        color: '#555555',
     },
 });
 

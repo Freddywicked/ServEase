@@ -25,11 +25,10 @@ const CustomerProfile = ({ navigation }) => {
     const name = user?.name || 'Your Name';
     const contactText = [user?.email, user?.phone_number].filter(Boolean).join(' | ');
 
-    // `provider` is non-null once the user has an application/account on file, whether
-    // it's still pending or already verified. If "Switch Account" should only appear once
-    // the application is actually verified (not just submitted), change this to
-    // `provider?.verification_status === VERIFIED_STATUS` instead.
-    const hasProviderAccount = Boolean(provider);
+    // "Switch Account" only appears once the service provider application has been
+    // approved. Until then (no application yet, or still pending), the customer
+    // sees "Apply as Service Provider" instead.
+    const hasProviderAccount = provider?.verification_status === VERIFIED_STATUS;
 
     const handleTabPress = (tabKey) => {
         if (tabKey === ACTIVE_TAB) return;
@@ -43,8 +42,9 @@ const CustomerProfile = ({ navigation }) => {
     };
 
     const handleApplyAsServiceProvider = () => {
-        // TODO: point this to the actual service-provider application screen once it exists
-        navigation.navigate('ApplyServiceProvider');
+        // First step of the application flow:
+        // ServiceProviderServiceCategory -> ServiceProviderVerificationRequirements
+        navigation.navigate('ServiceProviderServiceCategory');
     };
 
     const handleSwitchAccount = () => {
@@ -98,7 +98,7 @@ const CustomerProfile = ({ navigation }) => {
                         </TouchableOpacity>
                     ) : (
                         <TouchableOpacity style={styles.menuItem} onPress={handleApplyAsServiceProvider}>
-                            <Image source={require('../assets/icon_resume.png')} style={styles.menuIcon} />
+                            <Image source={require('../assets/icon_form.png')} style={styles.menuIcon} />
                             <Text style={styles.menuLabel}>Apply as Service Provider</Text>
                         </TouchableOpacity>
                     )}

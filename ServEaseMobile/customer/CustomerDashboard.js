@@ -1,18 +1,24 @@
-import React, { useEffect, useState } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Image, Text, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/auth_context';
+import { ROUTES } from '../navigation/routes';
+import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
+import { getActiveRepair, getNotifications } from '../api/servicerequest_api';
+import { formatTimeAgo } from '../utils/formatters';
 
-const ACTIVE_TAB = 'CustomerHome';
+const ACTIVE_TAB = ROUTES.CUSTOMER_HOME;
+const NOTIFICATION_LIMIT = 5; // how many recent notifications the dashboard card shows
 
 // Bottom tab definitions — each tab carries both its active (white) and
 // inactive (colored) icon so the same list can drive the bar regardless of
 // which tab is currently active.
 const TAB_ITEMS = [
-    { key: 'CustomerHome', label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
+    { key: ROUTES.CUSTOMER_HOME, label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
     { key: 'FindServiceProvider', label: 'Find', activeIcon: require('../assets/icon_gear_white.png'), inactiveIcon: require('../assets/icon_gear_colored.png') },
-    { key: 'Track', label: 'Track', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
+    { key: ROUTES.TRACK, label: 'Track', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
     { key: 'MessageCustomer', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
     { key: 'History', label: 'History', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
     { key: 'CustomerProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
@@ -25,16 +31,39 @@ const CustomerDashboard = ({ navigation, route }) => {
     // toRegistrationPayload); `provider` is null until an application exists, and then
     // looks like { verification_status }, e.g. 'pending' or 'verified'.
     const { user, provider, refreshUser } = useAuth();
+    const resetDraft = useServiceRequestDraftStore((state) => state.resetDraft);
     const customerName = user?.name || 'Customer';
     const applicationStatus = provider?.verification_status ?? null; // null | 'pending' | 'verified' | 'rejected'
 
     const [activeRepair, setActiveRepair] = useState(null);
     const [notifications, setNotifications] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [loadFailed, setLoadFailed] = useState(false);
+
+    // Loads the logged-in customer's active repair + recent notifications from the backend.
+    // Runs every time the dashboard regains focus, so a request just sent from the
+    // Create Service Request flow shows up as soon as the customer lands back here.
+    const loadDashboardData = useCallback(async () => {
+        setLoadFailed(false);
+        const [repairResult, notificationsResult] = await Promise.allSettled([
+            getActiveRepair(),
+            getNotifications({ limit: NOTIFICATION_LIMIT }),
+        ]);
+        if (repairResult.status === 'fulfilled') setActiveRepair(repairResult.value);
+        if (notificationsResult.status === 'fulfilled') setNotifications(notificationsResult.value);
+        if (repairResult.status === 'rejected' || notificationsResult.status === 'rejected') setLoadFailed(true);
+        setIsLoading(false);
+    }, []);
+
+    // Location is collected per-request in the Create Service Request flow
+    // (CreateServiceRequest.js -> draft.location), not here on the dashboard.
+    useFocusEffect(
+        useCallback(() => {
+            loadDashboardData();
+        }, [loadDashboardData]),
+    );
 
     useEffect(() => {
-        // TODO: fetch the logged-in customer's active repair status and notifications
-        // from the backend once the API is integrated.
-
         // Coming straight from submitting a Service Provider application —
         // ServiceProviderVerificationRequirements.js already calls refreshUser() right
         // after a successful submit, so this is just a safety net in case this screen
@@ -60,14 +89,33 @@ const CustomerDashboard = ({ navigation, route }) => {
         // ---------------------------------------------------------------------
     }, [route?.params?.pendingApproval, applicationStatus, refreshUser]);
 
+    // ---------------------------------------------------------------------
+    // PROVIDER COMMUNICATION (comment block): live updates when the provider responds.
+    // Instead of waiting for the next focus, subscribe to the customer's active request so
+    // the "Active Repair" card and notifications refresh the moment the provider submits a
+    // QUOTATION or declines. Uncomment once serviceRequestApi.js's Realtime helpers are
+    // enabled (needs your mobile Supabase client).
+    //
+    // useEffect(() => {
+    //     if (!activeRepair?.requestId) return undefined;
+    //     const unsubscribe = subscribeToServiceRequest(activeRepair.requestId, () => {
+    //         loadDashboardData();
+    //     });
+    //     return unsubscribe;
+    // }, [activeRepair?.requestId, loadDashboardData]);
+    //
+    // (import { subscribeToServiceRequest } from '../api/serviceRequestApi';)
+    // ---------------------------------------------------------------------
+
     const handleCreateServiceRequest = () => {
-        // TODO: point this to the actual create-service-request screen once it exists
-        navigation.navigate('CreateServiceRequest');
+        // Always start a new request from a clean draft.
+        resetDraft();
+        navigation.navigate(ROUTES.CREATE_SERVICE_REQUEST);
     };
 
     const handleNotificationsPress = () => {
         // TODO: point this to a full notifications screen once it exists
-        navigation.navigate('Notifications');
+        navigation.navigate(ROUTES.NOTIFICATIONS);
     };
 
     const handleTabPress = (tabKey) => {
@@ -75,6 +123,12 @@ const CustomerDashboard = ({ navigation, route }) => {
         // TODO: confirm these screen names once the rest of the tabs are built
         navigation.navigate(tabKey);
     };
+
+    const renderCardMessage = (message) => (
+        <TouchableOpacity onPress={loadDashboardData} disabled={!loadFailed}>
+            <Text style={styles.emptyStateText}>{message}</Text>
+        </TouchableOpacity>
+    );
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -98,7 +152,7 @@ const CustomerDashboard = ({ navigation, route }) => {
                 )}
 
                 <Text style={styles.sectionLabel}>QUICK START</Text>
-                <TouchableOpacity onPress={() => navigation.navigate('CreateServiceRequest')}>
+                <TouchableOpacity onPress={handleCreateServiceRequest}>
                     <LinearGradient
                         colors={['#0255AF', '#04A5A5']}
                         start={{ x: 0, y: 0 }}
@@ -113,24 +167,30 @@ const CustomerDashboard = ({ navigation, route }) => {
 
                 <Text style={styles.sectionLabel}>ACTIVE REPAIR</Text>
                 <View style={styles.card}>
-                    {activeRepair ? (
-                        <Text style={styles.activeRepairText}>{activeRepair.status}</Text>
+                    {isLoading ? (
+                        <ActivityIndicator color="#0255AF" />
+                    ) : activeRepair ? (
+                        <TouchableOpacity onPress={() => navigation.navigate(ROUTES.TRACK)}>
+                            <Text style={styles.activeRepairText}>{activeRepair.statusLabel ?? activeRepair.requestStatus}</Text>
+                        </TouchableOpacity>
                     ) : (
-                        <Text style={styles.emptyStateText}>No Active Repair</Text>
+                        renderCardMessage(loadFailed ? "Couldn't load. Tap to retry." : 'No Active Repair')
                     )}
                 </View>
 
                 <Text style={styles.sectionLabel}>NOTIFICATIONS</Text>
                 <View style={styles.card}>
-                    {notifications.length > 0 ? (
+                    {isLoading ? (
+                        <ActivityIndicator color="#0255AF" />
+                    ) : notifications.length > 0 ? (
                         notifications.map((item) => (
                             <View key={item.id} style={styles.notificationItem}>
                                 <Text style={styles.notificationMessage}>{item.message}</Text>
-                                <Text style={styles.notificationTime}>{item.timeAgo}</Text>
+                                <Text style={styles.notificationTime}>{formatTimeAgo(item.createdAt)}</Text>
                             </View>
                         ))
                     ) : (
-                        <Text style={styles.emptyStateText}>No notifications yet</Text>
+                        renderCardMessage(loadFailed ? "Couldn't load. Tap to retry." : 'No notifications yet')
                     )}
                 </View>
             </ScrollView>

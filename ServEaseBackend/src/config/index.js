@@ -54,6 +54,24 @@ const config = {
     // the code is printed in the terminal so you can keep testing.
     allowFallback: nodeEnv !== 'production',
   },
+
+  googleMaps: {
+    // Server-side Google Maps Platform key, used for reverse geocoding and the
+    // Static Maps snapshot the apps show instead of a live map. Empty means
+    // /location/reverse-geocode falls back to OpenStreetMap for the address and
+    // returns mapImageUri: null (the apps already handle that).
+    apiKey: env.GOOGLE_MAPS_API_KEY || '',
+  },
+
+  ai: {
+    // Gemini (Google AI). AI_API_URL is the full generateContent endpoint, model
+    // included (e.g. .../models/gemini-flash-latest:generateContent). An empty
+    // apiKey means utils/ai_diagnosis.js uses its keyword-based fallback instead.
+    apiKey: env.AI_API_KEY || '',
+    apiUrl:
+      env.AI_API_URL ||
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent',
+  },
 };
 
 module.exports = config;

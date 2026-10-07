@@ -3,22 +3,45 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
 // ----------------------------------------------------------------------------
-// SERVER ADDRESS: pick ONE option. It must match the backend's port (5000).
+// SERVER ADDRESS. The backend's port must match (ServEaseBackend/.env -> PORT=5000).
 //
-//  A) Android emulator:                        'http://10.0.2.2:5000/api'
-//  B) Emulator or USB phone + `adb reverse tcp:5000 tcp:5000`:
-//                                              'http://localhost:5000/api'
-//  C) Physical phone on the same Wi-Fi:        'http://192.168.x.x:5000/api'  (ipconfig -> IPv4)
-//  iOS simulator:                              'http://localhost:5000/api'
+//  DEVELOPMENT (__DEV__ === true — `npx react-native run-android`, Metro running):
 //
-// Test: open `${BASE_URL}/health` in the PHONE's browser. If it doesn't load there,
-// the app can't reach it either.
+//   A) Physical phone connected by USB (DEFAULT below):
+//        1. Run once after plugging the phone in:  adb reverse tcp:5000 tcp:5000
+//        2. The app then reaches the backend at 'http://localhost:5000/api'
+//           through the USB cable — works even when the phone can't ping the PC
+//           (firewall / different Wi-Fi network), which is the case on this setup.
+//   B) Phone on the SAME Wi-Fi as the PC (no USB needed):
+//        'http://192.168.100.248:5000/api'  (PC's IPv4 from `ipconfig`; needs a
+//        Windows Firewall inbound rule for TCP 5000)
+//   C) Android emulator: 'http://10.0.2.2:5000/api'   iOS simulator: localhost
+//
+//  RELEASE (__DEV__ === false — an installed APK/AAB):
+//   There is no Metro and no adb. The app must use a PUBLIC, HTTPS address of the
+//   deployed backend, e.g. 'https://api.yourdomain.com/api'. Plain http:// is
+//   blocked on Android 9+ release builds unless usesCleartextTraffic is true
+//   (already set in android/app/src/main/AndroidManifest.xml), but HTTPS is the
+//   correct choice for a shipped app.
+//
+// Test from the PHONE's browser: open `${BASE_URL}/health`. If it doesn't load
+// there, the app can't reach it either.
 // ----------------------------------------------------------------------------
-const BASE_URL = Platform.select({
-  android: 'http://192.168.100.248:5000/api',
+const DEV_API_URL = Platform.select({
+  android: 'http://localhost:5000/api', // A) USB + `adb reverse tcp:5000 tcp:5000`
+  // android: 'http://192.168.100.248:5000/api', // B) same Wi-Fi as the PC
+  // android: 'http://10.0.2.2:5000/api',        // C) Android emulator
   ios: 'http://localhost:5000/api',
   default: 'http://localhost:5000/api',
 });
+
+// Deployed backend on Render (verified live at /api/health). Works from any
+// network, so a release APK needs neither USB nor the PC to be on. Must end
+// with /api — every request path below (e.g. '/health', '/auth/login') is
+// appended directly to this value.
+const PROD_API_URL = 'https://servease-vvgp.onrender.com/api';
+
+const BASE_URL = __DEV__ ? DEV_API_URL : PROD_API_URL;
 
 const TOKEN_KEY = 'token';
 const TIMEOUT_MS = 15000;

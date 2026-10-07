@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { Navigate } from 'react-router-dom';
 import ServiceProviderSidebar from '../components/ServiceProviderSidebar.jsx';
-import { me } from '../api/client';
+import { getProviderAvailability, me, setProviderAvailability } from '../api/client';
 import { useAuth } from '../context/auth_context';
 
 // Shown under the welcome heading, based on the provider application's status in the backend.
@@ -99,15 +99,29 @@ function CalendarModal({ onClose }) {
   const [selectedDate, setSelectedDate] = useState(today);
   const [selectedSlot, setSelectedSlot] = useState(null);
 
-  // TODO: replace with the provider's saved availability fetched from the backend
-  // (e.g. GET /api/provider/availability?month=YYYY-MM), keyed by date, then by time slot:
-  // { '2026-09-09': { '10:00 AM': 'unavailable' } }. Any date/slot missing from this map
-  // is treated as available. Re-fetch whenever the visible month changes.
+  // The provider's saved availability from the backend (GET /api/providers/availability), keyed
+  // by date, then by time slot: { '2026-09-09': { '10:00 AM': 'unavailable' } }. Any date/slot
+  // missing from this map is treated as available. Re-fetched whenever the visible month changes.
   const [availability, setAvailability] = useState({});
   const [isSaving, setIsSaving] = useState(false);
+  const [calendarError, setCalendarError] = useState('');
 
   useEffect(() => {
-    // TODO: fetch availability for { viewYear, viewMonth }, then call setAvailability({...})
+    let cancelled = false;
+    const from = toDateKey(new Date(viewYear, viewMonth, 1));
+    const to = toDateKey(new Date(viewYear, viewMonth + 1, 0));
+    getProviderAvailability({ from, to })
+      .then((saved) => {
+        if (cancelled) return;
+        setCalendarError('');
+        setAvailability((prev) => ({ ...prev, ...saved }));
+      })
+      .catch((err) => {
+        if (!cancelled) setCalendarError(err.message || "Couldn't load your availability.");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [viewYear, viewMonth]);
 
   const selectedDateKey = toDateKey(selectedDate);
@@ -133,13 +147,17 @@ function CalendarModal({ onClose }) {
   const handleMarkUnavailable = async () => {
     if (!selectedSlot) return;
     setIsSaving(true);
+    setCalendarError('');
     try {
-      // TODO: call the backend to persist this, e.g.
-      // await api.setAvailability({ date: selectedDateKey, slot: selectedSlot, status: 'unavailable' });
+      // Saved on the backend first; the profile page reads the same data.
+      await setProviderAvailability({ date: selectedDateKey, slot: selectedSlot, status: 'unavailable' });
       setAvailability((prev) => ({
         ...prev,
         [selectedDateKey]: { ...prev[selectedDateKey], [selectedSlot]: 'unavailable' },
       }));
+      setSelectedSlot(null);
+    } catch (err) {
+      setCalendarError(err.message || "Couldn't save your availability. Please try again.");
     } finally {
       setIsSaving(false);
     }
@@ -282,6 +300,11 @@ function CalendarModal({ onClose }) {
             {isSaving ? 'Saving…' : 'Mark as Unavailable'}
           </button>
         </div>
+        {calendarError && (
+          <p role="alert" className="m-0 mt-2 text-right font-[Roboto] text-[12px] text-[#B91C1C]">
+            {calendarError}
+          </p>
+        )}
       </div>
     </div>
   );

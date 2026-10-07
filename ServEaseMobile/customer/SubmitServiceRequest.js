@@ -2,42 +2,47 @@ import React from 'react';
 import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
+import { ROUTES } from '../navigation/routes';
+import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
 
 /* ============================================================================
- * BACKEND-READY — SubmitServiceRequest (step 4 of 4 — confirmation)
+ * SubmitServiceRequest (step 4 of 4 — confirmation)
  * ----------------------------------------------------------------------------
- * This screen currently assumes the request was already sent (it's pure
- * confirmation UI, no `route.params`/props are even read). Depending on where
- * the actual POST /service-requests call ends up living (see the note in
- * RecommendServiceProvider.js's "Request Quotation" button), this screen is
- * either:
- *   (a) just a static success message shown after that POST already
- *       succeeded on the previous screen, or
- *   (b) where the POST itself fires, using the fully assembled draft passed
- *       in via route.params — in which case this needs a loading/error state
- *       (the request could fail, the provider could be unavailable by the
- *       time it's confirmed, etc.) rather than only ever showing success.
- * Pick one; right now there's no `useState`/`useEffect` here to support
- * either, so it silently assumes (a).
+ * Pure confirmation UI. The POST /service-requests call already succeeded on
+ * RecommendServiceProvider (which then `replace`d itself with this screen), so
+ * the request_id and provider name are read from the shared draft store.
+ * Done / the close button clear the draft and return to the dashboard.
  * ========================================================================== */
 
 const TOTAL_STEPS = 4;
 const CURRENT_STEP = 4;
 
 const SubmitServiceRequest = ({ navigation }) => {
-    const handleClose = () => {
-        navigation.goBack();
-    };
+    const providerName = useServiceRequestDraftStore((state) => state.providerName);
+    const requestId = useServiceRequestDraftStore((state) => state.submittedRequestId);
+    const resetDraft = useServiceRequestDraftStore((state) => state.resetDraft);
 
     const handleDone = () => {
-        navigation.navigate('CustomerHome');
+        resetDraft();
+        navigation.navigate(ROUTES.CUSTOMER_HOME);
+
+        // ---------------------------------------------------------------------
+        // PROVIDER COMMUNICATION (comment block — customer side)
+        // The provider now has to act (submit a QUOTATION or decline). To have the
+        // dashboard's "Active Repair" card and notifications update the moment they do,
+        // start a Supabase Realtime subscription on this request. It is best started once
+        // app-wide (e.g. in auth_context after login) so it survives leaving this screen;
+        // shown here for the new request_id:
         //
-        // BACKEND-READY: once request_id exists, this is a good point to
-        // start a Supabase Realtime subscription (or make sure one is
-        // already running app-wide) on that request's row, so
-        // CustomerDashboard's "Active Repair" card picks up the moment the
-        // provider responds with a QUOTATION — the provider is now the one
-        // this flow is waiting on.
+        // import { subscribeToServiceRequest } from '../api/serviceRequestApi';
+        //
+        // const unsubscribe = subscribeToServiceRequest(requestId, (updatedRequest) => {
+        //     // updatedRequest.request_status: 'quotation_sent' | 'declined' | ...
+        //     // -> refresh the dashboard (getActiveRepair / getNotifications) or
+        //     //    navigate to RequestDetails to review the quotation.
+        // });
+        // // call unsubscribe() on logout or once the request reaches a final status.
+        // ---------------------------------------------------------------------
     };
 
     return (
@@ -45,7 +50,7 @@ const SubmitServiceRequest = ({ navigation }) => {
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.headerRow}>
                     <Text style={styles.headerTitle}>Creating Service Request</Text>
-                    <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
+                    <TouchableOpacity onPress={handleDone} style={styles.closeButton}>
                         <Image source={require('../assets/icon_close.png')} style={styles.closeIcon} />
                     </TouchableOpacity>
                 </View>
@@ -70,13 +75,18 @@ const SubmitServiceRequest = ({ navigation }) => {
                     <Image source={require('../assets/icon_bigcheck.png')} style={styles.successCheck} />
                 </View>
 
-                <Text style={styles.successTitle}>Sent to the Service Provider!</Text>
+                <Text style={styles.successTitle}>
+                    {providerName ? `Sent to ${providerName}!` : 'Sent to the Service Provider!'}
+                </Text>
                 <Text style={styles.successDescription}>
                     This service provider will review your request and send a pre-repair quotation. You'll be
                     notified the moment it arrives.
                 </Text>
+                {!!requestId && (
+                    <Text style={styles.referenceText}>Reference: {String(requestId).slice(-8).toUpperCase()}</Text>
+                )}
 
-                <TouchableOpacity onPress={() => navigation.navigate('CustomerDashboard')}>
+                <TouchableOpacity onPress={handleDone}>
                     <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.doneButton}>
                         <Text style={styles.doneButtonText}>Done</Text>
                     </LinearGradient>
@@ -163,7 +173,7 @@ const styles = StyleSheet.create({
         color: '#666666',
         textAlign: 'center',
         lineHeight: 19,
-        marginBottom: 40,
+        marginBottom: 12,
         paddingHorizontal: 12,
     },
     doneButton: {
@@ -175,6 +185,12 @@ const styles = StyleSheet.create({
         fontSize: 16,
         color: '#FFFFFF',
         fontWeight: '700',
+    },
+    referenceText: {
+        fontSize: 12,
+        color: '#999999',
+        textAlign: 'center',
+        marginBottom: 28,
     },
 });
 

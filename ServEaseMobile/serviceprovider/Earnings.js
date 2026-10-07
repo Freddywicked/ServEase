@@ -1,6 +1,9 @@
-import React from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import { getProviderEarnings } from '../api/providerWork_api';
+import { formatPeso, formatShortDate } from '../utils/provider_formatters';
 
 const ACTIVE_TAB = 'Earnings';
 
@@ -10,29 +13,43 @@ const TAB_ITEMS = [
     { key: 'IncomingServiceRequest', label: 'Requests', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
     { key: 'Jobs', label: 'Jobs', activeIcon: require('../assets/icon_gear_white.png'), inactiveIcon: require('../assets/icon_gear_colored.png') },
     { key: 'MessageServiceProvider', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'Earnings', label: 'Earnings', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
+    { key: 'Earnings', label: 'Earnings', activeIcon: require('../assets/icon_dollar_white.png'), inactiveIcon: require('../assets/icon_dollar_colored.png') },
     { key: 'ServiceProviderProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
 ];
 
-// Hardcoded — backend isn't integrated yet. Swap these two figures out for a
-// fetched summary (sum of this week's completed payments / sum of pending
-// payments) once the API exists.
-const EARNINGS_SUMMARY = {
-    thisWeek: '₱8,150',
-    pendingPayment: '₱1,300',
-};
-
-// Hardcoded per transaction — backend isn't integrated yet. The design left
-// these rows blank (placeholder boxes), so this is a representative shape;
-// swap it for a fetched transaction history once the API exists. Shape to
-// match: { id, requestNumber, customerName, date, amount }
-const RECENT_TRANSACTIONS = [
-    { id: '1', requestNumber: 'SR-0001', customerName: 'Nikki Pie', date: 'Jun 27', amount: '₱1,500' },
-    { id: '2', requestNumber: 'SR-0002', customerName: 'Dominic Alcantara', date: 'Jun 24', amount: '₱2,300' },
-    { id: '3', requestNumber: 'SR-0003', customerName: 'Gabriela Lim', date: 'Jun 20', amount: '₱950' },
-];
-
 const Earnings = ({ navigation }) => {
+    // Summary and transactions come from GET /provider/earnings
+    // (see api/providerWorkApi.js for the shape). null summary -> cards show '–'.
+    const [summary, setSummary] = useState(null);
+    const [transactions, setTransactions] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [loadFailed, setLoadFailed] = useState(false);
+
+    const loadEarnings = useCallback(async () => {
+        try {
+            const data = await getProviderEarnings();
+            setSummary(data?.summary ?? null);
+            setTransactions(data?.transactions ?? []);
+            setLoadFailed(false);
+        } catch (error) {
+            // Keep the last known figures. A 401 is already handled by api/client.
+            setLoadFailed(true);
+        }
+    }, []);
+
+    useFocusEffect(
+        useCallback(() => {
+            loadEarnings().finally(() => setLoading(false));
+        }, [loadEarnings]),
+    );
+
+    const handleRefresh = async () => {
+        setRefreshing(true);
+        await loadEarnings();
+        setRefreshing(false);
+    };
+
     const handleTabPress = (tabKey) => {
         if (tabKey === ACTIVE_TAB) return;
         // TODO: confirm these screen names once the rest of the tabs are built
@@ -46,38 +63,53 @@ const Earnings = ({ navigation }) => {
 
     return (
         <SafeAreaView style={styles.safeArea}>
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+            <ScrollView
+                contentContainerStyle={styles.scrollContent}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+            >
                 <Text style={styles.headerTitle}>Earnings</Text>
+
+                {loadFailed && (
+                    <TouchableOpacity style={styles.errorBanner} onPress={loadEarnings}>
+                        <Text style={styles.errorBannerText}>Couldn't load your earnings. Tap to retry.</Text>
+                    </TouchableOpacity>
+                )}
 
                 <View style={styles.statsRow}>
                     <View style={[styles.statCard, styles.statCardSpacing]}>
-                        <Text style={styles.statAmount}>{EARNINGS_SUMMARY.thisWeek}</Text>
+                        <Text style={styles.statAmount}>{formatPeso(summary?.thisWeek)}</Text>
                         <Text style={styles.statLabel}>This week</Text>
                     </View>
                     <View style={styles.statCard}>
-                        <Text style={styles.statAmount}>{EARNINGS_SUMMARY.pendingPayment}</Text>
+                        <Text style={styles.statAmount}>{formatPeso(summary?.pendingPayment)}</Text>
                         <Text style={styles.statLabel}>Pending Payment</Text>
                     </View>
                 </View>
 
                 <Text style={styles.sectionLabel}>RECENT TRANSACTIONS</Text>
 
-                {RECENT_TRANSACTIONS.map((transaction) => (
-                    <TouchableOpacity
-                        key={transaction.id}
-                        style={styles.transactionRow}
-                        onPress={() => handleTransactionPress(transaction.id)}
-                        activeOpacity={0.85}
-                    >
-                        <View style={styles.transactionTextWrap}>
-                            <Text style={styles.transactionTitle} numberOfLines={1}>
-                                Request #{transaction.requestNumber} · {transaction.customerName}
-                            </Text>
-                            <Text style={styles.transactionDate}>{transaction.date}</Text>
-                        </View>
-                        <Text style={styles.transactionAmount}>{transaction.amount}</Text>
-                    </TouchableOpacity>
-                ))}
+                {loading ? (
+                    <ActivityIndicator style={styles.loader} color="#0255AF" />
+                ) : transactions.length > 0 ? (
+                    transactions.map((transaction) => (
+                        <TouchableOpacity
+                            key={transaction.id}
+                            style={styles.transactionRow}
+                            onPress={() => handleTransactionPress(transaction.id)}
+                            activeOpacity={0.85}
+                        >
+                            <View style={styles.transactionTextWrap}>
+                                <Text style={styles.transactionTitle} numberOfLines={1}>
+                                    Request #{transaction.requestNumber} · {transaction.customerName}
+                                </Text>
+                                <Text style={styles.transactionDate}>{formatShortDate(transaction.date)}</Text>
+                            </View>
+                            <Text style={styles.transactionAmount}>{formatPeso(transaction.amount)}</Text>
+                        </TouchableOpacity>
+                    ))
+                ) : (
+                    !loadFailed && <Text style={styles.emptyStateText}>No transactions yet</Text>
+                )}
             </ScrollView>
 
             <View style={styles.tabBar}>
@@ -221,6 +253,27 @@ const styles = StyleSheet.create({
         fontSize: 11,
         color: '#FFFFFF',
         fontWeight: '600',
+    },
+    loader: {
+        marginTop: 30,
+    },
+    errorBanner: {
+        borderWidth: 1,
+        borderColor: '#E0E0E0',
+        borderRadius: 12,
+        backgroundColor: '#F9F9F9',
+        padding: 14,
+        marginBottom: 16,
+    },
+    errorBannerText: {
+        fontSize: 13,
+        color: '#555555',
+    },
+    emptyStateText: {
+        fontSize: 13,
+        color: '#999999',
+        textAlign: 'center',
+        marginTop: 20,
     },
 });
 

@@ -151,11 +151,11 @@ function ApplicationSentModal({ onGoToDashboard }) {
 
 // Step 2 of 2 of the Service Provider application (after ServiceCategory).
 // Step 1's answers arrive through router state and are sent to the backend together
-// with the uploaded images when the provider submits.
+// with the uploaded images when the provider submits (mapping to the backend fields is in api/client.js).
 export default function VerificationRequirements() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, loading } = useAuth();
+  const { user, loading, refreshUser } = useAuth();
 
   const [validId, setValidId] = useState([]);
   const [selfie, setSelfie] = useState([]);
@@ -202,11 +202,18 @@ export default function VerificationRequirements() {
     setIsSubmitting(true);
     setError(null);
     try {
+      // client.js turns step 1's answers + the images into the multipart request that
+      // POST /api/providers/apply expects (see submitProviderApplication there).
       await submitProviderApplication(location.state, {
         validId: validId[0],
         selfie: selfie[0],
         supportingDocs,
       });
+
+      // Re-fetch the logged-in user so the pending application shows up (same as the mobile app).
+      // Skipped quietly if useAuth() has no refreshUser on web.
+      await refreshUser?.();
+
       setIsSubmitted(true);
     } catch (err) {
       setError(err.message || "Couldn't submit your application. Please try again.");

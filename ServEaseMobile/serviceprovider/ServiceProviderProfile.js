@@ -14,7 +14,7 @@ const TAB_ITEMS = [
     { key: 'IncomingServiceRequest', label: 'Requests', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
     { key: 'Jobs', label: 'Jobs', activeIcon: require('../assets/icon_gear_white.png'), inactiveIcon: require('../assets/icon_gear_colored.png') },
     { key: 'MessageServiceProvider', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'Earnings', label: 'Earnings', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
+    { key: 'Earnings', label: 'Earnings', activeIcon: require('../assets/icon_dollar_white.png'), inactiveIcon: require('../assets/icon_dollar_colored.png') },
     { key: 'ServiceProviderProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
 ];
 
@@ -31,7 +31,10 @@ const ServiceProviderProfile = ({ navigation }) => {
     // `user` and `provider` ({ verification_status }) come from auth_context.
     // The provider's own details come from GET /api/providers/me:
     //   { verification_status, years_of_experience, profile_photo,
-    //     offers_home_services, specializations: [] }
+    //     offers_home_services, specializations: [],
+    //     company_name, company_address, availability }
+    // `availability` is a display string (e.g. "Mon-Fri, 8AM-6PM") that the
+    // provider sets from the calendar on ServiceProviderDashboard.
     const { user, provider, refreshUser, signOut } = useAuth();
     const [profile, setProfile] = useState(null);
     const [switching, setSwitching] = useState(false);
@@ -43,6 +46,9 @@ const ServiceProviderProfile = ({ navigation }) => {
     const name = user?.name || 'Service Provider';
     const role = categories[0] ? `${categories[0]} Provider` : 'Service Provider';
     const years = profile?.years_of_experience;
+    const companyName = profile?.company_name;
+    const companyAddress = profile?.company_address;
+    const availability = profile?.availability;
     const photoUri = /^https?:\/\//.test(profile?.profile_photo || '') ? profile.profile_photo : null;
 
     const loadProfile = useCallback(async () => {
@@ -155,14 +161,26 @@ const ServiceProviderProfile = ({ navigation }) => {
                 <View style={styles.detailsBlock}>
                     {specializations.length > 0 && (
                         <Text style={styles.detailLine}>
-                            <Text style={styles.detailLabel}>Specialities: </Text>
+                            <Text style={styles.detailLabel}>Specialties: </Text>
                             {specializations.join(', ')}
                         </Text>
                     )}
-                    {user?.address ? (
+                    {availability ? (
                         <Text style={styles.detailLine}>
-                            <Text style={styles.detailLabel}>Location: </Text>
-                            {user.address}
+                            <Text style={styles.detailLabel}>Available: </Text>
+                            {availability}
+                        </Text>
+                    ) : null}
+                    {companyAddress ? (
+                        <Text style={styles.detailLine}>
+                            <Text style={styles.detailLabel}>Company Address: </Text>
+                            {companyAddress}
+                        </Text>
+                    ) : null}
+                    {companyName ? (
+                        <Text style={styles.detailLine}>
+                            <Text style={styles.detailLabel}>Company Name: </Text>
+                            {companyName}
                         </Text>
                     ) : null}
                     {profile?.offers_home_services != null && (

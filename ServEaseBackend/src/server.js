@@ -28,8 +28,7 @@ app.use(cors({ origin: allowedOrigins })); // browsers only; the mobile app send
 app.use(express.json({ limit: '1mb' }));
 if (config.nodeEnv !== 'production') app.use(morgan('dev'));
 
-app.use('/api', apiRoutes);
-app.use('/api/providers', require('./routes/provider_routes'));
+app.use('/api', apiRoutes); // /auth, /users, /providers (+ /requests), /service-requests
 app.use('/api/admin', require('./routes/admin_routes'));
 
 app.use((req, res, next) => {
@@ -47,7 +46,7 @@ const lanAddresses = () =>
 
 if (require.main === module) {
   const server = app.listen(config.port, '0.0.0.0', () => {
-    console.log(`ServEase API running at http://localhost:${config.port}/api`);
+    console.log(`ServEase API running at https://servease-vvgp.onrender.com/`);
     console.log(`  Android emulator : http://10.0.2.2:${config.port}/api`);
     lanAddresses().forEach((ip) => console.log(`  Phone on Wi-Fi   : http://${ip}:${config.port}/api`));
     console.log(`  Health check     : add /health to any of the above`);

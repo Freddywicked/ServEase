@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
+import { clearDraftRequestId } from '../api/client';
 import bigEllipse from '../assets/icon_bigellipse.png';
 import bigCheck from '../assets/icon_bigcheck.png';
 
@@ -28,50 +29,14 @@ const CONFIRMATION_MESSAGE =
 export default function SubmitServiceRequest() {
   const navigate = useNavigate();
 
-  // TODO (backend-ready): this screen is reached after the "Submit Service Request" button
-  // in RecommendServiceProvider.jsx (or "Choose this Service Provider" in ServiceProviderDetails.jsx).
-  // The submission itself should happen there (or on mount here) and its result be passed
-  // along via route state, e.g.:
-  //
-  //   // const created = await api.submitServiceRequest({ requestId, providerIds, diagnosis });
-  //   // navigate('/customer/request-submitted', { state: { requestId: created.id, provider: created.provider } });
-  //
-  // Then read it here:
-  //
-  //   // const { state } = useLocation();            // import { useLocation } from 'react-router-dom'
-  //   // const { requestId, provider } = state ?? {};
-  //
-  // Optional: guard against direct access / refresh when there is no submitted request:
-  //
-  //   // useEffect(() => {
-  //   //   if (!requestId) navigate('/customer/dashboard', { replace: true });
-  //   // }, [requestId, navigate]);
-  //
-  // Optional: confirm the request status from the backend instead of trusting route state:
-  //
-  //   // const [request, setRequest] = useState(null);
-  //   // useEffect(() => {
-  //   //   let cancelled = false;
-  //   //   async function loadRequest() {
-  //   //     try {
-  //   //       const result = await api.getServiceRequest(requestId);
-  //   //       if (!cancelled) setRequest(result);
-  //   //     } catch (err) {
-  //   //       // handle error (e.g. show a toast)
-  //   //     }
-  //   //   }
-  //   //   loadRequest();
-  //   //   return () => { cancelled = true; };
-  //   // }, [requestId]);
-  //
-  // The "you'll be notified" message assumes the backend sends a notification (in-app bell
-  // and/or email/push) when the provider's pre-repair quotation arrives. Wire that up
-  // server-side, e.g. via websocket / polling on GET /notifications.
+  // The request was sent to the chosen provider(s) by RecommendServiceProvider.jsx
+  // (submitServiceRequest(requestId, providerIds) -> POST /api/service-requests/:id/submit).
+  // It now appears in each provider's Incoming Service Requests list.
+  // The "you'll be notified" message relies on the backend creating a notification when the
+  // provider's quotation arrives (see Notifications.jsx).
 
   const handleDone = () => {
-    // TODO (backend-ready): clear any in-progress request draft (context/store/localStorage)
-    // before leaving the flow, e.g. resetServiceRequestDraft();
-    // Route: customer dashboard (adjust if the route name differs).
+    clearDraftRequestId(); // the flow is finished, forget the draft request id
     navigate('/customer/dashboard');
   };
 

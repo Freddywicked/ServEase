@@ -26,6 +26,8 @@ const HOME_REPAIR_SERVICES = [
 
 const ServiceProviderServiceCategory = ({ navigation, route }) => {
     const [selectedCategories, setSelectedCategories] = useState([]);
+    const [companyName, setCompanyName] = useState('');
+    const [companyAddress, setCompanyAddress] = useState('');
     const [homeRepairServices, setHomeRepairServices] = useState([]);
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const [otherServiceInput, setOtherServiceInput] = useState('');
@@ -83,6 +85,14 @@ const ServiceProviderServiceCategory = ({ navigation, route }) => {
             Alert.alert('Service Category Required', 'Please select at least one service category.');
             return;
         }
+        if (!companyName.trim()) {
+            Alert.alert('Company Name Required', 'Please enter your company or work name. Write "Freelance" if you have none.');
+            return;
+        }
+        if (!companyAddress.trim()) {
+            Alert.alert('Work Address Required', 'Please enter your work address.');
+            return;
+        }
         if (isHomeRepairSelected && homeRepairServices.length === 0 && finalOtherServices.length === 0) {
             Alert.alert('Services Required', 'Please select the home repair services you provide.');
             return;
@@ -104,6 +114,8 @@ const ServiceProviderServiceCategory = ({ navigation, route }) => {
             ...route.params,
             serviceCategory: {
                 selectedCategories,
+                companyName: companyName.trim(),
+                companyAddress: companyAddress.trim(),
                 // Empty array unless Home Repair Services is checked.
                 homeRepairServices: isHomeRepairSelected ? homeRepairServices : [],
                 otherServices: finalOtherServices,
@@ -142,6 +154,32 @@ const ServiceProviderServiceCategory = ({ navigation, route }) => {
                 {SERVICE_CATEGORIES.map((category) =>
                     renderCheckbox(category, category, selectedCategories.includes(category), () => toggleCategory(category))
                 )}
+
+                <View style={styles.companyField}>
+                    <Text style={styles.label}>COMPANY NAME</Text>
+                    <TextInput
+                        style={styles.input}
+                        placeholder="Company/Work Name (write Freelance if none)"
+                        placeholderTextColor="#B0B0B0"
+                        value={companyName}
+                        onChangeText={setCompanyName}
+                        autoCapitalize="words"
+                        returnKeyType="next"
+                    />
+                </View>
+
+                <View style={styles.companyField}>
+                    <Text style={styles.label}>WORK ADDRESS</Text>
+                    <TextInput
+                        style={styles.input}
+                        placeholder="Work Address"
+                        placeholderTextColor="#B0B0B0"
+                        value={companyAddress}
+                        onChangeText={setCompanyAddress}
+                        autoCapitalize="words"
+                        returnKeyType="next"
+                    />
+                </View>
 
                 <Text style={styles.subLabel}>WHAT SERVICES DO YOU PROVIDE?</Text>
 
@@ -306,6 +344,10 @@ const styles = StyleSheet.create({
     field: {
         marginTop: 14,
         marginBottom: 16,
+    },
+    companyField: {
+        marginTop: 10,
+        marginBottom: 8,
     },
     label: {
         fontSize: 11,

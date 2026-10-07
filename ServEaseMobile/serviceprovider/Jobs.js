@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
-import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import { getProviderJobs } from '../api/providerWork_api';
+import { formatPeso, formatShortDate } from '../utils/provider_formatters';
 
 const ACTIVE_TAB = 'Jobs';
 
@@ -11,39 +14,45 @@ const TAB_ITEMS = [
     { key: 'IncomingServiceRequests', label: 'Requests', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
     { key: 'Jobs', label: 'Jobs', activeIcon: require('../assets/icon_gear_white.png'), inactiveIcon: require('../assets/icon_gear_colored.png') },
     { key: 'MessageServiceProvider', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'Earnings', label: 'Earnings', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
+    { key: 'Earnings', label: 'Earnings', activeIcon: require('../assets/icon_dollar_white.png'), inactiveIcon: require('../assets/icon_dollar_colored.png') },
     { key: 'ServiceProviderProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
 ];
 
 const FILTER_OPTIONS = ['All', 'Active', 'Pending', 'Done'];
 
-// Total segments drawn in each job's stage-progress bar. Individual segments
-// aren't labeled in the design (aside from the current one), so this only
-// controls how many bars are drawn and how far the done/current fill reaches.
-const STEP_COUNT = 4;
-
-// Hardcoded per job — backend isn't integrated yet. Swap this out for a
-// fetched list once the API exists; the shape to match is:
-// { id, requestNumber, customerName, date, status, statusLabel, aiSuggestion,
-//   currentStepIndex, currentStepLabel, progressPaymentPaid }
-const JOBS = [
-    {
-        id: '1',
-        requestNumber: 'SR-0001',
-        customerName: 'Nikki Pie',
-        date: 'Jun 27',
-        status: 'Active',
-        statusLabel: 'In Progress',
-        aiSuggestion: 'AI suggests LCD problem (96% confidence)',
-        currentStepIndex: 1,
-        currentStepLabel: 'Repairing',
-        progressPaymentPaid: 500,
-    },
-];
-
 const Jobs = ({ navigation }) => {
+    // Jobs come from GET /provider/jobs (see api/providerWorkApi.js for the shape).
+    const [jobs, setJobs] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [loadFailed, setLoadFailed] = useState(false);
     const [selectedFilter, setSelectedFilter] = useState('All');
     const [searchQuery, setSearchQuery] = useState('');
+
+    const loadJobs = useCallback(async () => {
+        try {
+            const data = await getProviderJobs();
+            setJobs(data?.jobs ?? []);
+            setLoadFailed(false);
+        } catch (error) {
+            // Keep the last known jobs. A 401 is already handled by api/client.
+            setLoadFailed(true);
+        }
+    }, []);
+
+    // Load on mount and whenever the screen regains focus, so a status update
+    // pushed from JobUpdateStatus shows up when the provider comes back.
+    useFocusEffect(
+        useCallback(() => {
+            loadJobs().finally(() => setLoading(false));
+        }, [loadJobs]),
+    );
+
+    const handleRefresh = async () => {
+        setRefreshing(true);
+        await loadJobs();
+        setRefreshing(false);
+    };
 
     const handleFilterPress = (filter) => {
         setSelectedFilter(filter);
@@ -64,21 +73,24 @@ const Jobs = ({ navigation }) => {
     };
 
     const statusFiltered = selectedFilter === 'All'
-        ? JOBS
-        : JOBS.filter((job) => job.status === selectedFilter);
+        ? jobs
+        : jobs.filter((job) => job.status === selectedFilter);
 
     const query = searchQuery.trim().toLowerCase();
     const visibleJobs = query
         ? statusFiltered.filter((job) =>
-              job.requestNumber.toLowerCase().includes(query) ||
-              job.customerName.toLowerCase().includes(query) ||
-              job.currentStepLabel.toLowerCase().includes(query)
+              String(job.requestNumber || '').toLowerCase().includes(query) ||
+              String(job.customerName || '').toLowerCase().includes(query) ||
+              String(job.currentStepLabel || '').toLowerCase().includes(query)
           )
         : statusFiltered;
 
     return (
         <SafeAreaView style={styles.safeArea}>
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+            <ScrollView
+                contentContainerStyle={styles.scrollContent}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+            >
                 <Text style={styles.headerTitle}>Active Jobs</Text>
 
                 <TextInput
@@ -106,66 +118,87 @@ const Jobs = ({ navigation }) => {
                     })}
                 </View>
 
-                {visibleJobs.length > 0 ? (
-                    visibleJobs.map((job) => (
-                        <View key={job.id} style={styles.jobCard}>
-                            <View style={styles.cardTopRow}>
-                                <Text style={styles.requestNumber}>Request #{job.requestNumber}</Text>
-                                <View style={styles.statusBadge}>
-                                    <Text style={styles.statusBadgeText}>{job.statusLabel}</Text>
+                {loadFailed && (
+                    <TouchableOpacity style={styles.errorBanner} onPress={loadJobs}>
+                        <Text style={styles.errorBannerText}>Couldn't load your jobs. Tap to retry.</Text>
+                    </TouchableOpacity>
+                )}
+
+                {loading ? (
+                    <ActivityIndicator style={styles.loader} color="#0255AF" />
+                ) : visibleJobs.length > 0 ? (
+                    visibleJobs.map((job) => {
+                        const stepCount = job.stages?.length || 0;
+                        return (
+                            <View key={job.id} style={styles.jobCard}>
+                                <View style={styles.cardTopRow}>
+                                    <Text style={styles.requestNumber}>Request #{job.requestNumber}</Text>
+                                    {job.statusLabel ? (
+                                        <View style={styles.statusBadge}>
+                                            <Text style={styles.statusBadgeText}>{job.statusLabel}</Text>
+                                        </View>
+                                    ) : null}
+                                </View>
+                                <Text style={styles.jobSubtitle}>
+                                    {job.customerName}{job.createdAt ? ` | ${formatShortDate(job.createdAt)}` : ''}
+                                </Text>
+
+                                {job.aiSuggestion ? (
+                                    <View style={styles.aiBanner}>
+                                        <Image source={require('../assets/icon_lightning.png')} style={styles.aiIcon} />
+                                        <Text style={styles.aiBannerText}>{job.aiSuggestion}</Text>
+                                    </View>
+                                ) : null}
+
+                                <View style={styles.divider} />
+
+                                {stepCount > 0 && (
+                                    <View style={styles.stepRow}>
+                                        {job.stages.map((stage, index) => {
+                                            let segmentStyle = styles.stepSegmentUpcoming;
+                                            if (index < job.currentStepIndex) segmentStyle = styles.stepSegmentDone;
+                                            else if (index === job.currentStepIndex) segmentStyle = styles.stepSegmentCurrent;
+                                            return (
+                                                <View
+                                                    key={`${stage}-${index}`}
+                                                    style={[
+                                                        styles.stepSegmentBase,
+                                                        segmentStyle,
+                                                        index === stepCount - 1 && styles.stepSegmentLast,
+                                                    ]}
+                                                />
+                                            );
+                                        })}
+                                    </View>
+                                )}
+                                {job.currentStepLabel ? (
+                                    <Text style={styles.currentStepLabel}>Current Step: {job.currentStepLabel}</Text>
+                                ) : null}
+                                {Number(job.progressPaymentPaid) > 0 ? (
+                                    <Text style={styles.progressPaymentText}>
+                                        Progress Payment {formatPeso(job.progressPaymentPaid)} already paid by customer
+                                    </Text>
+                                ) : null}
+
+                                <View style={styles.actionRow}>
+                                    <TouchableOpacity
+                                        style={[styles.actionButton, styles.actionButtonSpacing]}
+                                        onPress={() => handleUpdateStatus(job.id)}
+                                    >
+                                        <Text style={styles.actionButtonText}>Update Status</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={styles.actionButton}
+                                        onPress={() => handleNotifyAdditionalParts(job.id)}
+                                    >
+                                        <Text style={styles.actionButtonText}>Notify Additional Parts</Text>
+                                    </TouchableOpacity>
                                 </View>
                             </View>
-                            <Text style={styles.jobSubtitle}>{job.customerName} | {job.date}</Text>
-
-                            {job.aiSuggestion ? (
-                                <View style={styles.aiBanner}>
-                                    <Image source={require('../assets/icon_lightning.png')} style={styles.aiIcon} />
-                                    <Text style={styles.aiBannerText}>{job.aiSuggestion}</Text>
-                                </View>
-                            ) : null}
-
-                            <View style={styles.divider} />
-
-                            <View style={styles.stepRow}>
-                                {Array.from({ length: STEP_COUNT }).map((_, index) => {
-                                    let segmentStyle = styles.stepSegmentUpcoming;
-                                    if (index < job.currentStepIndex) segmentStyle = styles.stepSegmentDone;
-                                    else if (index === job.currentStepIndex) segmentStyle = styles.stepSegmentCurrent;
-                                    return (
-                                        <View
-                                            key={index}
-                                            style={[
-                                                styles.stepSegmentBase,
-                                                segmentStyle,
-                                                index === STEP_COUNT - 1 && styles.stepSegmentLast,
-                                            ]}
-                                        />
-                                    );
-                                })}
-                            </View>
-                            <Text style={styles.currentStepLabel}>Current Step: {job.currentStepLabel}</Text>
-                            <Text style={styles.progressPaymentText}>
-                                Progress Payment ₱{job.progressPaymentPaid} already paid by customer
-                            </Text>
-
-                            <View style={styles.actionRow}>
-                                <TouchableOpacity
-                                    style={[styles.actionButton, styles.actionButtonSpacing]}
-                                    onPress={() => handleUpdateStatus(job.id)}
-                                >
-                                    <Text style={styles.actionButtonText}>Update Status</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={styles.actionButton}
-                                    onPress={() => handleNotifyAdditionalParts(job.id)}
-                                >
-                                    <Text style={styles.actionButtonText}>Notify Additional Parts</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    ))
+                        );
+                    })
                 ) : (
-                    <Text style={styles.emptyStateText}>No jobs found</Text>
+                    !loadFailed && <Text style={styles.emptyStateText}>No jobs found</Text>
                 )}
             </ScrollView>
 
@@ -409,6 +442,21 @@ const styles = StyleSheet.create({
         fontSize: 11,
         color: '#FFFFFF',
         fontWeight: '600',
+    },
+    loader: {
+        marginTop: 30,
+    },
+    errorBanner: {
+        borderWidth: 1,
+        borderColor: '#E0E0E0',
+        borderRadius: 12,
+        backgroundColor: '#F9F9F9',
+        padding: 14,
+        marginBottom: 16,
+    },
+    errorBannerText: {
+        fontSize: 13,
+        color: '#555555',
     },
 });
 

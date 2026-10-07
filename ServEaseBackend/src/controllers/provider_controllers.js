@@ -30,7 +30,11 @@ const parseBody = (body) => {
   // The app sends 'yes' / 'no' (also tolerate true / 'true').
   const offersHomeServices = ['yes', 'true', '1'].includes(String(body.offersHomeServices).toLowerCase());
 
-  return { selectedCategories, homeRepairServices, otherServices, yearsOfExperience, offersHomeServices };
+  // Work/company details — service_providers.company_name / company_address.
+  const companyName = body.companyName ? String(body.companyName).trim() : '';
+  const companyAddress = body.companyAddress ? String(body.companyAddress).trim() : '';
+
+  return { selectedCategories, homeRepairServices, otherServices, yearsOfExperience, offersHomeServices, companyName, companyAddress };
 };
 
 // GET /api/providers/me — the logged-in user's own provider profile.
@@ -43,11 +47,8 @@ const me = asyncHandler(async (req, res) => {
 // POST /api/providers/apply — req.user comes from the `authenticate`
 // middleware, never from the request body, so no one can submit an
 // application on someone else's behalf.
-//
-// REQUIRES (run once in Supabase):
-//   ALTER TABLE service_providers ADD COLUMN offers_home_services boolean DEFAULT false;
 const apply = asyncHandler(async (req, res) => {
-  const { selectedCategories, homeRepairServices, otherServices, yearsOfExperience, offersHomeServices } =
+  const { selectedCategories, homeRepairServices, otherServices, yearsOfExperience, offersHomeServices, companyName, companyAddress } =
     parseBody(req.body);
 
   if (!req.files?.validId?.[0]) throw new ApiError(400, 'A valid ID is required');
@@ -66,15 +67,31 @@ const apply = asyncHandler(async (req, res) => {
 
   // Home repair services only count when the Home Repair category is selected.
   const homeServices = selectedCategories.includes(HOME_REPAIR_CATEGORY) ? homeRepairServices : [];
-  const specializations = [...new Set([...selectedCategories, ...homeServices, ...otherServices])];
+
+  // One SERVICE_PROVIDER_SPECIALIZATION row per selected category/service:
+  // service_category is the parent category, specialization_name the category or
+  // service itself (custom "other" services have no parent category -> null).
+  const seen = new Set();
+  const specializations = [
+    ...selectedCategories.map((name) => ({ service_category: name, specialization_name: name })),
+    ...homeServices.map((name) => ({ service_category: HOME_REPAIR_CATEGORY, specialization_name: name })),
+    ...otherServices.map((name) => ({ service_category: null, specialization_name: name })),
+  ].filter((s) => {
+    const key = s.specialization_name.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 
   const application = await Provider.create({
     user_id: req.user.user_id,
-    experience: yearsOfExperience,
+    company_name: companyName || null,
+    company_address: companyAddress || null,
+    years_of_experience: yearsOfExperience,
     government_id,
     profile_photo,
     certification,
-    offers_home_services: offersHomeServices,
+    offers_home_service: offersHomeServices,
     specializations,
   });
 

@@ -1,6 +1,7 @@
-import { useNavigate } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
+import { useState } from 'react';
+import { Navigate, useNavigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
+import { getDraftRequestId, skipAiDiagnosis } from '../api/client';
 
 // Same step progress visual as CreateServiceRequest.jsx — this screen is step 2 of 4.
 function StepProgress({ activeStep, totalSteps = 4 }) {
@@ -16,40 +17,42 @@ function StepProgress({ activeStep, totalSteps = 4 }) {
   );
 }
 
-function ChoiceButton({ label, onClick }) {
+function ChoiceButton({ label, onClick, disabled = false }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="box-border flex h-[46px] w-full max-w-[520px] cursor-pointer items-center justify-between rounded-lg border border-black/30 bg-gradient-to-r from-[#0255AF] to-[#04A5A5] px-6 font-[Quicksand] text-[15px] font-bold text-white"
+      disabled={disabled}
+      className="box-border flex h-[46px] w-full max-w-[640px] cursor-pointer items-center justify-center disabled:cursor-not-allowed disabled:opacity-70 rounded-lg border border-black/30 bg-gradient-to-r from-[#0255AF] to-[#04A5A5] px-6 font-[Quicksand] text-[15px] font-bold text-white"
     >
-      <span className="mx-auto">{label}</span>
-      <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full bg-white">
-        <ChevronRight size={14} color="#0255AF" />
-      </span>
+      {label}
     </button>
   );
 }
 
 export default function AIDiagnosis_Skip() {
   const navigate = useNavigate();
+  const requestId = getDraftRequestId(); // saved by CreateServiceRequest.jsx
+  const [isBusy, setIsBusy] = useState(false);
+  const [error, setError] = useState('');
 
-  // TODO: this screen is reached after the draft service request from CreateServiceRequest.jsx
-  // has been created on the backend. If that request's id is needed on the next screen(s),
-  // read it here (e.g. from route state / params: const { requestId } = useParams();) and
-  // forward it when navigating below.
+  // No draft request (e.g. the page was opened directly): start from the beginning.
+  if (!requestId) return <Navigate to="/customer/requests/new" replace />;
 
-  const handleUseAI = () => {
-    // TODO: kick off the backend's AI diagnosis for this request, e.g.
-    // await api.startAiDiagnosis(requestId);
-    // then navigate once it's been triggered (AIResuslt.jsx does the actual polling/loading).
-    navigate('/customer/requests/new/ai-result');
-  };
+  // The AI diagnosis itself is run by AIResult.jsx (POST /api/service-requests/:id/ai-diagnosis).
+  const handleUseAI = () => navigate('/customer/requests/new/ai-result');
 
-  const handleSkip = () => {
-    // TODO: mark the backend request as "skip AI" if that status matters, e.g.
-    // await api.updateServiceRequest(requestId, { aiDiagnosis: 'skipped' });
-    navigate('/customer/providers');
+  const handleSkip = async () => {
+    setIsBusy(true);
+    setError('');
+    try {
+      await skipAiDiagnosis(requestId);
+      navigate('/customer/requests/new/recommend-providers');
+    } catch (err) {
+      setError(err.message || "Couldn't continue. Please try again.");
+    } finally {
+      setIsBusy(false);
+    }
   };
 
   return (
@@ -68,10 +71,15 @@ export default function AIDiagnosis_Skip() {
           Let AI analyze your problem before booking.
         </p>
 
-        <div className="flex flex-col items-start gap-4">
-          <ChoiceButton label="Use AI Diagnosis" onClick={handleUseAI} />
-          <ChoiceButton label="Skip AI and Find Service Providers" onClick={handleSkip} />
+        <div className="flex flex-col items-center gap-4">
+          <ChoiceButton label="Use AI Diagnosis" onClick={handleUseAI} disabled={isBusy} />
+          <ChoiceButton label="Skip AI and Find Service Providers" onClick={handleSkip} disabled={isBusy} />
         </div>
+        {error && (
+          <p role="alert" className="m-0 mt-4 text-center font-[Roboto] text-[13px] text-[#B91C1C]">
+            {error}
+          </p>
+        )}
       </div>
     </CustomerSidebar>
   );

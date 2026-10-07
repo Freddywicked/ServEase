@@ -1,106 +1,73 @@
-import React, { useState } from 'react';
-import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl, Alert, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import { ROUTES } from '../navigation/routes';
+import {
+    getTrackedRequests,
+    acceptScheduleProposal,
+    rejectScheduleProposal,
+    approveAdditionalPayment,
+    rejectAdditionalPayment,
+} from '../api/servicerequest_api';
+import { formatDateTime } from '../utils/formatters';
 
-const ACTIVE_TAB = 'Track';
+/* ============================================================================
+ * Track (Customer app) — "My Requests"
+ * ----------------------------------------------------------------------------
+ * Where the customer follows a service request after sending it. Everything here
+ * comes from the backend, and most of it is data the SERVICE PROVIDER created from
+ * their own app:
+ *
+ *   Customer-created                    Provider-created (shows up here)
+ *   ----------------------------------  ------------------------------------------
+ *   the request + AI diagnosis          quotation              (submitQuotation)
+ *   (CreateServiceRequest flow)         new schedule proposal  (proposeSchedule)
+ *                                       additional payment     (requestAdditionalPayment)
+ *                                       progress / completed   (updateJobProgress / completeJob)
+ *                                       decline + reason       (declineServiceRequest)
+ *
+ *   Load     GET  /service-requests/tracking  -> { sent, approved, ongoing, declined, done }
+ *            (card shapes are documented above getTrackedRequests in serviceRequestApi.js)
+ *   Respond  POST /service-requests/:id/schedule-proposals/:proposalId/accept | /reject
+ *            POST /service-requests/:id/payment-requests/:paymentRequestId/approve | /reject
+ *            Each one notifies the provider (their dashboard / incoming list update), then
+ *            this screen reloads so what you see is always the server's current state.
+ *   Quotation approve/decline happens in RequestDetails (respondToQuotation in the API file).
+ *
+ * Reloads on focus and on pull-to-refresh. For live updates the moment the provider acts,
+ * see the commented Realtime subscription inside the component.
+ *
+ * ========================================================================== */
+
+const ACTIVE_TAB = ROUTES.TRACK;
 
 // Bottom tab definitions — same icon set and pattern as CustomerDashboard.js /
 // FindServiceProvider.js, just with Track as the active tab this time.
 const TAB_ITEMS = [
-    { key: 'CustomerDashboard', label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
+    { key: ROUTES.CUSTOMER_HOME, label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
     { key: 'FindServiceProvider', label: 'Find', activeIcon: require('../assets/icon_gear_white.png'), inactiveIcon: require('../assets/icon_gear_colored.png') },
-    { key: 'Track', label: 'Track', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
+    { key: ROUTES.TRACK, label: 'Track', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
     { key: 'MessageCustomer', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
     { key: 'History', label: 'History', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
     { key: 'CustomerProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
 ];
 
-const STATUS_FILTERS = ['Sent', 'Approved', 'On-going', 'Declined', 'Done'];
+// Tab labels. `key` is the property of the tracking response that holds that tab's cards.
+const STATUS_FILTERS = [
+    { key: 'sent', label: 'Sent' },
+    { key: 'approved', label: 'Approved' },
+    { key: 'ongoing', label: 'On-going' },
+    { key: 'declined', label: 'Declined' },
+    { key: 'done', label: 'Done' },
+];
 
-// Hardcoded per instructions for this round of frontend review — the adviser
-// is checking the coded frontend before the backend exists. Swap this out for
-// a fetch of the logged-in customer's service requests (grouped by status)
-// once that API is ready.
-//
-// `cardType` decides which card layout renderRequestCard uses below:
-//   'diagnosis' — AI-diagnosis summary card (Sent)
-//   'quotation' — quotation preview, tap to open RequestDetails (Approved)
-//   'schedule'  — proposed new schedule with inline Accept/Reject (Approved)
-//   'payment'   — additional payment needed, expandable (On-going)
-//   'timeline'  — step-by-step progress tracker, expandable (On-going)
-//   'completed' — finished timeline + Proceed to Payment (final) (Done)
-const REQUESTS_BY_STATUS = {
-    Sent: [
-        {
-            id: 'SR-0000-diagnosis',
-            cardType: 'diagnosis',
-            requestNumber: 'SR-0000',
-            providerName: 'Mark Rivera',
-            probableCause: 'Liquid damage to charging circuit',
-            confidencePercent: 82,
-        },
-    ],
-    Approved: [
-        {
-            id: 'SR-0001-quotation',
-            cardType: 'quotation',
-            requestNumber: 'SR-0001',
-            providerName: 'Mico Dominic',
-            badgeLabel: 'Approve Quote?',
-            laborCost: 850,
-            total: 850,
-        },
-        {
-            id: 'SR-0001-schedule',
-            cardType: 'schedule',
-            requestNumber: 'SR-0001',
-            providerName: 'Mico Dominic',
-            badgeLabel: 'New Schedule',
-            scheduleDateTime: 'MM/DD/YY 10:00AM',
-            reason: 'Lorem ipsum dolor. Lorem ipsum dolor.',
-        },
-    ],
-    'On-going': [
-        {
-            id: 'SR-0000-payment',
-            cardType: 'payment',
-            requestNumber: 'SR-0000',
-            providerName: 'Jose Rodolfo',
-            statusTag: 'In progress',
-            paymentAmount: 3000,
-            paymentReason: 'Proper and valid reason stated in this sentence.',
-        },
-        {
-            id: 'SR-0000-timeline',
-            cardType: 'timeline',
-            requestNumber: 'SR-0000',
-            providerName: 'Josephinae Rodolfo',
-            statusTag: 'In progress',
-            timeline: [
-                { label: 'Request received', timestamp: 'Jun 24 9:12 AM', done: true },
-                { label: 'Quotation approved', timestamp: 'Jun 24 10:12 AM', done: true },
-                { label: 'Service Provider is on the way', description: 'Service provider is now heading to your doorstep', done: false },
-            ],
-        },
-    ],
-    Declined: [],
-    Done: [
-        {
-            id: 'SR-0000-completed',
-            cardType: 'completed',
-            requestNumber: 'SR-0000',
-            providerName: 'Jose Rodolfo',
-            statusTag: 'Completed',
-            finalAmount: 3400,
-            timeline: [
-                { label: 'Request received', timestamp: 'Jun 24 9:12 AM', done: true },
-                { label: 'Quotation approved', timestamp: 'Jun 24 10:12 AM', done: true },
-                { label: 'Service Provider is on the way', timestamp: 'Jun 24 11:05 AM', done: true },
-                { label: 'Completed', timestamp: 'Jun 24 1:45 PM', done: true },
-            ],
-        },
-    ],
-};
+// Badge text on the expandable cards. Not part of the card contract, so it is chosen by cardType;
+// a backend-supplied `statusLabel` wins if one is ever sent.
+const STATUS_TAG_BY_CARD_TYPE = { payment: 'In progress', timeline: 'In progress', completed: 'Completed' };
+const getStatusTag = (request) => request.statusLabel ?? STATUS_TAG_BY_CARD_TYPE[request.cardType];
+
+const formatPeso = (amount) => `₱${Number(amount ?? 0).toFixed(2)}`;
 
 // Pulls together whichever text fields a card happens to have so search works
 // the same way regardless of cardType, instead of assuming every request
@@ -112,14 +79,56 @@ const getSearchableText = (request) =>
         .toLowerCase();
 
 const Track = ({ navigation }) => {
-    const [selectedStatus, setSelectedStatus] = useState('Sent');
+    const [selectedStatus, setSelectedStatus] = useState(STATUS_FILTERS[0]);
     const [searchQuery, setSearchQuery] = useState('');
     // On-going cards (payment / timeline) start collapsed — tapping the
     // "Request #..." line expands that specific card's details. Holds the
     // ids of whichever cards are currently expanded.
     const [expandedRequestIds, setExpandedRequestIds] = useState([]);
+    const [groups, setGroups] = useState(null); // null until the first load finishes
+    const [isLoading, setIsLoading] = useState(true);
+    const [isRefreshing, setIsRefreshing] = useState(false);
+    const [errorMessage, setErrorMessage] = useState('');
+    const [busyCardId, setBusyCardId] = useState(null);
 
-    const statusRequests = REQUESTS_BY_STATUS[selectedStatus] || [];
+    const loadTracking = useCallback(async ({ refresh = false } = {}) => {
+        if (refresh) setIsRefreshing(true);
+        else setIsLoading(true);
+        setErrorMessage('');
+        try {
+            setGroups(await getTrackedRequests());
+        } catch (error) {
+            setErrorMessage(error.message);
+        } finally {
+            setIsLoading(false);
+            setIsRefreshing(false);
+        }
+    }, []);
+
+    // Reload every time the customer comes back to this tab (e.g. after sending a request).
+    useFocusEffect(
+        useCallback(() => {
+            loadTracking();
+        }, [loadTracking]),
+    );
+
+    // ---------------------------------------------------------------------
+    // PROVIDER COMMUNICATION (comment block): live tracking. Refresh the moment the
+    // service provider submits a quotation, proposes a schedule, asks for an additional
+    // payment, marks "on the way" / "completed", or declines — without pull-to-refresh.
+    // Uncomment once serviceRequestApi.js's Realtime helpers are enabled (needs the mobile
+    // Supabase client). `user.id` is the customer's id from auth_context (useAuth()).
+    //
+    // useEffect(() => {
+    //     if (!user?.id) return undefined;
+    //     return subscribeToMyServiceRequests(user.id, () => loadTracking({ refresh: true }));
+    // }, [user?.id, loadTracking]);
+    //
+    // (import { subscribeToMyServiceRequests } from '../api/serviceRequestApi';)
+    // The FCM push the backend sends on each provider action can call loadTracking() too.
+    // ---------------------------------------------------------------------
+
+    const statusRequests = groups?.[selectedStatus.key] ?? [];
     const visibleRequests = searchQuery.trim()
         ? statusRequests.filter((request) => getSearchableText(request).includes(searchQuery.trim().toLowerCase()))
         : statusRequests;
@@ -134,10 +143,9 @@ const Track = ({ navigation }) => {
         setSelectedStatus(status);
     };
 
-    const handleRequestPress = (requestNumber) => {
-        // TODO: confirm 'RequestDetails' matches the screen name registered in
-        // your navigator, and pass along whatever the real backend needs.
-        navigation.navigate('RequestDetails', { requestNumber });
+    const handleRequestPress = (request) => {
+        // RequestDetails is where the quotation is approved/declined (respondToQuotation).
+        navigation.navigate(ROUTES.REQUEST_DETAILS, { requestId: request.requestId, requestNumber: request.requestNumber });
     };
 
     const toggleRequestExpanded = (requestId) => {
@@ -146,41 +154,77 @@ const Track = ({ navigation }) => {
         );
     };
 
-    const handleAcceptSchedule = (requestId) => {
-        // TODO: confirm the proposed schedule via the backend once the API is ready
+    // Sends the customer's answer to the backend (which notifies the provider), then reloads
+    // so the card reflects the server's state. 409 = the provider changed or withdrew it.
+    const runAction = async (cardId, action, failureTitle) => {
+        if (busyCardId) return;
+        setBusyCardId(cardId);
+        try {
+            await action();
+            await loadTracking({ refresh: true });
+        } catch (error) {
+            if (error.status === 409) {
+                Alert.alert('This request was updated', 'The service provider changed it. Showing the latest details.');
+                loadTracking({ refresh: true });
+            } else {
+                Alert.alert(failureTitle, error.message);
+            }
+        } finally {
+            setBusyCardId(null);
+        }
     };
 
-    const handleRejectSchedule = (requestId) => {
-        // TODO: reject the proposed schedule via the backend once the API is ready
-    };
+    const handleAcceptSchedule = (request) =>
+        runAction(request.id, () => acceptScheduleProposal(request.requestId, request.proposalId), 'Could not accept the schedule');
 
-    const handleApprovePayment = (requestId) => {
-        // TODO: approve the additional payment via the backend once the API is ready
-    };
+    const handleRejectSchedule = (request) =>
+        runAction(request.id, () => rejectScheduleProposal(request.requestId, request.proposalId), 'Could not reject the schedule');
 
-    const handleRejectPayment = (requestId) => {
-        // TODO: reject the additional payment via the backend once the API is ready
-    };
+    const handleApprovePayment = (request) =>
+        runAction(request.id, () => approveAdditionalPayment(request.requestId, request.paymentRequestId), 'Could not approve the payment');
 
-    const handleMessageProvider = (providerName) => {
+    const handleRejectPayment = (request) =>
+        runAction(request.id, () => rejectAdditionalPayment(request.requestId, request.paymentRequestId), 'Could not reject the payment');
+
+    const handleMessageProvider = (request) => {
         // Re-uses the existing Chat -> Conversation flow so the customer can
         // message this provider directly about the request.
-        navigation.navigate('Conversation', { senderName: providerName });
+        navigation.navigate(ROUTES.CONVERSATION, {
+            senderName: request.providerName,
+            providerId: request.providerId,
+            requestId: request.requestId,
+        });
     };
 
     const handleProceedToPayment = (request) => {
-        navigation.navigate('Payment', {
+        navigation.navigate(ROUTES.PAYMENT, {
+            requestId: request.requestId,
             requestNumber: request.requestNumber,
             paymentStage: 'final',
             amount: request.finalAmount,
         });
     };
 
+    const renderTimeline = (timeline) =>
+        (timeline || []).map((step, index) => (
+            <View key={step.id ?? `${step.label}-${index}`} style={styles.timelineRow}>
+                <View style={styles.timelineDot}>
+                    {step.done && <Image source={require('../assets/icon_check.png')} style={styles.timelineCheckIcon} />}
+                </View>
+                <View style={styles.timelineTextWrap}>
+                    <Text style={styles.timelineLabel}>{step.label}</Text>
+                    <Text style={styles.timelineSubtext}>
+                        {step.timestamp ? formatDateTime(step.timestamp) : step.description}
+                    </Text>
+                </View>
+            </View>
+        ));
+
     const renderDiagnosisCard = (request) => (
         <TouchableOpacity
             key={request.id}
             style={styles.requestCard}
-            onPress={() => handleRequestPress(request.requestNumber)}
+            onPress={() => handleRequestPress(request)}
             activeOpacity={0.85}
         >
             <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
@@ -188,76 +232,105 @@ const Track = ({ navigation }) => {
                 sent to <Text style={styles.providerName}>{request.providerName}</Text>
             </Text>
 
-            <Text style={styles.probableCauseLabel}>Probable Cause</Text>
-            <Text style={styles.probableCauseText}>{request.probableCause}</Text>
+            {request.probableCause ? (
+                <>
+                    <Text style={styles.probableCauseLabel}>Probable Cause</Text>
+                    <Text style={styles.probableCauseText}>{request.probableCause}</Text>
 
-            <View style={styles.progressRow}>
-                <View style={styles.progressTrack}>
-                    <View style={[styles.progressFill, { width: `${request.confidencePercent}%` }]} />
-                </View>
-                <Text style={styles.progressPercent}>{request.confidencePercent}%</Text>
-            </View>
-            <Text style={styles.progressCaption}>Confidence based on similar reported cases</Text>
+                    {request.confidencePercent !== null && request.confidencePercent !== undefined && (
+                        <>
+                            <View style={styles.progressRow}>
+                                <View style={styles.progressTrack}>
+                                    <View
+                                        style={[
+                                            styles.progressFill,
+                                            { width: `${Math.min(100, Math.max(0, request.confidencePercent))}%` },
+                                        ]}
+                                    />
+                                </View>
+                                <Text style={styles.progressPercent}>{request.confidencePercent}%</Text>
+                            </View>
+                            <Text style={styles.progressCaption}>Confidence based on similar reported cases</Text>
+                        </>
+                    )}
+                </>
+            ) : (
+                <Text style={styles.progressCaption}>Waiting for the service provider to respond.</Text>
+            )}
         </TouchableOpacity>
     );
 
-    const renderQuotationCard = (request) => (
-        // Preview only — tapping opens RequestDetails, which is where the real
-        // Approve/Decline actions (and the scheduling + payment modals) live.
-        <TouchableOpacity
-            key={request.id}
-            style={styles.requestCard}
-            onPress={() => handleRequestPress(request.requestNumber)}
-            activeOpacity={0.85}
-        >
-            <View style={styles.cardTopRow}>
-                <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
-                <View style={styles.badgeOrange}>
-                    <Text style={styles.badgeOrangeText}>{request.badgeLabel}</Text>
+    const renderQuotationCard = (request) => {
+        const hasParts = Number(request.partsCost) > 0;
+        const total = request.total ?? Number(request.laborCost ?? 0) + Number(request.partsCost ?? 0);
+        return (
+            // Preview only — tapping opens RequestDetails, which is where the real
+            // Approve/Decline actions (and the scheduling + payment modals) live.
+            <TouchableOpacity
+                key={request.id}
+                style={styles.requestCard}
+                onPress={() => handleRequestPress(request)}
+                activeOpacity={0.85}
+            >
+                <View style={styles.cardTopRow}>
+                    <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
+                    <View style={styles.badgeOrange}>
+                        <Text style={styles.badgeOrangeText}>Approve Quote?</Text>
+                    </View>
+                </View>
+                <Text style={styles.sentToLine}>{request.providerName} sent a quotation</Text>
+
+                <View style={styles.lineItemRow}>
+                    <Text style={styles.lineItemLabel}>Labor Cost</Text>
+                    <Text style={styles.lineItemAmount}>{formatPeso(request.laborCost)}</Text>
+                </View>
+                {hasParts && (
+                    <View style={styles.lineItemRow}>
+                        <Text style={styles.lineItemLabel}>Parts Cost</Text>
+                        <Text style={styles.lineItemAmount}>{formatPeso(request.partsCost)}</Text>
+                    </View>
+                )}
+                <View style={styles.divider} />
+                <View style={styles.lineItemRow}>
+                    <Text style={styles.lineItemLabelBold}>Total</Text>
+                    <Text style={styles.lineItemAmountBold}>{formatPeso(total)}</Text>
+                </View>
+            </TouchableOpacity>
+        );
+    };
+
+    const renderScheduleCard = (request) => {
+        const isBusy = busyCardId !== null;
+        return (
+            <View key={request.id} style={styles.requestCard}>
+                <View style={styles.cardTopRow}>
+                    <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
+                    <View style={styles.badgeOrange}>
+                        <Text style={styles.badgeOrangeText}>New Schedule</Text>
+                    </View>
+                </View>
+                <Text style={styles.sentToLine}>{request.providerName} sent a new schedule.</Text>
+
+                <Text style={styles.scheduleDateTime}>{formatDateTime(request.scheduledAt)}</Text>
+
+                <Text style={styles.reasonLabel}>Reason for New Schedule</Text>
+                <Text style={styles.reasonText}>{request.reason}</Text>
+
+                <View style={styles.actionRow}>
+                    <TouchableOpacity style={[styles.actionButton, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleAcceptSchedule(request)}>
+                        <Text style={styles.actionButtonText}>Accept</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.actionButton, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleRejectSchedule(request)}>
+                        <Text style={styles.actionButtonText}>Reject</Text>
+                    </TouchableOpacity>
                 </View>
             </View>
-            <Text style={styles.sentToLine}>{request.providerName} sent a quotation</Text>
-
-            <View style={styles.lineItemRow}>
-                <Text style={styles.lineItemLabel}>Labor Cost</Text>
-                <Text style={styles.lineItemAmount}>₱{request.laborCost.toFixed(2)}</Text>
-            </View>
-            <View style={styles.divider} />
-            <View style={styles.lineItemRow}>
-                <Text style={styles.lineItemLabelBold}>Total</Text>
-                <Text style={styles.lineItemAmountBold}>₱{request.total.toFixed(2)}</Text>
-            </View>
-        </TouchableOpacity>
-    );
-
-    const renderScheduleCard = (request) => (
-        <View key={request.id} style={styles.requestCard}>
-            <View style={styles.cardTopRow}>
-                <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
-                <View style={styles.badgeOrange}>
-                    <Text style={styles.badgeOrangeText}>{request.badgeLabel}</Text>
-                </View>
-            </View>
-            <Text style={styles.sentToLine}>{request.providerName} sent a new schedule.</Text>
-
-            <Text style={styles.scheduleDateTime}>{request.scheduleDateTime}</Text>
-
-            <Text style={styles.reasonLabel}>Reason for New Schedule</Text>
-            <Text style={styles.reasonText}>{request.reason}</Text>
-
-            <View style={styles.actionRow}>
-                <TouchableOpacity style={styles.actionButton} onPress={() => handleAcceptSchedule(request.id)}>
-                    <Text style={styles.actionButtonText}>Accept</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.actionButton} onPress={() => handleRejectSchedule(request.id)}>
-                    <Text style={styles.actionButtonText}>Reject</Text>
-                </TouchableOpacity>
-            </View>
-        </View>
-    );
+        );
+    };
 
     const renderPaymentCard = (request) => {
         const isExpanded = expandedRequestIds.includes(request.id);
+        const isBusy = busyCardId !== null;
         return (
             <View key={request.id} style={styles.requestCard}>
                 <TouchableOpacity style={styles.cardTopRow} onPress={() => toggleRequestExpanded(request.id)} activeOpacity={0.7}>
@@ -265,7 +338,7 @@ const Track = ({ navigation }) => {
                         Request #{request.requestNumber} {isExpanded ? '▲' : '▼'}
                     </Text>
                     <View style={styles.badgeBlue}>
-                        <Text style={styles.badgeBlueText}>{request.statusTag}</Text>
+                        <Text style={styles.badgeBlueText}>{getStatusTag(request)}</Text>
                     </View>
                 </TouchableOpacity>
                 <Text style={styles.providerNameLine}>{request.providerName}</Text>
@@ -278,22 +351,22 @@ const Track = ({ navigation }) => {
                                 <Text style={styles.paymentNoticeReason}>{request.paymentReason}</Text>
                             </View>
                             <View style={styles.paymentNoticeAmountWrap}>
-                                <Text style={styles.paymentNoticeAmount}>₱{request.paymentAmount.toLocaleString()}</Text>
+                                <Text style={styles.paymentNoticeAmount}>₱{Number(request.paymentAmount).toLocaleString()}</Text>
                                 <Text style={styles.paymentNoticeCaption}>Due for approval</Text>
                             </View>
                         </View>
 
                         <View style={styles.actionRow}>
-                            <TouchableOpacity style={styles.actionButton} onPress={() => handleApprovePayment(request.id)}>
+                            <TouchableOpacity style={[styles.actionButton, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleApprovePayment(request)}>
                                 <Text style={styles.actionButtonText}>Approve</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={styles.actionButton} onPress={() => handleRejectPayment(request.id)}>
+                            <TouchableOpacity style={[styles.actionButton, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleRejectPayment(request)}>
                                 <Text style={styles.actionButtonText}>Reject</Text>
                             </TouchableOpacity>
                         </View>
 
                         <View style={styles.cardDivider} />
-                        <TouchableOpacity onPress={() => handleMessageProvider(request.providerName)} style={styles.messageButton}>
+                        <TouchableOpacity onPress={() => handleMessageProvider(request)} style={styles.messageButton}>
                             <Text style={styles.messageButtonText}>Message</Text>
                         </TouchableOpacity>
                     </>
@@ -311,27 +384,17 @@ const Track = ({ navigation }) => {
                         Request #{request.requestNumber} {isExpanded ? '▲' : '▼'}
                     </Text>
                     <View style={styles.badgeBlue}>
-                        <Text style={styles.badgeBlueText}>{request.statusTag}</Text>
+                        <Text style={styles.badgeBlueText}>{getStatusTag(request)}</Text>
                     </View>
                 </TouchableOpacity>
                 <Text style={styles.providerNameLine}>{request.providerName}</Text>
 
                 {isExpanded && (
                     <>
-                        {request.timeline.map((step) => (
-                            <View key={step.label} style={styles.timelineRow}>
-                                <View style={styles.timelineDot}>
-                                    {step.done && <Image source={require('../assets/icon_check.png')} style={styles.timelineCheckIcon} />}
-                                </View>
-                                <View style={styles.timelineTextWrap}>
-                                    <Text style={styles.timelineLabel}>{step.label}</Text>
-                                    <Text style={styles.timelineSubtext}>{step.timestamp || step.description}</Text>
-                                </View>
-                            </View>
-                        ))}
+                        {renderTimeline(request.timeline)}
 
                         <View style={styles.cardDivider} />
-                        <TouchableOpacity onPress={() => handleMessageProvider(request.providerName)} style={styles.messageButton}>
+                        <TouchableOpacity onPress={() => handleMessageProvider(request)} style={styles.messageButton}>
                             <Text style={styles.messageButtonText}>Message</Text>
                         </TouchableOpacity>
                     </>
@@ -339,6 +402,19 @@ const Track = ({ navigation }) => {
             </View>
         );
     };
+
+    const renderDeclinedCard = (request) => (
+        <View key={request.id} style={styles.requestCard}>
+            <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
+            <Text style={styles.sentToLine}>{request.providerName} declined this request.</Text>
+            {!!request.reason && (
+                <>
+                    <Text style={styles.reasonLabel}>Reason</Text>
+                    <Text style={styles.reasonText}>{request.reason}</Text>
+                </>
+            )}
+        </View>
+    );
 
     const renderCompletedCard = (request) => {
         const isExpanded = expandedRequestIds.includes(request.id);
@@ -349,24 +425,14 @@ const Track = ({ navigation }) => {
                         Request #{request.requestNumber} {isExpanded ? '▲' : '▼'}
                     </Text>
                     <View style={styles.badgeBlue}>
-                        <Text style={styles.badgeBlueText}>{request.statusTag}</Text>
+                        <Text style={styles.badgeBlueText}>{getStatusTag(request)}</Text>
                     </View>
                 </TouchableOpacity>
                 <Text style={styles.providerNameLine}>{request.providerName}</Text>
 
                 {isExpanded && (
                     <>
-                        {request.timeline.map((step) => (
-                            <View key={step.label} style={styles.timelineRow}>
-                                <View style={styles.timelineDot}>
-                                    {step.done && <Image source={require('../assets/icon_check.png')} style={styles.timelineCheckIcon} />}
-                                </View>
-                                <View style={styles.timelineTextWrap}>
-                                    <Text style={styles.timelineLabel}>{step.label}</Text>
-                                    <Text style={styles.timelineSubtext}>{step.timestamp || step.description}</Text>
-                                </View>
-                            </View>
-                        ))}
+                        {renderTimeline(request.timeline)}
 
                         <View style={styles.cardDivider} />
                         <View style={styles.actionRow}>
@@ -375,7 +441,7 @@ const Track = ({ navigation }) => {
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={styles.actionButton}
-                                onPress={() => handleMessageProvider(request.providerName)}
+                                onPress={() => handleMessageProvider(request)}
                             >
                                 <Text style={styles.actionButtonText}>Message</Text>
                             </TouchableOpacity>
@@ -396,6 +462,8 @@ const Track = ({ navigation }) => {
                 return renderPaymentCard(request);
             case 'timeline':
                 return renderTimelineCard(request);
+            case 'declined':
+                return renderDeclinedCard(request);
             case 'completed':
                 return renderCompletedCard(request);
             case 'diagnosis':
@@ -404,9 +472,33 @@ const Track = ({ navigation }) => {
         }
     };
 
+    const renderBody = () => {
+        if (isLoading) {
+            return <ActivityIndicator color="#0255AF" style={styles.loadingIndicator} />;
+        }
+        if (errorMessage) {
+            return (
+                <TouchableOpacity style={styles.emptyState} onPress={() => loadTracking()}>
+                    <Text style={styles.emptyStateText}>{errorMessage} Tap to retry.</Text>
+                </TouchableOpacity>
+            );
+        }
+        if (visibleRequests.length === 0) {
+            return (
+                <View style={styles.emptyState}>
+                    <Text style={styles.emptyStateText}>No {selectedStatus.label.toLowerCase()} requests</Text>
+                </View>
+            );
+        }
+        return visibleRequests.map(renderRequestCard);
+    };
+
     return (
         <SafeAreaView style={styles.safeArea}>
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+            <ScrollView
+                contentContainerStyle={styles.scrollContent}
+                refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => loadTracking({ refresh: true })} />}
+            >
                 <Text style={styles.headerTitle}>My Requests</Text>
 
                 <TextInput
@@ -423,29 +515,23 @@ const Track = ({ navigation }) => {
                     contentContainerStyle={styles.statusTabRow}
                 >
                     {STATUS_FILTERS.map((status) => {
-                        const isSelected = status === selectedStatus;
-                        const count = REQUESTS_BY_STATUS[status].length;
+                        const isSelected = status.key === selectedStatus.key;
+                        const count = groups?.[status.key]?.length;
                         return (
                             <TouchableOpacity
-                                key={status}
+                                key={status.key}
                                 style={[styles.statusTab, isSelected && styles.statusTabSelected]}
                                 onPress={() => handleSelectStatus(status)}
                             >
                                 <Text style={[styles.statusTabText, isSelected && styles.statusTabTextSelected]}>
-                                    {status} ({count})
+                                    {status.label}{count !== undefined ? ` (${count})` : ''}
                                 </Text>
                             </TouchableOpacity>
                         );
                     })}
                 </ScrollView>
 
-                {visibleRequests.length > 0 ? (
-                    visibleRequests.map(renderRequestCard)
-                ) : (
-                    <View style={styles.emptyState}>
-                        <Text style={styles.emptyStateText}>No {selectedStatus.toLowerCase()} requests</Text>
-                    </View>
-                )}
+                {renderBody()}
             </ScrollView>
 
             <View style={styles.tabBar}>
@@ -821,6 +907,12 @@ const styles = StyleSheet.create({
         fontSize: 11,
         color: '#FFFFFF',
         fontWeight: '600',
+    },
+    loadingIndicator: {
+        marginTop: 20,
+    },
+    actionButtonDisabled: {
+        opacity: 0.5,
     },
 });
 

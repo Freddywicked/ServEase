@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { notifyAdditionalParts } from '../api/providerWork_api';
 
 const ACTIVE_TAB = 'Jobs';
 
@@ -10,20 +11,43 @@ const TAB_ITEMS = [
     { key: 'Requests', label: 'Requests', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
     { key: 'Jobs', label: 'Jobs', activeIcon: require('../assets/icon_gear_white.png'), inactiveIcon: require('../assets/icon_gear_colored.png') },
     { key: 'Chat', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'Earnings', label: 'Earnings', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
+    { key: 'Earnings', label: 'Earnings', activeIcon: require('../assets/icon_dollar_white.png'), inactiveIcon: require('../assets/icon_dollar_colored.png') },
     { key: 'ServiceProviderProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
 ];
 
-const JobAdditionalParts = ({ navigation }) => {
+const JobAdditionalParts = ({ navigation, route }) => {
+    const jobId = route?.params?.jobId;
+
     const [additionalCost, setAdditionalCost] = useState('');
     const [notes, setNotes] = useState('');
+    const [sending, setSending] = useState(false);
 
     const handleBack = () => {
         navigation.goBack();
     };
 
-    const handleSendRequest = () => {
-        // TODO: call the notify-additional-parts endpoint once it exists, sending additionalCost/notes
+    const handleSendRequest = async () => {
+        if (sending) return;
+        const amount = Number(additionalCost);
+        if (!additionalCost.trim() || Number.isNaN(amount) || amount <= 0) {
+            Alert.alert('Enter the additional cost', 'Please enter an amount greater than zero.');
+            return;
+        }
+        if (!jobId) {
+            Alert.alert('Unable to send request', 'This job could not be identified. Go back and try again.');
+            return;
+        }
+        setSending(true);
+        try {
+            await notifyAdditionalParts(jobId, { additionalCost: amount, notes: notes.trim() });
+            Alert.alert('Request sent', 'The customer has been notified about the additional parts.', [
+                { text: 'OK', onPress: () => navigation.goBack() },
+            ]);
+        } catch (error) {
+            Alert.alert('Unable to send request', 'Please check your connection and try again.');
+        } finally {
+            setSending(false);
+        }
     };
 
     const handleTabPress = (tabKey) => {
@@ -34,7 +58,7 @@ const JobAdditionalParts = ({ navigation }) => {
 
     return (
         <SafeAreaView style={styles.safeArea}>
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+            <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
                 <TouchableOpacity style={styles.backButton} onPress={handleBack}>
                     <Text style={styles.backArrow}>‹</Text>
                 </TouchableOpacity>
@@ -63,8 +87,16 @@ const JobAdditionalParts = ({ navigation }) => {
                     onChangeText={setNotes}
                 />
 
-                <TouchableOpacity style={styles.sendButton} onPress={handleSendRequest}>
-                    <Text style={styles.sendButtonText}>Send Request</Text>
+                <TouchableOpacity
+                    style={[styles.sendButton, sending && styles.sendButtonDisabled]}
+                    onPress={handleSendRequest}
+                    disabled={sending}
+                >
+                    {sending ? (
+                        <ActivityIndicator color="#111111" />
+                    ) : (
+                        <Text style={styles.sendButtonText}>Send Request</Text>
+                    )}
                 </TouchableOpacity>
             </ScrollView>
 
@@ -205,6 +237,9 @@ const styles = StyleSheet.create({
         fontSize: 11,
         color: '#FFFFFF',
         fontWeight: '600',
+    },
+    sendButtonDisabled: {
+        opacity: 0.5,
     },
 });
 

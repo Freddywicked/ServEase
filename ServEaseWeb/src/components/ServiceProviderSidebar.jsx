@@ -11,13 +11,12 @@ import requestIconWhite from '../assets/icon_request_white.png';
 import requestIconBlack from '../assets/icon_request.png';
 import toolsIconWhite from '../assets/icon_tools_white.png';
 import toolsIconBlack from '../assets/icon_tools.png';
-import chatIconWhite from '../assets/icon_chatbubble_white.png';
-import chatIconBlack from '../assets/icon_chatbubble.png';
 import historyIconWhite from '../assets/icon_history_white.png';
 import historyIconBlack from '../assets/icon_history.png';
 import hamburgerIcon from '../assets/icon_hamburger.png';
-import bellIcon from '../assets/icon_ringbell.png';
 import dropdownIcon from '../assets/icon_dropdown.png';
+import MessagingWidget from './MessagingWidget';
+import Notifications from './Notifications';
 
 const EXPANDED_WIDTH = 229;
 const COLLAPSED_WIDTH = 84;
@@ -32,6 +31,7 @@ const getInitials = (name = '') => {
   return (first + last).toUpperCase();
 };
 
+// Messages is not a tab: it is the floating message button (MessagingWidget) at the bottom-right.
 const NAV_ITEMS = [
   {
     label: 'Dashboard',
@@ -50,12 +50,6 @@ const NAV_ITEMS = [
     to: '/serviceprovider/jobs',
     iconActive: toolsIconWhite,
     iconInactive: toolsIconBlack,
-  },
-  {
-    label: 'Messages',
-    to: '/serviceprovider/messages',
-    iconActive: chatIconWhite,
-    iconInactive: chatIconBlack,
   },
   {
     label: 'Earnings',
@@ -110,12 +104,6 @@ export default function ServiceProviderSidebar({ children, initials }) {
     navigate('/login', { replace: true });
   };
 
-  const handleNotificationsClick = () => {
-    // TODO: open a notifications panel once the backend notifications endpoint exists
-    // (e.g. GET /api/provider/notifications).
-    console.log('Notifications clicked');
-  };
-
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       {/* Top header (same size as the admin/customer header) */}
@@ -133,14 +121,7 @@ export default function ServiceProviderSidebar({ children, initials }) {
 
         {/* Upper right: notification bell, user avatar, name + role, dropdown */}
         <div className="mr-4 flex flex-none items-center gap-4 sm:mr-[46px] sm:gap-[33px]">
-          <button
-            type="button"
-            onClick={handleNotificationsClick}
-            aria-label="Notifications"
-            className="flex cursor-pointer items-center justify-center border-none bg-transparent p-0"
-          >
-            <img src={bellIcon} alt="" className="h-[27px] w-[27px]" />
-          </button>
+          <Notifications viewer="provider" />
 
           <div ref={menuRef} className="relative">
             <button
@@ -251,6 +232,9 @@ export default function ServiceProviderSidebar({ children, initials }) {
 
         <main className="min-w-0 flex-1 overflow-y-auto bg-white">{children}</main>
       </div>
+
+      {/* Floating messages button + chat popups (bottom-right of every provider screen) */}
+      <MessagingWidget viewer="provider" />
     </div>
   );
 }

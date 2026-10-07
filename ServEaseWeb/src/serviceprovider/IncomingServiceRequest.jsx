@@ -1,51 +1,31 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import ServiceProviderSidebar from '../components/ServiceProviderSidebar.jsx';
 import { useAuth } from '../context/auth_context';
+import { getProviderServiceRequests } from '../api/client';
 import lightningIcon from '../assets/icon_lightning.png';
 import pinIcon from '../assets/icon_pinloc.png';
 
 const SF_PRO = "font-[SF_Pro,system-ui,sans-serif]";
 
-// ---------------------------------------------------------------------------------------------
-// HARD-CODED DATA (visualization only)
-// These two entries exist only so the screen looks like the Figma design. Once the backend is
-// ready, delete MOCK_REQUESTS and use the BACKEND INTEGRATION block inside the component.
+// The list comes from the backend: GET /api/providers/requests -> { requests: [...] }.
+// A request shows up here as soon as a customer submits it to this provider
+// (RecommendServiceProvider.jsx -> POST /api/service-requests/:id/submit).
 //
-// Shape of one request (what the backend should return):
+// Shape of one request:
 // {
 //   id: 'SR-0000',                  // request number shown as "Request #SR-0000"
 //   customerName: 'Dominic Alcantara',
 //   createdAt: '2026-06-27',        // ISO date, shown as "Jun 27"
-//   aiDiagnosis: 'capacitor failure',
-//   aiConfidence: 82,               // percent
-//   distanceKm: 1.2,                // distance from the provider, shown as "1.2 km away"
+//   aiDiagnosis: 'capacitor failure' | null,   // null when the customer skipped the AI step
+//   aiConfidence: 82 | null,        // percent
+//   distanceKm: 1.2 | null,         // null until the backend can compute it
 //   status: 'new' | 'quoted',       // 'new' = no quote sent yet, 'quoted' = Pending Quotation
 //   quote: { labor: 800, parts: 2000 } | null, // only present when status === 'quoted'
 // }
-// ---------------------------------------------------------------------------------------------
-const MOCK_REQUESTS = [
-  {
-    id: 'SR-0000',
-    customerName: 'Dominic Alcantara',
-    createdAt: '2026-06-27',
-    aiDiagnosis: 'capacitor failure',
-    aiConfidence: 82,
-    distanceKm: 1.2,
-    status: 'new',
-    quote: null,
-  },
-  {
-    id: 'SR-0001',
-    customerName: 'Nick Duran',
-    createdAt: '2026-06-27',
-    aiDiagnosis: 'drain panel replacement',
-    aiConfidence: 91,
-    distanceKm: 1,
-    status: 'quoted',
-    quote: { labor: 800, parts: 2000 },
-  },
-];
+
+// New requests appear without a page refresh: the list is re-fetched this often.
+const POLL_INTERVAL_MS = 15000;
 
 const TABS = [
   { key: 'all', widthClass: 'w-[87px]' },
@@ -91,21 +71,25 @@ function RequestCard({ request }) {
         {request.customerName} | {formatShortDate(request.createdAt)}
       </p>
 
-      {/* AI diagnosis bar */}
-      <div className="mt-[9px] box-border flex h-[41px] w-full items-center rounded-[10px] bg-[#262728] pl-[15px]">
-        <img src={lightningIcon} alt="" className="h-[18px] w-[14px] flex-none object-contain" />
-        <span className="ml-[13px] text-[11px] font-normal leading-[19px] text-white">
-          AI suggests {request.aiDiagnosis} ({request.aiConfidence}% confidence)
-        </span>
-      </div>
+      {/* AI diagnosis bar (hidden when the customer skipped the AI step) */}
+      {request.aiDiagnosis && (
+        <div className="mt-[9px] box-border flex h-[41px] w-full items-center rounded-[10px] bg-[#262728] pl-[15px]">
+          <img src={lightningIcon} alt="" className="h-[18px] w-[14px] flex-none object-contain" />
+          <span className="ml-[13px] text-[11px] font-normal leading-[19px] text-white">
+            AI suggests {request.aiDiagnosis} ({request.aiConfidence}% confidence)
+          </span>
+        </div>
+      )}
 
-      {/* Distance */}
-      <div className="mt-[13px] flex items-center gap-[7px]">
-        <img src={pinIcon} alt="" className="h-[18px] w-[14px] flex-none object-contain" />
-        <span className="text-[10px] font-normal leading-[17px] text-[#5B5959]">
-          {request.distanceKm} km away
-        </span>
-      </div>
+      {/* Distance (hidden until the backend can compute it) */}
+      {request.distanceKm != null && (
+        <div className="mt-[13px] flex items-center gap-[7px]">
+          <img src={pinIcon} alt="" className="h-[18px] w-[14px] flex-none object-contain" />
+          <span className="text-[10px] font-normal leading-[17px] text-[#5B5959]">
+            {request.distanceKm} km away
+          </span>
+        </div>
+      )}
 
       <hr className="m-0 ml-[6px] mt-[15px] border-0 border-t border-black/40" />
 
@@ -144,39 +128,35 @@ export default function IncomingServiceRequest() {
   const { user, loading } = useAuth();
   const [activeTab, setActiveTab] = useState('new');
 
-  // Hard-coded for now. Swap for the BACKEND INTEGRATION block below once the endpoint exists.
-  const [requests] = useState(MOCK_REQUESTS);
+  const [requests, setRequests] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
-  /* ------------------------------ BACKEND INTEGRATION (ready) ------------------------------
-   Uncomment this block, add the import + the API helper, and delete MOCK_REQUESTS above.
-   Replace `const [requests] = useState(MOCK_REQUESTS);` with the state declared here.
+  useEffect(() => {
+    if (!user) return undefined;
+    let cancelled = false;
 
-   // import { useEffect } from 'react';
-   // import { getProviderServiceRequests } from '../api/client'; // GET /api/provider/requests
+    const load = () =>
+      getProviderServiceRequests()
+        .then((data) => {
+          if (cancelled) return;
+          setRequests(data.requests || []);
+          setLoadError('');
+        })
+        .catch((err) => {
+          if (!cancelled) setLoadError(err.message || "Couldn't load service requests.");
+        })
+        .finally(() => {
+          if (!cancelled) setIsLoading(false);
+        });
 
-   // const [requests, setRequests] = useState([]);
-   // const [isLoading, setIsLoading] = useState(true);
-   // const [loadError, setLoadError] = useState('');
-
-   // useEffect(() => {
-   //   let cancelled = false;
-   //   getProviderServiceRequests() // optionally pass { status: activeTab } to filter server-side
-   //     .then((data) => {
-   //       if (!cancelled) setRequests(data.requests); // array shaped like MOCK_REQUESTS above
-   //     })
-   //     .catch((err) => {
-   //       if (!cancelled) setLoadError(err.message || "Couldn't load service requests.");
-   //     })
-   //     .finally(() => {
-   //       if (!cancelled) setIsLoading(false);
-   //     });
-   //   return () => {
-   //     cancelled = true;
-   //   };
-   // }, []);
-
-   // Then render <p>{loadError}</p> / a loading state above the list when needed.
-  ------------------------------------------------------------------------------------------- */
+    load();
+    const timer = setInterval(load, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [user]);
 
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
@@ -218,9 +198,14 @@ export default function IncomingServiceRequest() {
 
         {/* Request cards */}
         <div className="mt-[23px] flex flex-col gap-4">
+          {loadError && (
+            <p role="alert" className="m-0 font-[Roboto] text-[14px] font-medium text-[#B91C1C]">
+              {loadError}
+            </p>
+          )}
           {visibleRequests.length === 0 ? (
             <p className="m-0 font-[Roboto] text-[14px] font-medium text-[#817C7C]">
-              No service requests found
+              {isLoading ? 'Loading service requests…' : 'No service requests found'}
             </p>
           ) : (
             visibleRequests.map((request) => <RequestCard key={request.id} request={request} />)
