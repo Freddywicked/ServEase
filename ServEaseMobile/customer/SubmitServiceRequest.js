@@ -24,7 +24,11 @@ const SubmitServiceRequest = ({ navigation }) => {
 
     const handleDone = () => {
         resetDraft();
-        navigation.navigate(ROUTES.CUSTOMER_HOME);
+        // reset (not navigate): the dashboard becomes the ONLY screen in the stack.
+        // navigate() left AIResult mounted underneath, and its "no diagnosis -> replace
+        // with RecommendServiceProvider" effect fired when the draft cleared, stealing
+        // the navigation and landing the customer back on the provider step.
+        navigation.reset({ index: 0, routes: [{ name: ROUTES.CUSTOMER_HOME }] });
 
         // ---------------------------------------------------------------------
         // PROVIDER COMMUNICATION (comment block — customer side)

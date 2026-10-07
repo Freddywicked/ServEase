@@ -35,7 +35,10 @@ const AIResult = ({ navigation }) => {
     useEffect(() => {
         // Landed here without a diagnosis (e.g. restored navigation state): nothing to show,
         // so continue to the provider step instead of rendering an empty screen.
-        if (!diagnosis) {
+        // Only while this screen is FOCUSED — it stays mounted under SubmitServiceRequest,
+        // and without this guard the draft reset on Done/problem-solved made this effect
+        // fire and steal the navigation back to RecommendServiceProvider.
+        if (!diagnosis && navigation.isFocused()) {
             navigation.replace(ROUTES.RECOMMEND_SERVICE_PROVIDER);
         }
     }, [diagnosis, navigation]);
@@ -50,7 +53,9 @@ const AIResult = ({ navigation }) => {
         try {
             await createServiceRequest(useServiceRequestDraftStore.getState(), { resolvedByAi: true });
             resetDraft();
-            navigation.navigate(ROUTES.CUSTOMER_HOME);
+            // reset (not navigate): land on the dashboard with a clean stack, so the
+            // whole create-request flow is gone and Back can't return to it.
+            navigation.reset({ index: 0, routes: [{ name: ROUTES.CUSTOMER_HOME }] });
         } catch (error) {
             setIsSaving(false);
             Alert.alert('Could not save your request', error.message);

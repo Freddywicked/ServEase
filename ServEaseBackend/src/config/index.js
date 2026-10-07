@@ -59,7 +59,8 @@ const config = {
     // Server-side Google Maps Platform key, used for reverse geocoding and the
     // Static Maps snapshot the apps show instead of a live map. Empty means
     // /location/reverse-geocode falls back to OpenStreetMap for the address and
-    // returns mapImageUri: null (the apps already handle that).
+    // returns mapImageUri: null (the apps already handle that). Must be set on the
+    // deployed server too (Render -> Environment), or the release app shows no map.
     apiKey: env.GOOGLE_MAPS_API_KEY || '',
   },
 

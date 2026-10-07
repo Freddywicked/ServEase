@@ -64,7 +64,9 @@ import { API_BASE_URL as BASE_URL, getToken } from './client';
 const API_PREFIX = ''; // see ADAPT #1
 const API_BASE_URL = `${BASE_URL}${API_PREFIX}`;
 const DEFAULT_TIMEOUT_MS = 15000;
-const DIAGNOSIS_TIMEOUT_MS = 30000; // AI language-model call: expect higher latency
+// AI language-model call: expect higher latency. 60s because the deployed backend
+// (Render free tier) can cold-start for tens of seconds BEFORE Gemini even runs.
+const DIAGNOSIS_TIMEOUT_MS = 60000;
 
 const getAccessToken = getToken;
 

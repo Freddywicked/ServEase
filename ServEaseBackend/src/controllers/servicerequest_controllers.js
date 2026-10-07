@@ -45,9 +45,27 @@ const CATEGORY_ALIASES = {
   'phone-device': 'Phone Device', // mobile app category key
   'phone repair': 'Phone Device',
 };
+// The mobile app sends the kebab-case key from GET /api/categories (e.g.
+// 'it-related-devices'); the web app sends the label. Compare slug-to-slug so every
+// variant maps back — 'it-related-devices' previously matched nothing (the alias list
+// only had the spaced form), so ONLY the IT category failed diagnose/recommend/create.
+const toCategorySlug = (value) =>
+  String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+const CATEGORY_BY_SLUG = Object.fromEntries(CATEGORIES.map((label) => [toCategorySlug(label), label]));
+const ALIAS_BY_SLUG = Object.fromEntries(
+  Object.entries(CATEGORY_ALIASES).map(([alias, label]) => [toCategorySlug(alias), label])
+);
+
 const normalizeCategory = (value) => {
   const text = String(value || '').trim();
-  return CATEGORIES.includes(text) ? text : CATEGORY_ALIASES[text.toLowerCase()] || '';
+  if (CATEGORIES.includes(text)) return text;
+  return (
+    CATEGORY_ALIASES[text.toLowerCase()] ||
+    CATEGORY_BY_SLUG[toCategorySlug(text)] ||
+    ALIAS_BY_SLUG[toCategorySlug(text)] ||
+    ''
+  );
 };
 
 const MAX_PROVIDERS_PER_REQUEST = 5;
@@ -610,6 +628,10 @@ const reverseGeocode = asyncHandler(async (req, res) => {
   const mapsKey = config.googleMaps.apiKey;
   // The Static Maps URL must carry the key to load; restrict the key in Google Cloud
   // Console (Geocoding API + Maps Static API only) since it ends up in the apps' traffic.
+  // Without a key mapImageUri stays null and the app shows the address/coordinates —
+  // set GOOGLE_MAPS_API_KEY on the deployed server (Render -> Environment) so the
+  // release app gets the map image too. (No keyless fallback: the only free OSM
+  // static-map service, staticmap.openstreetmap.de, no longer exists.)
   const mapImageUri = mapsKey
     ? `https://maps.googleapis.com/maps/api/staticmap?center=${lat},${lon}&zoom=16&size=600x300&scale=2&maptype=roadmap` +
       `&markers=color:0x0255AF%7C${lat},${lon}&key=${mapsKey}`
