@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const { supabase } = require('../config/supabase');
+const workflow = require('../controllers/workflow_controllers');
 
 // Quick check that the server AND the Supabase connection/keys work.
 router.get('/health', async (req, res) => {
@@ -27,8 +28,19 @@ router.get('/appointment-time-slots', serviceRequestController.listTimeSlots);
 router.get('/location/reverse-geocode', authenticate, serviceRequestController.reverseGeocode);
 // Mobile step 3: recommended providers for a draft (no request row exists yet).
 router.get('/service-providers/recommended', authenticate, serviceRequestController.recommendedForDraft);
+// Customer Find screen: browse all verified providers (optionally filtered).
+router.get('/service-providers', authenticate, workflow.browseProviders);
 // The mobile provider app fetches its inbox at /api/provider/service-requests; the same
 // router also serves the web app at /api/providers/requests (see provider_routes.js).
 router.use('/provider/service-requests', require('./servicerequest_routes').provider);
+// Provider dashboard / jobs / earnings (mobile app).
+router.use('/provider', require('./providerwork_routes'));
+
+// Notifications + customer<->provider chat (workflow_controllers.js; tables from
+// migrations/002_core_workflow_tables.sql).
+router.get('/notifications', authenticate, workflow.listNotifications);
+router.get('/conversations', authenticate, workflow.listConversations);
+router.get('/conversations/:id/messages', authenticate, workflow.listMessages);
+router.post('/conversations/:id/messages', authenticate, workflow.sendMessage);
 
 module.exports = router;

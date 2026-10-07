@@ -34,6 +34,12 @@ const uploadFields = (req, res, next) =>
 router.get('/me', authenticate, providers.me);
 router.post('/apply', authenticate, uploadFields, providers.apply);
 
+// "Manage Calendar" on the provider dashboards (mobile + web): which date/slot
+// pairs the provider marked unavailable. Serves both payload shapes.
+const workflow = require('../controllers/workflow_controllers');
+router.get('/availability', authenticate, workflow.getAvailability);
+router.put('/availability', authenticate, workflow.setAvailability);
+
 // Incoming service requests for the logged-in provider: /api/providers/requests/...
 router.use('/requests', require('./servicerequest_routes').provider);
 

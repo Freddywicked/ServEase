@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { View, Image, Text, TouchableOpacity, FlatList, StyleSheet } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Image, Text, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import { getMyServiceRequests } from '../api/servicerequest_api';
+import { formatShortDate } from '../utils/formatters';
 
 const ACTIVE_TAB = 'History';
 
@@ -26,25 +29,56 @@ const TAB_ITEMS = [
 
 const History = ({ navigation }) => {
     const [filter, setFilter] = useState('all');
-    const [history, setHistory] = useState([]);
+    const [requests, setRequests] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [loadFailed, setLoadFailed] = useState(false);
 
-    useEffect(() => {
-        // TODO: fetch the customer's repair/transaction history from the
-        // backend once the API is integrated, e.g.
-        // fetchHistory({ filter }).then(setHistory);
-    }, [filter]);
+    // The customer's submitted requests, newest first (GET /service-requests).
+    const loadHistory = useCallback(async () => {
+        try {
+            setRequests(await getMyServiceRequests());
+            setLoadFailed(false);
+        } catch (error) {
+            setLoadFailed(true);
+        }
+    }, []);
+
+    useFocusEffect(
+        useCallback(() => {
+            loadHistory().finally(() => setLoading(false));
+        }, [loadHistory]),
+    );
+
+    const handleRefresh = async () => {
+        setRefreshing(true);
+        await loadHistory();
+        setRefreshing(false);
+    };
 
     const handleTabPress = (tabKey) => {
         if (tabKey === ACTIVE_TAB) return;
-        // TODO: confirm these screen names once the rest of the tabs are built
         navigation.navigate(tabKey);
     };
 
+    // 'transactions' = requests that reached a quote/payment stage (a quotation was
+    // sent or the job is completed); 'repair' = every service request.
+    const history = requests.filter((item) => {
+        if (filter === 'transactions') {
+            return item.status === 'Completed' || (item.providers || []).some((p) => p.quote);
+        }
+        return true;
+    });
+
     const renderHistoryItem = ({ item }) => (
-        // TODO: build this card out once the backend fields are known
-        // (e.g. service title, device, date, price, status).
         <View style={styles.card}>
-            <Text style={styles.cardText}>{item.title}</Text>
+            <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>{item.category}</Text>
+                <Text style={styles.cardText}>
+                    {item.id} · {formatShortDate(item.createdAt)}
+                </Text>
+            </View>
+            <Text style={styles.cardStatus}>{item.status}</Text>
         </View>
     );
 
@@ -56,6 +90,16 @@ const History = ({ navigation }) => {
                 renderItem={renderHistoryItem}
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+                ListEmptyComponent={
+                    loading ? (
+                        <ActivityIndicator color="#0255AF" style={{ marginTop: 32 }} />
+                    ) : (
+                        <Text style={styles.emptyText}>
+                            {loadFailed ? "Couldn't load your history. Pull down to retry." : 'No service requests yet.'}
+                        </Text>
+                    )
+                }
                 ListHeaderComponent={
                     <View>
                         <Text style={styles.header}>History</Text>
@@ -155,6 +199,23 @@ const styles = StyleSheet.create({
         minHeight: 90,
         justifyContent: 'center',
         marginBottom: 14,
+    },
+    cardTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#333333',
+    },
+    cardStatus: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#0255AF',
+        marginLeft: 10,
+    },
+    emptyText: {
+        fontSize: 13,
+        color: '#999999',
+        textAlign: 'center',
+        marginTop: 32,
     },
     cardText: {
         fontSize: 14,

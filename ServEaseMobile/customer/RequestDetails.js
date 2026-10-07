@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, Modal, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Image, Text, TouchableOpacity, ScrollView, Modal, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
+import { ROUTES } from '../navigation/routes';
+import { getServiceRequest, respondToQuotation } from '../api/servicerequest_api';
 
 const ACTIVE_TAB = 'Track';
 
@@ -43,18 +45,55 @@ const TAB_ITEMS = [
 //                   real business rule, this should either be a constant
 //                   shared with the backend or fetched, not hardcoded per
 //                   screen at a different value than intended.
-const REQUEST_DETAIL = {
-    requestNumber: 'SR-0000',
-    providerName: 'Mico Dominic',
-    reason: 'This sentence states the reason to justify the labor.',
-    lineItems: [{ label: 'Labor', amount: 850 }],
-    total: 850,
-    initialFeePercent: 20,
-};
+// The initial fee is 20% of the quotation total. NOTE: the ERD discussion mentioned
+// 50% — change this one constant (and the backend payment validation) if that wins.
+const INITIAL_FEE_PERCENT = 20;
 
 const RequestDetails = ({ navigation, route }) => {
+    const requestId = route?.params?.requestId;
+
+    // The real request: GET /service-requests/:id. The quotation lives on the
+    // provider entry whose status is 'quoted' (toCustomerDto in the backend).
+    const [detail, setDetail] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
+    const [acting, setActing] = useState(false);
     // null | 'approved' — which modal (if any) is on screen.
     const [modalStep, setModalStep] = useState(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            if (!requestId) {
+                setLoadError('Missing request id');
+                setLoading(false);
+                return;
+            }
+            try {
+                const request = await getServiceRequest(requestId);
+                if (cancelled) return;
+                const quoted = (request.providers || []).find((p) => p.status === 'quoted' && p.quote);
+                setDetail({
+                    requestNumber: request.id,
+                    providerName: quoted?.name || 'Service provider',
+                    reason: quoted?.quote?.notes || '',
+                    lineItems: [
+                        { label: 'Labor', amount: quoted?.quote?.labor ?? 0 },
+                        { label: 'Parts / Items', amount: quoted?.quote?.parts ?? 0 },
+                    ],
+                    total: (quoted?.quote?.labor ?? 0) + (quoted?.quote?.parts ?? 0),
+                    hasOpenQuotation: Boolean(quoted),
+                });
+            } catch (error) {
+                if (!cancelled) setLoadError(error.message || 'Could not load the request.');
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [requestId]);
 
     const handleClose = () => {
         navigation.goBack();
@@ -62,44 +101,45 @@ const RequestDetails = ({ navigation, route }) => {
 
     const handleTabPress = (tabKey) => {
         if (tabKey === ACTIVE_TAB) return;
-        // TODO: confirm these screen names once the rest of the tabs are built
         navigation.navigate(tabKey);
     };
 
-    const handleApprove = () => {
-        setModalStep('approved');
-        //
-        // BACKEND-READY: PATCH the QUOTATION's status to 'accepted' here.
-        // Provider-side effect: the provider needs to be
-        // notified their quotation was accepted, since it's what unblocks
-        // them to start preparing for the job. SERVICE_REQUEST.request_status
-        // should also move forward at this point (e.g. to 'accepted').
+    // Approving books the provider (request_status -> 'Approved') and notifies them.
+    const handleApprove = async () => {
+        if (acting) return;
+        setActing(true);
+        try {
+            await respondToQuotation(requestId, { approve: true });
+            setModalStep('approved');
+        } catch (error) {
+            Alert.alert('Could not approve', error.message);
+        } finally {
+            setActing(false);
+        }
     };
 
-    const handleDecline = () => {
-        // TODO: send the decline via the backend once the API is ready, e.g.
-        // declineRequest(REQUEST_DETAIL.requestNumber).then(() => navigation.goBack());
-        //
-        // BACKEND-READY: PATCH QUOTATION.status to 'declined'. Provider-side
-        // effect: the provider needs to be notified the quotation was
-        // declined so it drops off their active list — otherwise they're left
-        // thinking a response is still pending.
-        navigation.goBack();
+    // Declining frees the provider (they're notified) and the request stays open
+    // so the customer can pick another one.
+    const handleDecline = async () => {
+        if (acting) return;
+        setActing(true);
+        try {
+            await respondToQuotation(requestId, { approve: false });
+            navigation.goBack();
+        } catch (error) {
+            setActing(false);
+            Alert.alert('Could not decline', error.message);
+        }
     };
 
     const handleProceedToPayment = () => {
-        // TODO: navigate to the actual payment screen once it exists, e.g.
-        // navigation.navigate('Payment', { requestNumber: REQUEST_DETAIL.requestNumber });
-        //
-        // BACKEND-READY: this is the initial-payment step — creates a
-        // PAYMENT row with payment_type = 'initial', request_id, and amount
-        // (validated as >= the required minimum of QUOTATION.total_amount —
-        // confirm the real percentage first, see the REQUEST_DETAIL note
-        // above) via PayMongo. On success: SERVICE_REQUEST.request_status
-        // moves to something like 'booked'/'confirmed', and the provider
-        // should be notified payment was received — this is what actually
-        // locks in the booking on their side.
         setModalStep(null);
+        navigation.navigate(ROUTES.PAYMENT, {
+            requestId,
+            requestNumber: detail?.requestNumber,
+            paymentStage: 'initial',
+            amount: Math.round(((detail?.total ?? 0) * INITIAL_FEE_PERCENT) / 100 * 100) / 100,
+        });
     };
 
     return (
@@ -110,12 +150,20 @@ const RequestDetails = ({ navigation, route }) => {
                 </TouchableOpacity>
                 <Text style={styles.header}>My Requests</Text>
 
-                <Text style={styles.requestNumber}>Request #{REQUEST_DETAIL.requestNumber}</Text>
-                <Text style={styles.senderLine}>{REQUEST_DETAIL.providerName} sent a quotation</Text>
-                <Text style={styles.reasonText}>{REQUEST_DETAIL.reason}</Text>
+                {loading ? (
+                    <ActivityIndicator color="#0255AF" style={{ marginTop: 24 }} />
+                ) : loadError ? (
+                    <Text style={styles.reasonText}>{loadError}</Text>
+                ) : !detail || !detail.hasOpenQuotation ? (
+                    <Text style={styles.reasonText}>There is no open quotation for this request.</Text>
+                ) : (
+                    <>
+                <Text style={styles.requestNumber}>Request #{detail.requestNumber}</Text>
+                <Text style={styles.senderLine}>{detail.providerName} sent a quotation</Text>
+                {!!detail.reason && <Text style={styles.reasonText}>{detail.reason}</Text>}
 
                 <View style={styles.lineItemsCard}>
-                    {REQUEST_DETAIL.lineItems.map((item) => (
+                    {detail.lineItems.map((item) => (
                         <View key={item.label} style={styles.lineItemRow}>
                             <Text style={styles.lineItemLabel}>{item.label}</Text>
                             <Text style={styles.lineItemAmount}>₱{item.amount.toFixed(2)}</Text>
@@ -124,27 +172,29 @@ const RequestDetails = ({ navigation, route }) => {
                     <View style={styles.divider} />
                     <View style={styles.lineItemRow}>
                         <Text style={styles.totalLabel}>Total</Text>
-                        <Text style={styles.totalAmount}>₱{REQUEST_DETAIL.total.toFixed(2)}</Text>
+                        <Text style={styles.totalAmount}>₱{detail.total.toFixed(2)}</Text>
                     </View>
                 </View>
 
                 <Text style={styles.noteText}>
                     Note: If you accepted the quotation, you are required to pay the initial fee which is the{' '}
-                    {REQUEST_DETAIL.initialFeePercent}% of the total service repair cost.
+                    {INITIAL_FEE_PERCENT}% of the total service repair cost.
                 </Text>
 
                 <View style={styles.actionRow}>
-                    <TouchableOpacity style={styles.actionButtonHalf} onPress={handleApprove}>
+                    <TouchableOpacity style={styles.actionButtonHalf} onPress={handleApprove} disabled={acting}>
                         <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.actionButton}>
-                            <Text style={styles.actionButtonText}>Approve</Text>
+                            <Text style={styles.actionButtonText}>{acting ? 'Please wait…' : 'Approve'}</Text>
                         </LinearGradient>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.actionButtonHalf} onPress={handleDecline}>
+                    <TouchableOpacity style={styles.actionButtonHalf} onPress={handleDecline} disabled={acting}>
                         <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.actionButton}>
                             <Text style={styles.actionButtonText}>Decline</Text>
                         </LinearGradient>
                     </TouchableOpacity>
                 </View>
+                    </>
+                )}
             </ScrollView>
 
             <View style={styles.tabBar}>
@@ -171,7 +221,7 @@ const RequestDetails = ({ navigation, route }) => {
 
                         <Text style={styles.modalTitle}>Service Request Approved</Text>
                         <Text style={styles.modalSubtitle}>
-                            You are required to pay the initial fee which is the {REQUEST_DETAIL.initialFeePercent}% of the total
+                            You are required to pay the initial fee which is the {INITIAL_FEE_PERCENT}% of the total
                             service repair cost.
                         </Text>
 

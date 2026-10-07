@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, Modal, StyleSheet } from 'react-native';
+import { View, Image, Text, TouchableOpacity, ScrollView, Modal, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { payForServiceRequest } from '../api/servicerequest_api';
 
 const ACTIVE_TAB = 'Track';
 
@@ -23,7 +24,8 @@ const PAYMENT_METHODS = [
 ];
 
 const Payment = ({ navigation, route }) => {
-    const requestNumber = route?.params?.requestNumber || 'SR-0000';
+    const requestId = route?.params?.requestId;
+    const requestNumber = route?.params?.requestNumber || requestId || '';
     // 'initial' (20% deposit, right after the quotation/appointment is approved)
     // or 'final' (remaining balance, once the job is marked Done).
     const paymentStage = route?.params?.paymentStage || 'initial';
@@ -31,6 +33,7 @@ const Payment = ({ navigation, route }) => {
 
     const [selectedMethod, setSelectedMethod] = useState(null);
     const [showProcessedModal, setShowProcessedModal] = useState(false);
+    const [isPaying, setIsPaying] = useState(false);
 
     const formattedAmount = `₱${Number(amount).toLocaleString('en-PH', {
         minimumFractionDigits: 2,
@@ -45,16 +48,25 @@ const Payment = ({ navigation, route }) => {
         setSelectedMethod(methodId);
     };
 
-    const handleContinue = () => {
-        if (!selectedMethod) return;
-        // TODO: backend-ready integration point. Call your own backend (never
-        // PayMongo directly from the app) to create a Payment Intent / Checkout
-        // Session for `amount` using `selectedMethod`. Card payments typically need
-        // client-side tokenization; Gcash/QR Ph redirect out to authorize and then
-        // return to the app. Only open the processed modal once the backend confirms
-        // the payment actually went through (e.g. a webhook-backed status check) —
-        // not immediately on tapping Continue like this hardcoded version does.
-        setShowProcessedModal(true);
+    // The payment is recorded by OUR backend (POST /service-requests/:id/payment),
+    // which also notifies the provider. PayMongo checkout (GCash/QR Ph redirects,
+    // card tokenization) plugs into that endpoint later — the app never talks to
+    // PayMongo directly. The processed modal opens only after the backend confirms.
+    const handleContinue = async () => {
+        if (!selectedMethod || isPaying) return;
+        if (!requestId || !(amount > 0)) {
+            Alert.alert('Missing payment details', 'Go back to Track and open the request again.');
+            return;
+        }
+        setIsPaying(true);
+        try {
+            await payForServiceRequest(requestId, { amount, method: selectedMethod, stage: paymentStage });
+            setShowProcessedModal(true);
+        } catch (error) {
+            Alert.alert('Payment failed', error.message);
+        } finally {
+            setIsPaying(false);
+        }
     };
 
     const handleCloseProcessedModal = () => {
@@ -68,7 +80,7 @@ const Payment = ({ navigation, route }) => {
     const handlePrimaryCta = () => {
         setShowProcessedModal(false);
         if (paymentStage === 'final') {
-            navigation.navigate('Ratings', { requestNumber });
+            navigation.navigate('Ratings', { requestId, requestNumber });
         } else {
             navigation.navigate('Track');
         }

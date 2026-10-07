@@ -1,7 +1,11 @@
-import React, { useState } from 'react';
-import { View, Image, Text, TouchableOpacity, TextInput, FlatList, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Image, Text, TouchableOpacity, TextInput, FlatList, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
+import { useFocusEffect } from '@react-navigation/native';
+// Same thread endpoints the provider's chat uses — the backend is role-aware and
+// marks the thread read for whichever side opens it.
+import { getConversationMessages, sendConversationMessage } from '../api/providerWork_api';
 
 const ACTIVE_TAB = 'Chat';
 
@@ -17,44 +21,97 @@ const TAB_ITEMS = [
     { key: 'CustomerProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
 ];
 
-// Hardcoded thread header — once navigation params + the backend are wired
-// up, this should come from route.params (e.g. route.params.conversationId)
-// and a fetch call instead of being hardcoded here.
-const CONVERSATION = {
-    senderName: 'Nick Duran',
-    subject: 'Laptop screen repair',
-    isOnline: true,
+// How often the open thread checks for new messages (ms). Replace the polling with a
+// realtime subscription (Supabase Realtime / FCM) once that is enabled.
+const POLL_INTERVAL_MS = 5000;
+
+const formatTimestamp = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+    })}`;
 };
 
-// Hardcoded message thread — the adviser wants the coded frontend checked
-// before the backend exists. Once the API is ready, drop this array and
-// populate the thread via setMessages(...) from a fetch instead.
-// `isSender: true` is included so sent bubbles (right-aligned, colored) can
-// be told apart from received ones (left-aligned, gray) once real messages
-// come in.
-const MESSAGE_THREAD = [
-    { id: '1', text: 'K lang.', timestamp: 'Jun 24 9:12 AM', isSender: false },
-];
+const ConversationCustomer = ({ navigation, route }) => {
+    // Passed by MessageCustomer.js: the thread id is the request reference ("SR-0007").
+    const conversationId = route?.params?.conversationId;
+    const contactName = route?.params?.contactName || 'Service provider';
+    const subject = route?.params?.jobTitle || '';
+    const isOnline = route?.params?.isOnline ?? false;
 
-const ConversationCustomer = ({ navigation }) => {
+    // Message shape (GET /conversations/:id/messages): { id, text, sender, senderId, createdAt }.
+    // `sender === 'customer'` is this user — the right-aligned bubble.
+    const [messages, setMessages] = useState([]);
     const [draft, setDraft] = useState('');
+    const [loading, setLoading] = useState(true);
+    const [loadFailed, setLoadFailed] = useState(false);
+    const [sending, setSending] = useState(false);
+    const listRef = useRef(null);
+
+    const loadMessages = useCallback(async () => {
+        if (!conversationId) {
+            setLoadFailed(true);
+            return;
+        }
+        try {
+            const data = await getConversationMessages(conversationId);
+            setMessages(data?.messages ?? []);
+            setLoadFailed(false);
+        } catch (error) {
+            setLoadFailed(true);
+        }
+    }, [conversationId]);
+
+    // Load on focus and keep polling while the thread is open, so the provider's
+    // replies appear without leaving the screen.
+    useFocusEffect(
+        useCallback(() => {
+            loadMessages().finally(() => setLoading(false));
+            const timer = setInterval(loadMessages, POLL_INTERVAL_MS);
+            return () => clearInterval(timer);
+        }, [loadMessages]),
+    );
+
+    useEffect(() => {
+        listRef.current?.scrollToEnd({ animated: true });
+    }, [messages.length]);
 
     const handleTabPress = (tabKey) => {
         if (tabKey === ACTIVE_TAB) return;
-        // TODO: confirm these screen names once the rest of the tabs are built
         navigation.navigate(tabKey);
     };
 
-    const handleSend = () => {
-        // TODO: send `draft` to the backend once the messaging API is ready,
-        // then append the new message to MESSAGE_THREAD / clear the input.
+    const handleSend = async () => {
+        const text = draft.trim();
+        if (!text || sending || !conversationId) return;
+
+        // Show the message right away, then swap in the saved one from the backend.
+        const tempId = `temp-${Date.now()}`;
+        setMessages((prev) => [...prev, { id: tempId, text, sender: 'customer', createdAt: new Date().toISOString() }]);
+        setDraft('');
+        setSending(true);
+        try {
+            const data = await sendConversationMessage(conversationId, text);
+            const saved = data?.message;
+            setMessages((prev) => prev.map((m) => (m.id === tempId ? saved : m)));
+        } catch (error) {
+            setMessages((prev) => prev.filter((m) => m.id !== tempId));
+            setDraft(text);
+            Alert.alert('Message not sent', error.message);
+        } finally {
+            setSending(false);
+        }
     };
 
     const renderMessageItem = ({ item }) => (
         <View>
-            <Text style={styles.timestamp}>{item.timestamp}</Text>
-            <View style={item.isSender ? styles.bubbleSent : styles.bubbleReceived}>
-                <Text style={item.isSender ? styles.bubbleTextSent : styles.bubbleTextReceived}>{item.text}</Text>
+            <Text style={styles.timestamp}>{formatTimestamp(item.createdAt)}</Text>
+            <View style={item.sender === 'customer' ? styles.bubbleSent : styles.bubbleReceived}>
+                <Text style={item.sender === 'customer' ? styles.bubbleTextSent : styles.bubbleTextReceived}>
+                    {item.text}
+                </Text>
             </View>
         </View>
     );
@@ -69,24 +126,34 @@ const ConversationCustomer = ({ navigation }) => {
             </View>
 
             <FlatList
-                data={MESSAGE_THREAD}
-                keyExtractor={(item) => item.id}
+                ref={listRef}
+                data={messages}
+                keyExtractor={(item) => String(item.id)}
                 renderItem={renderMessageItem}
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
                 ListHeaderComponent={
                     <View style={styles.conversationCard}>
                         <View style={styles.conversationTopRow}>
-                            <Text style={styles.senderName}>{CONVERSATION.senderName}</Text>
-                            {CONVERSATION.isOnline && (
+                            <Text style={styles.senderName}>{contactName}</Text>
+                            {isOnline && (
                                 <View style={styles.onlineBadge}>
                                     <Text style={styles.onlineBadgeText}>Online</Text>
                                 </View>
                             )}
                         </View>
-                        <Text style={styles.subject}>{CONVERSATION.subject}</Text>
+                        {!!subject && <Text style={styles.subject}>{subject}</Text>}
+                        {loadFailed && (
+                            <TouchableOpacity onPress={loadMessages}>
+                                <Text style={styles.loadErrorText}>Couldn't load messages. Tap to retry.</Text>
+                            </TouchableOpacity>
+                        )}
+                        {loading && <ActivityIndicator color="#0255AF" style={{ marginVertical: 8 }} />}
                         <View style={styles.divider} />
                     </View>
+                }
+                ListEmptyComponent={
+                    !loading && !loadFailed ? <Text style={styles.emptyThreadText}>No messages yet — say hi!</Text> : null
                 }
             />
 
@@ -128,6 +195,18 @@ const ConversationCustomer = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
+    loadErrorText: {
+        fontSize: 12,
+        color: '#B00020',
+        textAlign: 'center',
+        marginVertical: 8,
+    },
+    emptyThreadText: {
+        fontSize: 13,
+        color: '#999999',
+        textAlign: 'center',
+        marginTop: 24,
+    },
     safeArea: {
         flex: 1,
         backgroundColor: '#FFFFFF',

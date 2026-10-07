@@ -71,6 +71,8 @@ const toFormErrors = (details) => {
   return Object.keys(out).length ? out : null;
 };
 
+// Exported so sibling API modules (providerWork_api.js) share the same base URL,
+// auth token and error handling instead of re-implementing fetch.
 async function request(path, { method = 'GET', body, auth = true } = {}) {
   const url = `${BASE_URL}${path}`;
   // FormData (file uploads) must NOT get a manual Content-Type — fetch needs
@@ -151,6 +153,7 @@ const toRegistrationPayload = (form) => {
 };
 
 export const API_BASE_URL = BASE_URL;
+export { request };
 export const getToken = () => AsyncStorage.getItem(TOKEN_KEY);
 export const healthCheck = () => request('/health', { auth: false });
 
@@ -194,3 +197,16 @@ export const getProviderProfile = () => request('/providers/me');
 // Returns the backend's response (ideally the updated user).
 export const setActiveMode = (mode) =>
   request('/users/me', { method: 'PATCH', body: { activeMode: mode } });
+
+// --- Provider availability (the "Manage Calendar" modal on ServiceProviderDashboard) ---
+// GET -> { availability: {...}, slots: ['YYYY-MM-DDTHH:00', ...] } — the dashboard
+// reads `slots`. A missing date/slot means available.
+export const getProviderUnavailableSlots = () => request('/providers/availability');
+
+// date: 'YYYY-MM-DD', slot: 'HH:00' (24h, the dashboard's TIME_SLOTS values),
+// makeAvailable: true clears the mark, false marks the slot unavailable.
+export const setProviderSlotAvailability = (date, slot, makeAvailable) =>
+  request('/providers/availability', {
+    method: 'PUT',
+    body: { date, slot, status: makeAvailable ? 'available' : 'unavailable' },
+  });

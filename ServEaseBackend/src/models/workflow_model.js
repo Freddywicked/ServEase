@@ -1,0 +1,154 @@
+// src/models/workflow_model.js
+// Data access for the core customer <-> provider workflow tables, created by
+// migrations/002_core_workflow_tables.sql:
+//   notifications, schedule_proposals, payment_requests, progress_updates,
+//   payments, ratings, messages, provider_unavailable_slots
+const { supabase } = require('../config/supabase');
+const { unwrap } = require('../utils/db');
+
+// ---------- notifications ----------
+const addNotification = async ({ userId, type = 'general', message, requestId = null }) =>
+  unwrap(
+    await supabase
+      .from('notifications')
+      .insert({ user_id: userId, type, message, request_id: requestId })
+      .select()
+      .single()
+  );
+
+// Best-effort: a notification must never break the action that triggered it.
+const notify = (args) => addNotification(args).catch((err) => console.error('[notify]', err.message));
+
+const listNotifications = async (userId, limit = 20) =>
+  unwrap(
+    await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(Math.min(Number(limit) || 20, 100))
+  );
+
+// ---------- schedule_proposals ----------
+const addScheduleProposal = async (row) =>
+  unwrap(await supabase.from('schedule_proposals').insert(row).select().single());
+
+const findScheduleProposal = async (proposalId) =>
+  unwrap(await supabase.from('schedule_proposals').select('*').eq('proposal_id', proposalId).maybeSingle());
+
+const updateScheduleProposal = async (proposalId, patch) =>
+  unwrap(await supabase.from('schedule_proposals').update(patch).eq('proposal_id', proposalId).select().single());
+
+const listScheduleProposals = async (requestIds) => {
+  if (!requestIds.length) return [];
+  return unwrap(await supabase.from('schedule_proposals').select('*').in('request_id', requestIds));
+};
+
+// ---------- payment_requests ----------
+const addPaymentRequest = async (row) =>
+  unwrap(await supabase.from('payment_requests').insert(row).select().single());
+
+const findPaymentRequest = async (paymentRequestId) =>
+  unwrap(await supabase.from('payment_requests').select('*').eq('payment_request_id', paymentRequestId).maybeSingle());
+
+const updatePaymentRequest = async (paymentRequestId, patch) =>
+  unwrap(
+    await supabase.from('payment_requests').update(patch).eq('payment_request_id', paymentRequestId).select().single()
+  );
+
+const listPaymentRequests = async (requestIds) => {
+  if (!requestIds.length) return [];
+  return unwrap(await supabase.from('payment_requests').select('*').in('request_id', requestIds));
+};
+
+// ---------- progress_updates ----------
+const addProgressUpdate = async (row) =>
+  unwrap(await supabase.from('progress_updates').insert(row).select().single());
+
+const listProgressUpdates = async (requestIds) => {
+  if (!requestIds.length) return [];
+  return unwrap(
+    await supabase.from('progress_updates').select('*').in('request_id', requestIds).order('created_at')
+  );
+};
+
+// ---------- payments ----------
+const addPayment = async (row) => unwrap(await supabase.from('payments').insert(row).select().single());
+
+const listPayments = async (requestIds) => {
+  if (!requestIds.length) return [];
+  return unwrap(await supabase.from('payments').select('*').in('request_id', requestIds).order('created_at'));
+};
+
+// ---------- ratings ----------
+const addRating = async (row) => unwrap(await supabase.from('ratings').insert(row).select().single());
+
+const findRatingForRequest = async (requestId) =>
+  unwrap(await supabase.from('ratings').select('*').eq('request_id', requestId).maybeSingle());
+
+
+// ---------- messages ----------
+const addMessage = async (row) => unwrap(await supabase.from('messages').insert(row).select().single());
+
+const listMessages = async (requestId) =>
+  unwrap(await supabase.from('messages').select('*').eq('request_id', requestId).order('created_at'));
+
+const listMessagesForRequests = async (requestIds) => {
+  if (!requestIds.length) return [];
+  return unwrap(await supabase.from('messages').select('*').in('request_id', requestIds).order('created_at'));
+};
+
+// viewer: 'customer' | 'provider' — marks every message in the thread seen by that side.
+const markMessagesSeen = async (requestId, viewer) => {
+  const column = viewer === 'provider' ? 'seen_by_provider' : 'seen_by_customer';
+  const { error } = await supabase.from('messages').update({ [column]: true }).eq('request_id', requestId);
+  if (error) console.error('[messages] mark seen failed:', error.message);
+};
+
+// ---------- provider_unavailable_slots ----------
+const listUnavailableSlots = async (providerId) =>
+  unwrap(await supabase.from('provider_unavailable_slots').select('date, slot').eq('provider_id', providerId));
+
+const setUnavailableSlot = async (providerId, date, slot, unavailable) => {
+  if (unavailable) {
+    const { error } = await supabase
+      .from('provider_unavailable_slots')
+      .upsert({ provider_id: providerId, date, slot }, { onConflict: 'provider_id,date,slot' });
+    if (error) unwrap({ error });
+    return;
+  }
+  unwrap(
+    await supabase
+      .from('provider_unavailable_slots')
+      .delete()
+      .eq('provider_id', providerId)
+      .eq('date', date)
+      .eq('slot', slot)
+  );
+};
+
+module.exports = {
+  addNotification,
+  notify,
+  listNotifications,
+  addScheduleProposal,
+  findScheduleProposal,
+  updateScheduleProposal,
+  listScheduleProposals,
+  addPaymentRequest,
+  findPaymentRequest,
+  updatePaymentRequest,
+  listPaymentRequests,
+  addProgressUpdate,
+  listProgressUpdates,
+  addPayment,
+  listPayments,
+  addRating,
+  findRatingForRequest,
+  addMessage,
+  listMessages,
+  listMessagesForRequests,
+  markMessagesSeen,
+  listUnavailableSlots,
+  setUnavailableSlot,
+};

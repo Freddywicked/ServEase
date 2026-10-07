@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ROUTES } from '../navigation/routes';
+import { getCategories, browseServiceProviders } from '../api/servicerequest_api';
 
 const ACTIVE_TAB = 'FindServiceProvider';
 
@@ -15,108 +17,45 @@ const TAB_ITEMS = [
     { key: 'CustomerProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
 ];
 
-const CATEGORIES = ['All', 'Home Repair', 'Automotive', 'IT and Phone Repair'];
-
-// Hardcoded per instructions for this round of frontend review — swap this
-// out for a backend fetch of providers (filtered by category) once that API
-// is ready.
-const PROVIDERS_BY_CATEGORY = {
-    'Home Repair': [
-        {
-            id: 'juan-dela-cruz',
-            name: 'Juan Dela Cruz',
-            specialty: 'Home Repair Specialist',
-            verified: true,
-            available: true,
-            rating: 4.7,
-            reviews: 62,
-            experienceYears: 6,
-            specialities: 'Plumbing and Carpentry',
-            location: 'Naga City · 1.8 km away',
-            availability: 'Mon-Sat, 8AM-5PM',
-        },
-        {
-            id: 'ana-bautista',
-            name: 'Ana Bautista',
-            specialty: 'Home Repair Specialist',
-            verified: true,
-            available: false,
-            rating: 4.6,
-            reviews: 48,
-            experienceYears: 4,
-            specialities: 'Electrical and Painting',
-            location: 'Naga City · 3.1 km away',
-            availability: 'Mon-Fri, 9AM-6PM',
-        },
-    ],
-    Automotive: [
-        {
-            id: 'carlos-reyes',
-            name: 'Carlos Reyes',
-            specialty: 'Automotive Technician',
-            verified: true,
-            available: true,
-            rating: 4.9,
-            reviews: 110,
-            experienceYears: 8,
-            specialities: 'Engine and Brake Repair',
-            location: 'Naga City · 2.2 km away',
-            availability: 'Mon-Sat, 8AM-6PM',
-        },
-        {
-            id: 'liza-fernandez',
-            name: 'Liza Fernandez',
-            specialty: 'Automotive Technician',
-            verified: true,
-            available: true,
-            rating: 4.5,
-            reviews: 37,
-            experienceYears: 3,
-            specialities: 'Aircon and Electrical',
-            location: 'Naga City · 4.0 km away',
-            availability: 'Tue-Sun, 9AM-5PM',
-        },
-    ],
-    'IT and Phone Repair': [
-        {
-            id: 'mika-santos',
-            name: 'Mika Santos',
-            specialty: 'IT and Phone Repair Technician',
-            verified: true,
-            available: true,
-            rating: 4.8,
-            reviews: 95,
-            experienceYears: 5,
-            specialities: 'IT and Phone Repair',
-            location: 'Naga City · 2.5 km away',
-            availability: 'Mon-Fri, 8AM-6PM',
-        },
-        {
-            id: 'paolo-cruz',
-            name: 'Paolo Cruz',
-            specialty: 'IT and Phone Repair Technician',
-            verified: true,
-            available: false,
-            rating: 4.4,
-            reviews: 29,
-            experienceYears: 2,
-            specialities: 'Computer and Laptop Repair',
-            location: 'Naga City · 1.2 km away',
-            availability: 'Mon-Fri, 10AM-7PM',
-        },
-    ],
-};
-
-const ALL_PROVIDERS = Object.values(PROVIDERS_BY_CATEGORY).flat();
+// Category chips and provider cards both come from the backend now:
+//   GET /categories          -> the chips ('All' + the live category labels)
+//   GET /service-providers   -> verified providers, filtered server-side by category
+// Nothing here is hardcoded sample data anymore.
 
 const FindServiceProvider = ({ navigation }) => {
+    const [categories, setCategories] = useState(['All']);
     const [selectedCategory, setSelectedCategory] = useState('All');
+    const [providers, setProviders] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
 
-    const providers = selectedCategory === 'All' ? ALL_PROVIDERS : PROVIDERS_BY_CATEGORY[selectedCategory];
+    const loadProviders = useCallback(async (category) => {
+        setIsLoading(true);
+        setLoadError('');
+        try {
+            const list = await browseServiceProviders({ category: category === 'All' ? undefined : category });
+            setProviders(list);
+        } catch (error) {
+            setProviders([]);
+            setLoadError(error.message || 'Could not load service providers.');
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    // Categories once on mount; providers on mount and whenever the category changes.
+    useEffect(() => {
+        getCategories()
+            .then((list) => setCategories(['All', ...list.map((c) => c.label)]))
+            .catch(() => {}); // chips fall back to just 'All'
+    }, []);
+
+    useEffect(() => {
+        loadProviders(selectedCategory);
+    }, [selectedCategory, loadProviders]);
 
     const handleTabPress = (tabKey) => {
         if (tabKey === ACTIVE_TAB) return;
-        // TODO: confirm these screen names once the rest of the tabs are built
         navigation.navigate(tabKey);
     };
 
@@ -124,9 +63,10 @@ const FindServiceProvider = ({ navigation }) => {
         setSelectedCategory(category);
     };
 
-    const handleProviderPress = (providerId) => {
-        // TODO: point this to an actual provider profile screen once it exists
-        navigation.navigate('ServiceProviderProfile', { providerId });
+    // Tapping a provider starts a service request — that flow asks for the category,
+    // problem, photo and schedule, then recommends this provider's colleagues too.
+    const handleProviderPress = () => {
+        navigation.navigate(ROUTES.CREATE_SERVICE_REQUEST);
     };
 
     const renderProviderCard = (provider) => (
@@ -165,23 +105,29 @@ const FindServiceProvider = ({ navigation }) => {
 
             <View style={styles.ratingRow}>
                 <Image source={require('../assets/icon_star.png')} style={styles.starIcon} />
-                <Text style={styles.ratingText}>{provider.rating}</Text>
+                <Text style={styles.ratingText}>{provider.rating ?? '—'}</Text>
                 <Text style={styles.ratingDetail}>{provider.reviews} reviews</Text>
-                <Text style={styles.ratingDetail}>{provider.experienceYears} years experience</Text>
+                {provider.experienceYears != null && (
+                    <Text style={styles.ratingDetail}>{provider.experienceYears} years experience</Text>
+                )}
             </View>
 
             <Text style={styles.detailLine}>
                 <Text style={styles.detailLabel}>Specialities: </Text>
-                {provider.specialities}
+                {provider.specialities || provider.specialty}
             </Text>
-            <Text style={styles.detailLine}>
-                <Text style={styles.detailLabel}>Location: </Text>
-                {provider.location}
-            </Text>
-            <Text style={styles.detailLine}>
-                <Text style={styles.detailLabel}>Available: </Text>
-                {provider.availability}
-            </Text>
+            {!!provider.locationName && (
+                <Text style={styles.detailLine}>
+                    <Text style={styles.detailLabel}>Location: </Text>
+                    {provider.locationName}
+                </Text>
+            )}
+            {!!provider.availabilitySchedule && (
+                <Text style={styles.detailLine}>
+                    <Text style={styles.detailLabel}>Available: </Text>
+                    {provider.availabilitySchedule}
+                </Text>
+            )}
         </TouchableOpacity>
     );
 
@@ -189,17 +135,13 @@ const FindServiceProvider = ({ navigation }) => {
         <SafeAreaView style={styles.safeArea}>
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <Text style={styles.headerTitle}>Find Service Providers</Text>
-                <View style={styles.locationRow}>
-                    <Image source={require('../assets/icon_location.png')} style={styles.locationIcon} />
-                    <Text style={styles.locationText}>Naga City</Text>
-                </View>
 
                 <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
                     contentContainerStyle={styles.categoryTabRow}
                 >
-                    {CATEGORIES.map((category) => {
+                    {categories.map((category) => {
                         const isSelected = category === selectedCategory;
                         return (
                             <TouchableOpacity
@@ -215,7 +157,17 @@ const FindServiceProvider = ({ navigation }) => {
                     })}
                 </ScrollView>
 
-                {providers.map(renderProviderCard)}
+                {isLoading ? (
+                    <ActivityIndicator color="#0255AF" style={{ marginTop: 24 }} />
+                ) : loadError ? (
+                    <TouchableOpacity onPress={() => loadProviders(selectedCategory)}>
+                        <Text style={styles.emptyText}>Couldn't load providers. Tap to retry.{'\n'}{loadError}</Text>
+                    </TouchableOpacity>
+                ) : providers.length === 0 ? (
+                    <Text style={styles.emptyText}>No verified service providers in this category yet.</Text>
+                ) : (
+                    providers.map(renderProviderCard)
+                )}
             </ScrollView>
 
             <View style={styles.tabBar}>
@@ -253,6 +205,13 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
         paddingTop: 16,
         paddingBottom: 24,
+    },
+    emptyText: {
+        fontSize: 13,
+        color: '#777777',
+        textAlign: 'center',
+        marginTop: 24,
+        lineHeight: 19,
     },
     headerTitle: {
         fontSize: 22,

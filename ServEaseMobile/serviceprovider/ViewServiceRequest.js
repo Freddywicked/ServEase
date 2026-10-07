@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, Modal, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, Modal, StyleSheet, ActivityIndicator, Alert, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
+import { getProviderServiceRequest, submitQuotation, declineServiceRequest } from '../api/servicerequest_api';
 
 const ACTIVE_TAB = 'Requests';
 
@@ -17,10 +18,15 @@ const TAB_ITEMS = [
     { key: 'ServiceProviderProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
 ];
 
-// Possible-cause list — hardcoded per the design, backend isn't integrated yet.
-const POSSIBLE_CAUSES = ['Dirty air filter', 'Refrigerant leak', 'Compressor issue'];
+const ViewServiceRequest = ({ navigation, route }) => {
+    // Passed by IncomingServiceRequest.js. The request detail is
+    // GET /provider/service-requests/:id -> { id, customer, concern, photos, appointment, ai }.
+    const requestId = route?.params?.requestId;
+    const [request, setRequest] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
+    const [acting, setActing] = useState(false);
 
-const ViewServiceRequest = ({ navigation }) => {
     const [showApprovedModal, setShowApprovedModal] = useState(false);
     const [laborCost, setLaborCost] = useState('');
     const [partsCost, setPartsCost] = useState('');
@@ -28,12 +34,35 @@ const ViewServiceRequest = ({ navigation }) => {
     const [showRejectModal, setShowRejectModal] = useState(false);
     const [rejectReason, setRejectReason] = useState('');
 
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            if (!requestId) {
+                setLoadError('Missing request id');
+                setLoading(false);
+                return;
+            }
+            try {
+                setRequest(await getProviderServiceRequest(requestId));
+            } catch (error) {
+                if (!cancelled) setLoadError(error.message || 'Could not load the request.');
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [requestId]);
+
     const handleBack = () => {
         navigation.goBack();
     };
 
     const handleViewLocation = () => {
-        // TODO: open the device's maps app with the customer's coordinates once available
+        // Open Google Maps with a search for the customer's address/pin.
+        const query = request?.customer?.address;
+        if (query) Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`);
     };
 
     const handleDecline = () => {
@@ -52,25 +81,56 @@ const ViewServiceRequest = ({ navigation }) => {
         setShowRejectModal(false);
     };
 
-    const handleSendRejection = () => {
-        // TODO: call the decline-request endpoint once it exists, sending rejectReason
-        setShowRejectModal(false);
+    // Decline: the customer is notified (with the reason) so they can pick another provider.
+    const handleSendRejection = async () => {
+        if (acting) return;
+        if (!rejectReason.trim()) {
+            Alert.alert('Reason needed', 'Please tell the customer why you are declining.');
+            return;
+        }
+        setActing(true);
+        try {
+            await declineServiceRequest(requestId, { reason: rejectReason.trim() });
+            setShowRejectModal(false);
+            navigation.goBack();
+        } catch (error) {
+            setActing(false);
+            Alert.alert('Could not decline', error.message);
+        }
     };
 
     const handleAddPart = () => {
-        // TODO: add another parts line item once multi-part entry is designed
+        Alert.alert('One parts total', 'Enter the combined parts cost; itemized parts are coming later.');
     };
 
-    const handleSendQuote = () => {
-        // TODO: call the send-quote endpoint once it exists, sending laborCost/partsCost/notes
-        setShowApprovedModal(false);
+    // The quotation lands on the customer's Track screen (quotation card) + a notification.
+    const handleSendQuote = async () => {
+        if (acting) return;
+        const labor = Number(laborCost) || 0;
+        const parts = Number(partsCost) || 0;
+        if (labor + parts <= 0) {
+            Alert.alert('Missing price', 'Enter a labor or parts cost first.');
+            return;
+        }
+        setActing(true);
+        try {
+            await submitQuotation(requestId, { laborCost: labor, partsCost: parts, remarks: notes.trim() });
+            setShowApprovedModal(false);
+            Alert.alert('Quotation sent', 'The customer has been notified.', [
+                { text: 'OK', onPress: () => navigation.goBack() },
+            ]);
+        } catch (error) {
+            setActing(false);
+            Alert.alert('Could not send the quotation', error.message);
+        }
     };
 
     const handleTabPress = (tabKey) => {
         if (tabKey === ACTIVE_TAB) return;
-        // TODO: confirm these screen names once the rest of the tabs are built
         navigation.navigate(tabKey);
     };
+
+    const possibleCauses = request?.ai?.possibleCauses || [];
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -80,55 +140,72 @@ const ViewServiceRequest = ({ navigation }) => {
                 </TouchableOpacity>
 
                 <Text style={styles.headerTitle}>Service Request</Text>
-                <Text style={styles.requestNumber}>Request #SR-0001</Text>
+
+                {loading ? (
+                    <ActivityIndicator color="#0255AF" style={{ marginTop: 24 }} />
+                ) : loadError ? (
+                    <Text style={styles.concernText}>{loadError}</Text>
+                ) : !request ? null : (
+                    <>
+                <Text style={styles.requestNumber}>Request #{request.id}</Text>
 
                 <Text style={styles.sectionLabel}>Customer Information</Text>
                 <View style={styles.customerRow}>
                     <Image source={require('../assets/icon_profile_photo.png')} style={styles.customerAvatar} />
                     <View style={styles.customerInfo}>
-                        <Text style={styles.customerName}>Dominic Alcantara</Text>
+                        <Text style={styles.customerName}>{request.customer?.name || 'Customer'}</Text>
                         <View style={styles.addressRow}>
-                            <Text style={styles.customerAddress}>123 Maple St QC Manila</Text>
+                            <Text style={styles.customerAddress}>{request.customer?.address || 'No address given'}</Text>
                             <TouchableOpacity style={styles.distanceInline} onPress={handleViewLocation}>
                                 <Image source={require('../assets/icon_pinloc.png')} style={styles.pinIcon} />
-                                <Text style={styles.distanceText}>1.2 km away</Text>
+                                <Text style={styles.distanceText}>View map</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
                 </View>
 
                 <Text style={styles.sectionLabel}>Customer Concern</Text>
-                <Text style={styles.concernText}>
-                    Customer Narration about the devices problem lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
-                </Text>
-                <View style={styles.photoPlaceholder} />
+                <Text style={styles.concernText}>{request.concern}</Text>
+                {request.photos?.[0] ? (
+                    <Image source={{ uri: request.photos[0] }} style={styles.photoImage} />
+                ) : (
+                    <View style={styles.photoPlaceholder} />
+                )}
 
+                {request.ai && (
+                    <>
                 <Text style={styles.sectionLabel}>AI Diagnosis (Preliminary)</Text>
                 <View style={styles.aiBanner}>
                     <Image source={require('../assets/icon_lightning.png')} style={styles.aiIcon} />
-                    <Text style={styles.aiBannerText}>AI suggests capacitor failure (82% confidence)</Text>
+                    <Text style={styles.aiBannerText}>
+                        AI suggests {request.ai.diagnosis} ({request.ai.confidence}% confidence)
+                    </Text>
                 </View>
 
                 <Text style={styles.causesLabel}>Possible causes:</Text>
-                {POSSIBLE_CAUSES.map((cause) => (
+                {possibleCauses.map((cause) => (
                     <Text key={cause} style={styles.causeItem}>{cause}</Text>
                 ))}
+                    </>
+                )}
 
                 <View style={styles.actionRow}>
-                    <TouchableOpacity style={styles.declineButton} onPress={handleDecline}>
+                    <TouchableOpacity style={styles.declineButton} onPress={handleDecline} disabled={acting}>
                         <Text style={styles.declineButtonText}>Decline</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={handleAccept} activeOpacity={0.85}>
+                    <TouchableOpacity onPress={handleAccept} activeOpacity={0.85} disabled={acting}>
                         <LinearGradient
                             colors={['#0255AF', '#04A5A5']}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 0 }}
                             style={styles.acceptButton}
                         >
-                            <Text style={styles.acceptButtonText}>Accept</Text>
+                            <Text style={styles.acceptButtonText}>{acting ? 'Please wait…' : 'Accept'}</Text>
                         </LinearGradient>
                     </TouchableOpacity>
                 </View>
+                    </>
+                )}
             </ScrollView>
 
             <View style={styles.tabBar}>
@@ -345,6 +422,12 @@ const styles = StyleSheet.create({
         color: '#444444',
         lineHeight: 19,
         marginBottom: 14,
+    },
+    photoImage: {
+        height: 160,
+        borderRadius: 10,
+        marginBottom: 14,
+        resizeMode: 'cover',
     },
     photoPlaceholder: {
         height: 90,

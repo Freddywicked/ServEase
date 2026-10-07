@@ -311,6 +311,28 @@ export const rejectAdditionalPayment = (requestId, paymentRequestId) =>
 export const respondToQuotation = (requestId, { approve }) =>
     request(`/service-requests/${requestId}/quotation/respond`, { method: 'POST', body: { approve } });
 
+// The customer's submitted requests, newest first (History screen). Same endpoint the
+// web app uses; each entry is the toCustomerDto shape (id, status, category, providers...).
+export const getMyServiceRequests = () => request('/service-requests').then(pick('requests'));
+
+// One of the customer's own requests (RequestDetails.js) -> the toCustomerDto shape.
+export const getServiceRequest = (requestId) => request(`/service-requests/${requestId}`).then(pick('request'));
+
+// Records a payment for the request (Payment.js). method: 'gcash' | 'qrph' | 'card',
+// stage: 'initial' | 'final' | 'additional'. The backend records it and notifies the
+// provider. (PayMongo checkout plugs into the backend later — never call it from the app.)
+export const payForServiceRequest = (requestId, { amount, method, stage }) =>
+    request(`/service-requests/${requestId}/payment`, { method: 'POST', body: { amount, method, stage } });
+
+// Rates a completed request (Ratings.js). One rating per request — 409 after that.
+export const rateServiceRequest = (requestId, { rating, review }) =>
+    request(`/service-requests/${requestId}/rating`, { method: 'POST', body: { rating, review } });
+
+// Find screen: browse verified providers. category is a label from GET /categories
+// ('All' = no filter); search matches name/company/specializations.
+export const browseServiceProviders = ({ category, search } = {}) =>
+    request('/service-providers', { query: { category, search } }).then(pick('providers'));
+
 /* ------------------------- Provider side (Service Provider app) ------------------------- */
 // The provider sees exactly the SERVICE_REQUEST rows customers sent to them from
 // RecommendServiceProvider (provider_id = the logged-in provider). The backend scopes

@@ -1,6 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { View, Image, Text, TouchableOpacity, FlatList, StyleSheet } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Image, Text, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+// Same backend endpoints the provider's Messages screen uses — GET /conversations
+// is role-aware, so a customer gets their threads with service providers here.
+import { getConversations } from '../api/providerWork_api';
 
 const ACTIVE_TAB = 'Chat';
 
@@ -16,63 +20,98 @@ const TAB_ITEMS = [
     { key: 'CustomerProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
 ];
 
-// Hardcoded message threads — the adviser wants the coded frontend checked
-// before the backend exists. Once the API is ready, drop this array and let
-// the useEffect below populate `messages` via setMessages(...) instead.
-const MESSAGES = [
-    { id: '1', senderName: 'Nick Duran', lastMessage: 'K lang.', isUnread: true },
-    { id: '2', senderName: 'Gabriela Lim', lastMessage: "Hi Ma'am, sinend ko na po yung quotation.", isUnread: false },
-];
-
 const MessageCustomer = ({ navigation }) => {
-    const [messages, setMessages] = useState(MESSAGES);
+    // Conversation shape (GET /conversations): { id ('SR-0007'), name, avatarUrl,
+    // lastMessage, hasUnread, jobTitle, isOnline }.
+    const [conversations, setConversations] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [loadFailed, setLoadFailed] = useState(false);
 
-    useEffect(() => {
-        // TODO: fetch the customer's message threads from the backend once
-        // the API is integrated, e.g. fetchMessages().then(setMessages);
+    const loadConversations = useCallback(async () => {
+        try {
+            const data = await getConversations();
+            setConversations(data?.conversations ?? []);
+            setLoadFailed(false);
+        } catch (error) {
+            // Keep the last known list. A 401 is already handled by api/client.
+            setLoadFailed(true);
+        }
     }, []);
+
+    // Reload on focus and pull-to-refresh, so a provider's reply (and the unread
+    // dot clearing after reading a thread) shows up without restarting the app.
+    useFocusEffect(
+        useCallback(() => {
+            loadConversations().finally(() => setLoading(false));
+        }, [loadConversations]),
+    );
+
+    const handleRefresh = async () => {
+        setRefreshing(true);
+        await loadConversations();
+        setRefreshing(false);
+    };
 
     const handleTabPress = (tabKey) => {
         if (tabKey === ACTIVE_TAB) return;
-        // TODO: confirm these screen names once the rest of the tabs are built
         navigation.navigate(tabKey);
     };
 
     const renderMessageItem = ({ item }) => (
-        // TODO: build this card out further once the backend fields are known
-        // (e.g. profile photo, timestamp, read receipts). Confirm 'Conversation'
-        // also matches the screen name registered in your navigator.
         <TouchableOpacity
             style={styles.card}
-            onPress={() => navigation.navigate('ConversationCustomer', { messageId: item.id, senderName: item.senderName })}
+            onPress={() =>
+                navigation.navigate('ConversationCustomer', {
+                    conversationId: item.id,
+                    contactName: item.name,
+                    jobTitle: item.jobTitle,
+                    isOnline: item.isOnline,
+                })
+            }
         >
-            <View style={styles.avatar} />
+            {item.avatarUrl ? (
+                <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
+            ) : (
+                <View style={styles.avatar} />
+            )}
             <View style={styles.cardContent}>
-                <Text style={styles.senderName}>{item.senderName}</Text>
-                <Text style={styles.lastMessage} numberOfLines={1}>{item.lastMessage}</Text>
+                <Text style={styles.senderName}>{item.name}</Text>
+                <Text style={styles.lastMessage} numberOfLines={1}>
+                    {item.lastMessage || `About your request ${item.id}`}
+                </Text>
             </View>
-            {item.isUnread && <View style={styles.unreadDot} />}
+            {item.hasUnread && <View style={styles.unreadDot} />}
         </TouchableOpacity>
     );
 
     return (
         <SafeAreaView style={styles.safeArea}>
             <FlatList
-                data={messages}
+                data={conversations}
                 keyExtractor={(item) => item.id}
                 renderItem={renderMessageItem}
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
-                ListHeaderComponent={<Text style={styles.header}>Messages</Text>}
-                // Empty state — shown when there are no message threads yet. It's
-                // unreachable right now because MESSAGES above is hardcoded, but it
-                // stays here (commented, not deleted) since it should come back the
-                // moment `messages` returns empty from the real backend.
-                // ListEmptyComponent={
-                //     <View style={styles.emptyState}>
-                //         <Text style={styles.emptyStateText}>No Messages yet</Text>
-                //     </View>
-                // }
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+                ListHeaderComponent={
+                    <View>
+                        <Text style={styles.header}>Messages</Text>
+                        {loadFailed && (
+                            <TouchableOpacity onPress={loadConversations}>
+                                <Text style={styles.errorText}>Couldn't load your messages. Tap to retry.</Text>
+                            </TouchableOpacity>
+                        )}
+                        {loading && <ActivityIndicator color="#0255AF" style={{ marginBottom: 12 }} />}
+                    </View>
+                }
+                ListEmptyComponent={
+                    !loading ? (
+                        <View style={styles.emptyState}>
+                            <Text style={styles.emptyStateText}>No Messages yet</Text>
+                        </View>
+                    ) : null
+                }
             />
 
             <View style={styles.tabBar}>
@@ -145,6 +184,12 @@ const styles = StyleSheet.create({
         borderRadius: 4,
         backgroundColor: '#0255AF',
         marginLeft: 10,
+    },
+    errorText: {
+        fontSize: 12,
+        color: '#B00020',
+        textAlign: 'center',
+        marginBottom: 12,
     },
     emptyState: {
         flex: 1,

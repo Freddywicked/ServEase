@@ -149,6 +149,7 @@ const toDetailsDto = (row, recipient, customer, photoUrls = []) => {
     customer: {
       name: customer?.name || 'Customer',
       address:
+        row.address ||
         customer?.address ||
         (row.latitude != null && row.longitude != null
           ? `${Number(row.latitude).toFixed(5)}, ${Number(row.longitude).toFixed(5)}`
@@ -237,6 +238,9 @@ const create = asyncHandler(async (req, res) => {
     time: req.body.appointmentTime || req.body.preferredTime || null, // "10:00 AM"
     latitude: toNumberOrNull(req.body.latitude),
     longitude: toNumberOrNull(req.body.longitude),
+    // The mobile app reverse-geocodes the pin and sends the readable address too
+    // (migration 002 adds the column); the provider sees it on ViewServiceRequest.
+    address: req.body.address ? String(req.body.address).trim() : null,
     ...(req.body.aiDiagnosis ? { ai_diagnosis: mapMobileDiagnosis(req.body.aiDiagnosis) } : {}),
     request_status: resolvedByAi ? 'Resolved' : providerId ? 'Pending' : 'New',
   });

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { rateServiceRequest } from '../api/servicerequest_api';
 
 const ACTIVE_TAB = 'Track';
 
@@ -17,10 +18,12 @@ const TAB_ITEMS = [
 const STAR_VALUES = [1, 2, 3, 4, 5];
 
 const Ratings = ({ navigation, route }) => {
-    const requestNumber = route?.params?.requestNumber || 'SR-0000';
+    const requestId = route?.params?.requestId;
+    const requestNumber = route?.params?.requestNumber || requestId || '';
 
     const [rating, setRating] = useState(0);
     const [reviewText, setReviewText] = useState('');
+    const [isSending, setIsSending] = useState(false);
 
     const handleBack = () => {
         navigation.goBack();
@@ -30,14 +33,35 @@ const Ratings = ({ navigation, route }) => {
         setRating(value);
     };
 
-    const handleSendReview = () => {
-        // TODO: submit { requestNumber, rating, reviewText } to the backend once the API exists
-        navigation.navigate('Track');
+    // Saved as a RATINGS row on the backend (one per request); the provider is
+    // notified and their average rating updates everywhere it is shown.
+    const handleSendReview = async () => {
+        if (isSending) return;
+        if (!requestId) {
+            navigation.navigate('Track');
+            return;
+        }
+        if (rating === 0) {
+            Alert.alert('Pick a rating', 'Tap 1 to 5 stars first.');
+            return;
+        }
+        setIsSending(true);
+        try {
+            await rateServiceRequest(requestId, { rating, review: reviewText.trim() });
+            navigation.navigate('Track');
+        } catch (error) {
+            setIsSending(false);
+            // 409 = already rated — just move on.
+            if (error.status === 409) {
+                navigation.navigate('Track');
+            } else {
+                Alert.alert('Could not send your review', error.message);
+            }
+        }
     };
 
     const handleTabPress = (tabKey) => {
         if (tabKey === ACTIVE_TAB) return;
-        // TODO: confirm these screen names once the rest of the tabs are built
         navigation.navigate(tabKey);
     };
 
