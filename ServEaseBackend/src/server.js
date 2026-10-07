@@ -25,7 +25,16 @@ if (config.nodeEnv !== 'production') {
 
 app.use(helmet());
 app.use(cors({ origin: allowedOrigins })); // browsers only; the mobile app sends no Origin
-app.use(express.json({ limit: '1mb' }));
+// The verify hook keeps the raw body — the PayMongo webhook signature is HMAC'd
+// over the exact bytes, which re-serializing req.body would break.
+app.use(
+  express.json({
+    limit: '1mb',
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 if (config.nodeEnv !== 'production') app.use(morgan('dev'));
 
 app.use('/api', apiRoutes); // /auth, /users, /providers (+ /requests), /service-requests

@@ -73,6 +73,21 @@ const config = {
       env.AI_API_URL ||
       'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent',
   },
+
+  paymongo: {
+    // Checkout Sessions (GCash / QR Ph / card). Empty secret key = payments are
+    // recorded directly without a real charge (dev mode). The webhook secret
+    // (whsk_...) comes from the PayMongo dashboard webhook you point at
+    // POST {BASE_URL}/api/payments/webhook — optional; payment-status polls
+    // PayMongo directly, so confirmation works even without it.
+    secretKey: (env.PAYMONGO_SECRET_KEY || '').trim(),
+    publicKey: (env.PAYMONGO_PUBLIC_KEY || '').trim(),
+    webhookSecret: (env.PAYMONGO_WEBHOOK_SECRET || '').trim(),
+    baseUrl: env.PAYMONGO_BASE_URL || 'https://api.paymongo.com/v1',
+  },
+
+  // Public address of THIS server — used for PayMongo success/cancel redirect URLs.
+  baseUrl: (env.BASE_URL || 'http://localhost:5000').replace(/\/+$/, ''),
 };
 
 module.exports = config;

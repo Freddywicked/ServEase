@@ -318,11 +318,18 @@ export const getMyServiceRequests = () => request('/service-requests').then(pick
 // One of the customer's own requests (RequestDetails.js) -> the toCustomerDto shape.
 export const getServiceRequest = (requestId) => request(`/service-requests/${requestId}`).then(pick('request'));
 
-// Records a payment for the request (Payment.js). method: 'gcash' | 'qrph' | 'card',
-// stage: 'initial' | 'final' | 'additional'. The backend records it and notifies the
-// provider. (PayMongo checkout plugs into the backend later — never call it from the app.)
+// Starts a payment for the request (Payment.js). method: 'gcash' | 'qrph' | 'card',
+// stage: 'initial' | 'final' | 'additional'. When the backend has PayMongo keys this
+// returns { payment, checkoutUrl } — open checkoutUrl in the browser, then poll
+// getPaymentStatus until 'paid'. Without keys the payment is recorded directly
+// (status 'paid', no checkoutUrl) so dev testing still works.
 export const payForServiceRequest = (requestId, { amount, method, stage }) =>
     request(`/service-requests/${requestId}/payment`, { method: 'POST', body: { amount, method, stage } });
+
+// The latest payment attempt's status ('pending' | 'paid' | 'failed'). The backend
+// re-checks PayMongo before answering, so polling this is the payment confirmation.
+export const getPaymentStatus = (requestId) =>
+    request(`/service-requests/${requestId}/payment-status`).then(pick('payment'));
 
 // Rates a completed request (Ratings.js). One rating per request — 409 after that.
 export const rateServiceRequest = (requestId, { rating, review }) =>

@@ -66,6 +66,7 @@ customer.post('/:requestId/payment-requests/:paymentRequestId/approve', authenti
 customer.post('/:requestId/payment-requests/:paymentRequestId/reject', authenticate, workflow.answerPaymentRequest('rejected'));
 customer.post('/:requestId/quotation/respond', authenticate, workflow.respondToQuotation);
 customer.post('/:requestId/payment', authenticate, workflow.payForRequest);
+customer.get('/:requestId/payment-status', authenticate, workflow.getPaymentStatus);
 customer.post('/:requestId/rating', authenticate, workflow.rateRequest);
 
 // ----- service provider: mounted at /api/providers/requests AND /api/provider/service-requests -----

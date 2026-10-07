@@ -1,7 +1,12 @@
-import React, { useState } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, Modal, StyleSheet, Alert } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Image, Text, TouchableOpacity, ScrollView, Modal, StyleSheet, Alert, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { payForServiceRequest } from '../api/servicerequest_api';
+import { payForServiceRequest, getPaymentStatus } from '../api/servicerequest_api';
+
+// How often / how long the screen re-checks the payment after the customer comes
+// back from the PayMongo checkout page.
+const POLL_INTERVAL_MS = 4000;
+const POLL_TIMEOUT_MS = 3 * 60 * 1000;
 
 const ACTIVE_TAB = 'Track';
 
@@ -34,6 +39,12 @@ const Payment = ({ navigation, route }) => {
     const [selectedMethod, setSelectedMethod] = useState(null);
     const [showProcessedModal, setShowProcessedModal] = useState(false);
     const [isPaying, setIsPaying] = useState(false);
+    // True while the PayMongo checkout page is open in the browser and we're
+    // polling the backend for the confirmation.
+    const [waitingForCheckout, setWaitingForCheckout] = useState(false);
+    const pollTimerRef = useRef(null);
+
+    useEffect(() => () => clearInterval(pollTimerRef.current), []);
 
     const formattedAmount = `₱${Number(amount).toLocaleString('en-PH', {
         minimumFractionDigits: 2,
@@ -48,10 +59,35 @@ const Payment = ({ navigation, route }) => {
         setSelectedMethod(methodId);
     };
 
-    // The payment is recorded by OUR backend (POST /service-requests/:id/payment),
-    // which also notifies the provider. PayMongo checkout (GCash/QR Ph redirects,
-    // card tokenization) plugs into that endpoint later — the app never talks to
-    // PayMongo directly. The processed modal opens only after the backend confirms.
+    // The payment runs through OUR backend (POST /service-requests/:id/payment),
+    // which creates a PayMongo Checkout Session — the app never talks to PayMongo
+    // directly. We open the checkout page in the browser, then poll the backend
+    // until the payment is confirmed; only then does the processed modal open.
+    const startPolling = () => {
+        const startedAt = Date.now();
+        pollTimerRef.current = setInterval(async () => {
+            try {
+                const payment = await getPaymentStatus(requestId);
+                if (payment?.status === 'paid') {
+                    clearInterval(pollTimerRef.current);
+                    setWaitingForCheckout(false);
+                    setIsPaying(false);
+                    setShowProcessedModal(true);
+                } else if (payment?.status === 'failed' || Date.now() - startedAt > POLL_TIMEOUT_MS) {
+                    clearInterval(pollTimerRef.current);
+                    setWaitingForCheckout(false);
+                    setIsPaying(false);
+                    if (payment?.status === 'failed') {
+                        Alert.alert('Payment failed', 'No charge went through. Please try again.');
+                    }
+                    // on timeout: stay quiet — the customer can tap Continue again to re-check
+                }
+            } catch (error) {
+                // A flaky connection shouldn't kill the wait; the next poll retries.
+            }
+        }, POLL_INTERVAL_MS);
+    };
+
     const handleContinue = async () => {
         if (!selectedMethod || isPaying) return;
         if (!requestId || !(amount > 0)) {
@@ -59,13 +95,23 @@ const Payment = ({ navigation, route }) => {
             return;
         }
         setIsPaying(true);
+        // Local flag — the state variable would be stale inside this closure.
+        let openedCheckout = false;
         try {
-            await payForServiceRequest(requestId, { amount, method: selectedMethod, stage: paymentStage });
-            setShowProcessedModal(true);
+            const result = await payForServiceRequest(requestId, { amount, method: selectedMethod, stage: paymentStage });
+            if (result?.checkoutUrl) {
+                openedCheckout = true;
+                setWaitingForCheckout(true);
+                startPolling();
+                Linking.openURL(result.checkoutUrl);
+            } else {
+                // No PayMongo keys on the backend: payment recorded directly (dev mode).
+                setShowProcessedModal(true);
+            }
         } catch (error) {
             Alert.alert('Payment failed', error.message);
         } finally {
-            setIsPaying(false);
+            if (!openedCheckout) setIsPaying(false);
         }
     };
 
@@ -121,8 +167,18 @@ const Payment = ({ navigation, route }) => {
                     );
                 })}
 
-                <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
-                    <Text style={styles.continueButtonText}>Continue</Text>
+                <TouchableOpacity
+                    style={[styles.continueButton, (isPaying || waitingForCheckout) && { opacity: 0.6 }]}
+                    onPress={handleContinue}
+                    disabled={isPaying || waitingForCheckout}
+                >
+                    <Text style={styles.continueButtonText}>
+                        {waitingForCheckout
+                            ? 'Waiting for payment… complete it in your browser'
+                            : isPaying
+                              ? 'Processing…'
+                              : 'Continue'}
+                    </Text>
                 </TouchableOpacity>
             </ScrollView>
 

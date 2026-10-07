@@ -364,11 +364,37 @@ const respondToQuotation = asyncHandler(async (req, res) => {
 });
 
 // POST /api/service-requests/:requestId/payment  body: { amount, method, stage }
-// Records the payment server-side. PayMongo (GCash/QR Ph/card checkout) plugs in
-// here: create the checkout session with PAYMONGO_SECRET_KEY and only mark the
-// payment 'paid' from the webhook. Until the keys are set, payments are recorded
-// directly so the flow can be tested end to end.
+// With PAYMONGO_SECRET_KEY set this creates a PayMongo Checkout Session and returns
+// its checkoutUrl — the app opens it (GCash / QR Ph / card) and then polls
+// GET .../payment-status. Without keys (local dev) the payment is recorded as paid
+// directly so the flow can still be tested end to end.
 const PAYMENT_METHODS = ['gcash', 'qrph', 'card'];
+
+const paymongo = require('../utils/paymongo');
+const config = require('../config');
+
+// Marks a payment paid exactly once and tells the provider.
+const markPaymentPaid = async (payment, paymongoPaymentId = null) => {
+  if (payment.status === 'paid') return payment;
+  const updated = await Workflow.updatePayment(payment.payment_id, {
+    status: 'paid',
+    ...(paymongoPaymentId ? { paymongo_payment_id: paymongoPaymentId } : {}),
+  });
+  const row = (await Request.findByIds([payment.request_id]))[0];
+  if (row) {
+    const recipients = await Request.listRecipients(row.request_id);
+    const providerId = pickProviderId(row, recipients);
+    if (providerId) {
+      await Workflow.notify({
+        userId: providerId,
+        type: 'payment_received',
+        message: `Payment received for ${refOf(row)}: ${peso(payment.amount)} via ${String(payment.method).toUpperCase()}.`,
+        requestId: row.request_id,
+      });
+    }
+  }
+  return updated;
+};
 
 const payForRequest = asyncHandler(async (req, res) => {
   const row = await getOwnedRequest(req);
@@ -378,26 +404,109 @@ const payForRequest = asyncHandler(async (req, res) => {
   if (!Number.isFinite(amount) || amount <= 0) throw new ApiError(400, 'Enter a valid amount');
   if (!PAYMENT_METHODS.includes(method)) throw new ApiError(400, 'Choose a payment method');
 
-  const payment = await Workflow.addPayment({
-    request_id: row.request_id,
-    amount,
-    method,
-    stage,
-    status: 'paid', // TODO: 'pending' until the PayMongo webhook confirms
-  });
-
-  const recipients = await Request.listRecipients(row.request_id);
-  const providerId = pickProviderId(row, recipients);
-  if (providerId) {
-    await Workflow.notify({
-      userId: providerId,
-      type: 'payment_received',
-      message: `Payment received for ${refOf(row)}: ${peso(amount)} via ${method.toUpperCase()}.`,
-      requestId: row.request_id,
-    });
+  // ---- No PayMongo key: dev mode, record the payment straight away. ----
+  if (!config.paymongo.secretKey) {
+    const payment = await Workflow.addPayment({ request_id: row.request_id, amount, method, stage, status: 'paid' });
+    const recipients = await Request.listRecipients(row.request_id);
+    const providerId = pickProviderId(row, recipients);
+    if (providerId) {
+      await Workflow.notify({
+        userId: providerId,
+        type: 'payment_received',
+        message: `Payment received for ${refOf(row)}: ${peso(amount)} via ${method.toUpperCase()}.`,
+        requestId: row.request_id,
+      });
+    }
+    return res.status(201).json({ payment: { id: payment.payment_id, amount, method, stage, status: 'paid' } });
   }
-  res.status(201).json({ payment: { id: payment.payment_id, amount, method, stage, status: payment.status } });
+
+  // ---- PayMongo Checkout Session ----
+  const payment = await Workflow.addPayment({ request_id: row.request_id, amount, method, stage, status: 'pending' });
+  try {
+    const session = await paymongo.createCheckoutSession({
+      amount,
+      method,
+      description: `ServEase ${refOf(row)} — ${stage === 'initial' ? 'initial fee' : stage === 'additional' ? 'additional payment' : 'service payment'}`,
+      referenceNumber: payment.payment_id, // the webhook finds our row through this
+      successUrl: `${config.baseUrl}/api/payments/return?status=success&ref=${payment.payment_id}`,
+      cancelUrl: `${config.baseUrl}/api/payments/return?status=cancelled&ref=${payment.payment_id}`,
+    });
+    await Workflow.updatePayment(payment.payment_id, { checkout_session_id: session.id });
+    return res.status(201).json({
+      payment: { id: payment.payment_id, amount, method, stage, status: 'pending' },
+      checkoutUrl: session.attributes.checkout_url,
+    });
+  } catch (err) {
+    await Workflow.updatePayment(payment.payment_id, { status: 'failed' }).catch(() => {});
+    throw new ApiError(502, `Could not start the payment: ${err.message}`);
+  }
 });
+
+// GET /api/service-requests/:requestId/payment-status -> { payment: { status, ... } }
+// The Payment screen polls this after the customer returns from the PayMongo page.
+// Checks PayMongo directly, so confirmation works even before the webhook exists.
+const getPaymentStatus = asyncHandler(async (req, res) => {
+  const row = await getOwnedRequest(req);
+  const payment = await Workflow.latestPaymentForRequest(row.request_id);
+  if (!payment) throw new ApiError(404, 'No payment started for this request');
+
+  let current = payment;
+  if (current.status === 'pending' && current.checkout_session_id && config.paymongo.secretKey) {
+    try {
+      const session = await paymongo.getCheckoutSession(current.checkout_session_id);
+      if (paymongo.sessionIsPaid(session)) {
+        const paid = session.attributes.payments?.find((p) => p?.attributes?.status === 'paid');
+        current = await markPaymentPaid(current, paid?.id || null);
+      }
+    } catch (err) {
+      console.error('[paymongo] status check failed:', err.message); // keep serving the stored status
+    }
+  }
+  res.json({
+    payment: {
+      id: current.payment_id,
+      status: current.status,
+      amount: Number(current.amount),
+      method: current.method,
+      stage: current.stage,
+    },
+  });
+});
+
+// POST /api/payments/webhook — called by PayMongo, not by the apps. Verifies the
+// signature when PAYMONGO_WEBHOOK_SECRET is set.
+const paymongoWebhook = asyncHandler(async (req, res) => {
+  const raw = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
+  if (!paymongo.verifyWebhookSignature(raw, req.headers['paymongo-signature'])) {
+    throw new ApiError(401, 'Bad webhook signature');
+  }
+  const event = req.body?.data;
+  const type = event?.attributes?.type;
+  const session = event?.attributes?.data; // for checkout_session.payment.paid this is the session
+
+  if (type === 'checkout_session.payment.paid' || type === 'payment.paid') {
+    const sessionId = session?.id?.startsWith('cs_') ? session.id : null;
+    const reference = session?.attributes?.reference_number || null;
+    let payment = reference ? await Workflow.findPaymentById(reference) : null;
+    if (!payment && sessionId) payment = await Workflow.findPaymentByCheckoutId(sessionId);
+    if (payment) await markPaymentPaid(payment, session?.attributes?.payments?.[0]?.id || null);
+    else console.warn('[paymongo] webhook for unknown payment', reference || sessionId);
+  }
+  res.json({ received: true });
+});
+
+// GET /api/payments/return — the browser lands here after PayMongo checkout.
+const paymentReturn = (req, res) => {
+  const ok = req.query.status === 'success';
+  res.send(
+    `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">` +
+      `<body style="font-family:sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;background:#f4f7fb">` +
+      `<div style="text-align:center;padding:24px">` +
+      `<h1 style="color:#1B2A8C">${ok ? 'Payment submitted' : 'Payment cancelled'}</h1>` +
+      `<p>${ok ? 'You can now return to the ServEase app — your receipt will appear in a moment.' : 'No charge was made. Return to the ServEase app to try again.'}</p>` +
+      `</div></body>`
+  );
+};
 
 // POST /api/service-requests/:requestId/rating  body: { rating (1-5), review }
 const rateRequest = asyncHandler(async (req, res) => {
@@ -1047,6 +1156,9 @@ module.exports = {
   answerPaymentRequest,
   respondToQuotation,
   payForRequest,
+  getPaymentStatus,
+  paymongoWebhook,
+  paymentReturn,
   rateRequest,
   acceptRequest,
   declineRequest,

@@ -80,6 +80,29 @@ const listPayments = async (requestIds) => {
   return unwrap(await supabase.from('payments').select('*').in('request_id', requestIds).order('created_at'));
 };
 
+const findPaymentById = async (paymentId) =>
+  unwrap(await supabase.from('payments').select('*').eq('payment_id', paymentId).maybeSingle());
+
+const findPaymentByCheckoutId = async (checkoutSessionId) =>
+  unwrap(
+    await supabase.from('payments').select('*').eq('checkout_session_id', checkoutSessionId).maybeSingle()
+  );
+
+const updatePayment = async (paymentId, patch) =>
+  unwrap(await supabase.from('payments').update(patch).eq('payment_id', paymentId).select().single());
+
+// The newest payment attempt on a request (the Payment screen polls its status).
+const latestPaymentForRequest = async (requestId) =>
+  unwrap(
+    await supabase
+      .from('payments')
+      .select('*')
+      .eq('request_id', requestId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+  );
+
 // ---------- ratings ----------
 const addRating = async (row) => unwrap(await supabase.from('ratings').insert(row).select().single());
 
@@ -143,6 +166,10 @@ module.exports = {
   listProgressUpdates,
   addPayment,
   listPayments,
+  findPaymentById,
+  findPaymentByCheckoutId,
+  updatePayment,
+  latestPaymentForRequest,
   addRating,
   findRatingForRequest,
   addMessage,

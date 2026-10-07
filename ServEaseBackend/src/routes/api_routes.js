@@ -43,4 +43,9 @@ router.get('/conversations', authenticate, workflow.listConversations);
 router.get('/conversations/:id/messages', authenticate, workflow.listMessages);
 router.post('/conversations/:id/messages', authenticate, workflow.sendMessage);
 
+// PayMongo: webhook (called by PayMongo, signature-verified, no JWT) and the
+// browser landing page after checkout. See utils/paymongo.js.
+router.post('/payments/webhook', workflow.paymongoWebhook);
+router.get('/payments/return', workflow.paymentReturn);
+
 module.exports = router;
