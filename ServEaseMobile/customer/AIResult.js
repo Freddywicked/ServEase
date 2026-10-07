@@ -116,6 +116,11 @@ const AIResult = ({ navigation }) => {
                             <Text style={styles.confidencePercent}>{diagnosis.confidence}%</Text>
                         </View>
                         <Text style={styles.confidenceCaption}>Confidence based on similar reported cases</Text>
+                        {diagnosis.lowConfidence ? (
+                            <Text style={styles.lowConfidenceNote}>
+                                Low confidence — add more detail or a clearer photo for a sharper diagnosis.
+                            </Text>
+                        ) : null}
                         <View style={styles.tagRow}>
                             {(diagnosis.tags || []).map((tag) => (
                                 <View key={tag} style={styles.tagPill}>
@@ -268,6 +273,12 @@ const styles = StyleSheet.create({
     confidenceCaption: {
         fontSize: 11,
         color: '#999999',
+        marginBottom: 12,
+    },
+    lowConfidenceNote: {
+        fontSize: 11,
+        color: '#B26A00',
+        marginTop: -8,
         marginBottom: 12,
     },
     tagRow: {

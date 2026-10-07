@@ -16,8 +16,9 @@ import { diagnoseServiceRequest } from '../api/servicerequest_api';
  *   success          -> diagnosis saved to the draft (draft.aiDiagnosis), then
  *                       AIResult is shown. `replace` is used so Back from the
  *                       result goes to step 1, not to this loading screen.
- *   failure / timeout / lowConfidence
- *                    -> no dead end: the customer can retry, or skip straight to
+ *                       A LOW-confidence result still goes to AIResult (shown with a
+ *                       note) — it is a real answer, not a failure.
+ *   failure / timeout -> no dead end: the customer can retry, or skip straight to
  *                       RecommendServiceProvider without a diagnosis.
  *
  * No SERVICE_REQUEST row is created here; that happens on submit.
@@ -62,7 +63,10 @@ const AIDiagnosis = ({ navigation }) => {
                 const diagnosis = await diagnoseServiceRequest(draft, { signal: controller.signal });
                 if (cancelled) return;
 
-                if (!diagnosis || diagnosis.lowConfidence) {
+                // A low-confidence diagnosis is still a diagnosis — show it (AIResult
+                // displays a "low confidence" note) instead of dead-ending the customer
+                // on an error screen. Only a missing/empty result counts as a failure.
+                if (!diagnosis || !diagnosis.probableCause) {
                     setDraft({ aiDiagnosis: null });
                     setFailureMessage("We couldn't reach a confident diagnosis for this one.");
                     setStatus('failed');
