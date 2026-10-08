@@ -6,57 +6,44 @@ import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/auth_context';
 import { ROUTES } from '../navigation/routes';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
-import { getActiveRepair, getNotifications } from '../api/servicerequest_api';
+import { getActiveRepair, getMyServiceRequests } from '../api/servicerequest_api';
 import { formatTimeAgo } from '../utils/formatters';
+import CustomerNavBar from '../components/CustomerNavBar';
+import NotificationsModal from '../components/NotificationsModal';
 
-const ACTIVE_TAB = ROUTES.CUSTOMER_HOME;
-const NOTIFICATION_LIMIT = 5; // how many recent notifications the dashboard card shows
-
-// Bottom tab definitions — each tab carries both its active (white) and
-// inactive (colored) icon so the same list can drive the bar regardless of
-// which tab is currently active.
-const TAB_ITEMS = [
-    { key: ROUTES.CUSTOMER_HOME, label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
-    { key: 'FindServiceProvider', label: 'Find', activeIcon: require('../assets/icon_search_white.png'), inactiveIcon: require('../assets/icon_search_colored.png') },
-    { key: ROUTES.TRACK, label: 'Track', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
-    { key: 'MessageCustomer', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'History', label: 'History', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
-    { key: 'CustomerProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
-];
+const HISTORY_PREVIEW_LIMIT = 3; // how many recent history entries the dashboard card previews
 
 const CustomerDashboard = ({ navigation, route }) => {
-    // `user` and `provider` come from auth_context: populated on login (LoginScreen calls
-    // setUser/setProvider with /auth/login's response) and kept in sync afterwards via
-    // refreshUser(). `user.name` matches the backend's registration field (see client.js's
-    // toRegistrationPayload); `provider` is null until an application exists, and then
-    // looks like { verification_status }, e.g. 'pending' or 'verified'.
+    // `user` and `provider` come from auth_context (populated on login, kept in sync via
+    // refreshUser()). `provider` is null until an application exists, then looks like
+    // { verification_status }, e.g. 'pending' or 'verified'.
     const { user, provider, refreshUser } = useAuth();
     const resetDraft = useServiceRequestDraftStore((state) => state.resetDraft);
     const customerName = user?.name || 'Customer';
     const applicationStatus = provider?.verification_status ?? null; // null | 'pending' | 'verified' | 'rejected'
 
     const [activeRepair, setActiveRepair] = useState(null);
-    const [notifications, setNotifications] = useState([]);
+    const [recentHistory, setRecentHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [loadFailed, setLoadFailed] = useState(false);
+    const [notificationsVisible, setNotificationsVisible] = useState(false);
 
-    // Loads the logged-in customer's active repair + recent notifications from the backend.
+    // Loads the active repair + a short preview of the customer's history from the backend.
     // Runs every time the dashboard regains focus, so a request just sent from the
     // Create Service Request flow shows up as soon as the customer lands back here.
+    // (Notifications are fetched by NotificationsModal when it opens.)
     const loadDashboardData = useCallback(async () => {
         setLoadFailed(false);
-        const [repairResult, notificationsResult] = await Promise.allSettled([
+        const [repairResult, historyResult] = await Promise.allSettled([
             getActiveRepair(),
-            getNotifications({ limit: NOTIFICATION_LIMIT }),
+            getMyServiceRequests(), // newest first
         ]);
         if (repairResult.status === 'fulfilled') setActiveRepair(repairResult.value);
-        if (notificationsResult.status === 'fulfilled') setNotifications(notificationsResult.value);
-        if (repairResult.status === 'rejected' || notificationsResult.status === 'rejected') setLoadFailed(true);
+        if (historyResult.status === 'fulfilled') setRecentHistory(historyResult.value.slice(0, HISTORY_PREVIEW_LIMIT));
+        if (repairResult.status === 'rejected' || historyResult.status === 'rejected') setLoadFailed(true);
         setIsLoading(false);
     }, []);
 
-    // Location is collected per-request in the Create Service Request flow
-    // (CreateServiceRequest.js -> draft.location), not here on the dashboard.
     useFocusEffect(
         useCallback(() => {
             loadDashboardData();
@@ -65,36 +52,26 @@ const CustomerDashboard = ({ navigation, route }) => {
 
     useEffect(() => {
         // Coming straight from submitting a Service Provider application —
-        // ServiceProviderVerificationRequirements.js already calls refreshUser() right
-        // after a successful submit, so this is just a safety net in case this screen
-        // mounted before that refresh resolved.
+        // ServiceProviderVerificationRequirements.js already calls refreshUser() after a
+        // successful submit, so this is just a safety net.
         if (route?.params?.pendingApproval && applicationStatus == null) {
             refreshUser().catch(() => {
                 // Non-fatal: the banner just won't show until the next refreshUser() call.
             });
         }
 
-        // ---------------------------------------------------------------------
-        // BACKEND-READY: poll (or subscribe via Firebase Cloud Messaging) for this
-        // user's Service Provider application status so the pending banner below
-        // clears on its own once the admin approves it from the web dashboard —
-        // not just right after submitting.
-        //
-        // Example (uncomment and adjust once this needs to run on an interval):
+        // BACKEND-READY: poll (or subscribe via Firebase Cloud Messaging) for the Service
+        // Provider application status so the pending banner clears once the admin approves.
         //
         // const interval = setInterval(() => {
         //   refreshUser().catch(() => {});
         // }, 30000);
         // return () => clearInterval(interval);
-        // ---------------------------------------------------------------------
     }, [route?.params?.pendingApproval, applicationStatus, refreshUser]);
 
-    // ---------------------------------------------------------------------
-    // PROVIDER COMMUNICATION (comment block): live updates when the provider responds.
-    // Instead of waiting for the next focus, subscribe to the customer's active request so
-    // the "Active Repair" card and notifications refresh the moment the provider submits a
-    // QUOTATION or declines. Uncomment once serviceRequestApi.js's Realtime helpers are
-    // enabled (needs your mobile Supabase client).
+    // PROVIDER COMMUNICATION (comment block): subscribe to the customer's active request so
+    // the "Active Repair" card refreshes the moment the provider submits a QUOTATION or
+    // declines. Uncomment once serviceRequestApi.js's Realtime helpers are enabled.
     //
     // useEffect(() => {
     //     if (!activeRepair?.requestId) return undefined;
@@ -105,23 +82,11 @@ const CustomerDashboard = ({ navigation, route }) => {
     // }, [activeRepair?.requestId, loadDashboardData]);
     //
     // (import { subscribeToServiceRequest } from '../api/serviceRequestApi';)
-    // ---------------------------------------------------------------------
 
     const handleCreateServiceRequest = () => {
         // Always start a new request from a clean draft.
         resetDraft();
         navigation.navigate(ROUTES.CREATE_SERVICE_REQUEST);
-    };
-
-    const handleNotificationsPress = () => {
-        // TODO: point this to a full notifications screen once it exists
-        navigation.navigate(ROUTES.NOTIFICATIONS);
-    };
-
-    const handleTabPress = (tabKey) => {
-        if (tabKey === ACTIVE_TAB) return;
-        // TODO: confirm these screen names once the rest of the tabs are built
-        navigation.navigate(tabKey);
     };
 
     const renderCardMessage = (message) => (
@@ -138,7 +103,7 @@ const CustomerDashboard = ({ navigation, route }) => {
                         <Text style={styles.welcomeText}>Welcome, {customerName}!</Text>
                         <Text style={styles.subtitle}>What needs fixing today?</Text>
                     </View>
-                    <TouchableOpacity onPress={handleNotificationsPress}>
+                    <TouchableOpacity onPress={() => setNotificationsVisible(true)}>
                         <Image source={require('../assets/icon_ringbell.png')} style={styles.bellIcon} />
                     </TouchableOpacity>
                 </View>
@@ -166,7 +131,7 @@ const CustomerDashboard = ({ navigation, route }) => {
                 <View style={styles.divider} />
 
                 <Text style={styles.sectionLabel}>ACTIVE REPAIR</Text>
-                <View style={styles.card}>
+                <View style={styles.activeCard}>
                     {isLoading ? (
                         <ActivityIndicator color="#0255AF" />
                     ) : activeRepair ? (
@@ -178,36 +143,41 @@ const CustomerDashboard = ({ navigation, route }) => {
                     )}
                 </View>
 
-                <Text style={styles.sectionLabel}>NOTIFICATIONS</Text>
-                <View style={styles.card}>
+                <Text style={styles.sectionLabel}>HISTORY</Text>
+                <View style={styles.historyCard}>
+                    {/* Right arrow -> full History screen (its list is fetched from the backend) */}
+                    <TouchableOpacity
+                        style={styles.arrowButton}
+                        onPress={() => navigation.navigate('History')}
+                        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                        accessibilityLabel="View full history"
+                    >
+                        <Text style={styles.arrowText}>→</Text>
+                    </TouchableOpacity>
+
                     {isLoading ? (
-                        <ActivityIndicator color="#0255AF" />
-                    ) : notifications.length > 0 ? (
-                        notifications.map((item) => (
-                            <View key={item.id} style={styles.notificationItem}>
-                                <Text style={styles.notificationMessage}>{item.message}</Text>
-                                <Text style={styles.notificationTime}>{formatTimeAgo(item.createdAt)}</Text>
+                        <ActivityIndicator color="#0255AF" style={styles.historyLoader} />
+                    ) : recentHistory.length > 0 ? (
+                        recentHistory.map((item) => (
+                            <View key={item.id} style={styles.historyItem}>
+                                <Text style={styles.historyMessage}>
+                                    {item.category} · {item.status}
+                                </Text>
+                                <Text style={styles.historyTime}>{formatTimeAgo(item.createdAt)}</Text>
+                                <View style={styles.historyLine} />
                             </View>
                         ))
                     ) : (
-                        renderCardMessage(loadFailed ? "Couldn't load. Tap to retry." : 'No notifications yet')
+                        <View style={styles.historyEmpty}>
+                            {renderCardMessage(loadFailed ? "Couldn't load. Tap to retry." : 'No history yet')}
+                        </View>
                     )}
                 </View>
             </ScrollView>
 
-            <View style={styles.tabBar}>
-                {TAB_ITEMS.map((tab) => {
-                    const isActive = tab.key === ACTIVE_TAB;
-                    return (
-                        <TouchableOpacity key={tab.key} style={styles.tabItem} onPress={() => handleTabPress(tab.key)}>
-                            <View style={isActive ? styles.tabItemActive : styles.tabItemInactive}>
-                                <Image source={isActive ? tab.activeIcon : tab.inactiveIcon} style={styles.tabIcon}/>
-                                <Text style={isActive ? styles.tabLabelActive : styles.tabLabel}> {tab.label}</Text>
-                            </View>
-                        </TouchableOpacity>
-                    );
-                })}
-            </View>
+            <CustomerNavBar activeTab={ROUTES.CUSTOMER_HOME} />
+
+            <NotificationsModal visible={notificationsVisible} onClose={() => setNotificationsVisible(false)} />
         </SafeAreaView>
     );
 };
@@ -270,7 +240,7 @@ const styles = StyleSheet.create({
         marginBottom: 10,
     },
     createRequestButton: {
-        borderRadius: 12,
+        borderRadius: 8,
         paddingVertical: 15,
         alignItems: 'center',
     },
@@ -281,16 +251,16 @@ const styles = StyleSheet.create({
     },
     divider: {
         height: 1,
-        backgroundColor: '#E0E0E0',
+        backgroundColor: '#8A8A8A',
         marginTop: 20,
     },
-    card: {
+    activeCard: {
         borderWidth: 1,
-        borderColor: '#E0E0E0',
+        borderColor: '#C9C9C9',
         borderRadius: 10,
         backgroundColor: '#FFFFFF',
         padding: 16,
-        minHeight: 90,
+        height: 110,
         justifyContent: 'center',
     },
     activeRepairText: {
@@ -298,61 +268,54 @@ const styles = StyleSheet.create({
         color: '#333333',
         textAlign: 'center',
     },
+    historyCard: {
+        borderWidth: 1,
+        borderColor: '#C9C9C9',
+        borderRadius: 10,
+        backgroundColor: '#FFFFFF',
+        paddingHorizontal: 16,
+        paddingTop: 36,
+        paddingBottom: 12,
+        minHeight: 160,
+    },
+    arrowButton: {
+        position: 'absolute',
+        top: 8,
+        right: 12,
+        zIndex: 1,
+    },
+    arrowText: {
+        fontSize: 20,
+        color: '#1B2A5C',
+    },
+    historyLoader: {
+        marginTop: 16,
+    },
+    historyItem: {
+        marginBottom: 8,
+    },
+    historyMessage: {
+        fontSize: 12,
+        color: '#333333',
+    },
+    historyTime: {
+        fontSize: 10,
+        fontWeight: '600',
+        color: '#666666',
+        marginTop: 2,
+        marginBottom: 8,
+    },
+    historyLine: {
+        height: 1,
+        backgroundColor: '#8A8A8A',
+    },
+    historyEmpty: {
+        paddingVertical: 24,
+    },
     emptyStateText: {
         fontSize: 13,
         color: '#999999',
         textAlign: 'center',
-    },
-    notificationItem: {
-        marginBottom: 10,
-    },
-    notificationMessage: {
-        fontSize: 13,
-        color: '#333333',
-    },
-    notificationTime: {
-        fontSize: 11,
-        color: '#999999',
-        marginTop: 2,
-    },
-    tabBar: {
-        flexDirection: 'row',
-        borderTopWidth: 1,
-        borderTopColor: '#E0E0E0',
-        backgroundColor: '#FFFFFF',
-        paddingVertical: 8,
-    },
-    tabItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    tabItemInactive: {
-        alignItems: 'center',
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-    },
-    tabItemActive: {
-        alignItems: 'center',
-        backgroundColor: '#0255AF',
-        borderRadius: 10,
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-        marginHorizontal: 4,
-    },
-    tabIcon: {
-        width: 22,
-        height: 22,
-        resizeMode: 'contain',
-        marginBottom: 2,
-    },
-    tabLabel: {
-        fontSize: 11,
-        color: '#555555',
-    },
-    tabLabelActive: {
-        fontSize: 11,
-        color: '#FFFFFF',
-        fontWeight: '600',
     },
 });
 

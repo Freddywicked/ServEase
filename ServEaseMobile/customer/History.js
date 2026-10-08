@@ -4,27 +4,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { getMyServiceRequests } from '../api/servicerequest_api';
 import { formatShortDate } from '../utils/formatters';
+import { ROUTES } from '../navigation/routes';
+import CustomerNavBar from '../components/CustomerNavBar';
 
-const ACTIVE_TAB = 'History';
-
-// Filter chips for the history list. The selected key is used to
-// filter the data once the backend is wired up.
+// Filter chips for the history list.
 const FILTERS = [
     { key: 'all', label: 'All' },
     { key: 'repair', label: 'Repair' },
     { key: 'transactions', label: 'Transactions' },
-];
-
-// Bottom tab definitions — each tab carries both its active (white) and
-// inactive (colored) icon so the same list can drive the bar regardless of
-// which tab is currently active.
-const TAB_ITEMS = [
-    { key: 'CustomerDashboard', label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
-    { key: 'FindServiceProvider', label: 'Find', activeIcon: require('../assets/icon_search_white.png'), inactiveIcon: require('../assets/icon_search_colored.png') },
-    { key: 'Track', label: 'Track', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
-    { key: 'MessageCustomer', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'History', label: 'History', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
-    { key: 'CustomerProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
 ];
 
 const History = ({ navigation }) => {
@@ -54,11 +41,6 @@ const History = ({ navigation }) => {
         setRefreshing(true);
         await loadHistory();
         setRefreshing(false);
-    };
-
-    const handleTabPress = (tabKey) => {
-        if (tabKey === ACTIVE_TAB) return;
-        navigation.navigate(tabKey);
     };
 
     // 'transactions' = requests that reached a quote/payment stage (a quotation was
@@ -102,6 +84,16 @@ const History = ({ navigation }) => {
                 }
                 ListHeaderComponent={
                     <View>
+                        {/* Back button -> always returns to the dashboard */}
+                        <TouchableOpacity
+                            style={styles.backButton}
+                            onPress={() => navigation.navigate(ROUTES.CUSTOMER_HOME)}
+                            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                            accessibilityRole="button"
+                            accessibilityLabel="Back to dashboard"
+                        >
+                            <Image source={require('../assets/icon_back_button.png')} style={styles.backIcon} />
+                        </TouchableOpacity>
                         <Text style={styles.header}>History</Text>
                         <View style={styles.chipRow}>
                             {FILTERS.map((f) => {
@@ -119,26 +111,10 @@ const History = ({ navigation }) => {
                         </View>
                     </View>
                 }
-                ListEmptyComponent={
-                    <View style={styles.emptyState}>
-                        <Text style={styles.emptyStateText}>No repair history</Text>
-                    </View>
-                }
             />
 
-            <View style={styles.tabBar}>
-                {TAB_ITEMS.map((tab) => {
-                    const isActive = tab.key === ACTIVE_TAB;
-                    return (
-                        <TouchableOpacity key={tab.key} style={styles.tabItem} onPress={() => handleTabPress(tab.key)}>
-                            <View style={isActive ? styles.tabItemActive : styles.tabItemInactive}>
-                                <Image source={isActive ? tab.activeIcon : tab.inactiveIcon} style={styles.tabIcon} />
-                                <Text style={isActive ? styles.tabLabelActive : styles.tabLabel}> {tab.label}</Text>
-                            </View>
-                        </TouchableOpacity>
-                    );
-                })}
-            </View>
+            {/* History is no longer a tab; it lives under Home, so Home stays highlighted. */}
+            <CustomerNavBar activeTab={ROUTES.CUSTOMER_HOME} />
         </SafeAreaView>
     );
 };
@@ -153,6 +129,15 @@ const styles = StyleSheet.create({
         paddingTop: 16,
         paddingBottom: 24,
         flexGrow: 1,
+    },
+    backButton: {
+        alignSelf: 'flex-start',
+        marginBottom: 8,
+    },
+    backIcon: {
+        width: 24,
+        height: 24,
+        resizeMode: 'contain',
     },
     header: {
         fontSize: 24,
@@ -191,13 +176,14 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
     },
     card: {
+        flexDirection: 'row',
+        alignItems: 'center',
         borderWidth: 1,
         borderColor: '#E0E0E0',
         borderRadius: 10,
         backgroundColor: '#FFFFFF',
         padding: 16,
         minHeight: 90,
-        justifyContent: 'center',
         marginBottom: 14,
     },
     cardTitle: {
@@ -218,58 +204,9 @@ const styles = StyleSheet.create({
         marginTop: 32,
     },
     cardText: {
-        fontSize: 14,
-        color: '#333333',
-        textAlign: 'center',
-    },
-    emptyState: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    emptyStateText: {
         fontSize: 13,
-        color: '#999999',
-        textAlign: 'center',
-    },
-    tabBar: {
-        flexDirection: 'row',
-        borderTopWidth: 1,
-        borderTopColor: '#E0E0E0',
-        backgroundColor: '#FFFFFF',
-        paddingVertical: 8,
-    },
-    tabItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    tabItemInactive: {
-        alignItems: 'center',
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-    },
-    tabItemActive: {
-        alignItems: 'center',
-        backgroundColor: '#0255AF',
-        borderRadius: 10,
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-        marginHorizontal: 4,
-    },
-    tabIcon: {
-        width: 22,
-        height: 22,
-        resizeMode: 'contain',
-        marginBottom: 2,
-    },
-    tabLabel: {
-        fontSize: 11,
-        color: '#555555',
-    },
-    tabLabelActive: {
-        fontSize: 11,
-        color: '#FFFFFF',
-        fontWeight: '600',
+        color: '#333333',
+        marginTop: 4,
     },
 });
 

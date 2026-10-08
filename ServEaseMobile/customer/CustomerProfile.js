@@ -1,20 +1,8 @@
 import React from 'react';
 import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import CustomerNavBar from '../components/CustomerNavBar';
 import { useAuth, VERIFIED_STATUS } from '../context/auth_context';
-
-const ACTIVE_TAB = 'Profile';
-
-// Bottom tab definitions — same pattern and route names as CustomerDashboard.js
-// and FindServiceProvider.js, with Profile as the active tab this time.
-const TAB_ITEMS = [
-    { key: 'CustomerDashboard', label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
-    { key: 'FindServiceProvider', label: 'Find', activeIcon: require('../assets/icon_search_white.png'), inactiveIcon: require('../assets/icon_search_colored.png') },
-    { key: 'Track', label: 'Track', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
-    { key: 'MessageCustomer', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'History', label: 'History', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
-    { key: 'Profile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
-];
 
 const CustomerProfile = ({ navigation }) => {
     // `user` and `provider` come from auth_context, populated on login and kept in sync
@@ -29,12 +17,6 @@ const CustomerProfile = ({ navigation }) => {
     // approved. Until then (no application yet, or still pending), the customer
     // sees "Apply as Service Provider" instead.
     const hasProviderAccount = provider?.verification_status === VERIFIED_STATUS;
-
-    const handleTabPress = (tabKey) => {
-        if (tabKey === ACTIVE_TAB) return;
-        // TODO: confirm these screen names once the rest of the tabs are built
-        navigation.navigate(tabKey);
-    };
 
     const handleEditProfile = () => {
         // TODO: point this to the actual edit-profile screen once it exists
@@ -110,28 +92,7 @@ const CustomerProfile = ({ navigation }) => {
                 </View>
             </ScrollView>
 
-            <View style={styles.tabBar}>
-                {TAB_ITEMS.map((tab) => {
-                    const isActive = tab.key === ACTIVE_TAB;
-                    return (
-                        <TouchableOpacity
-                            key={tab.key}
-                            style={styles.tabItem}
-                            onPress={() => handleTabPress(tab.key)}
-                        >
-                            <View style={isActive ? styles.tabItemActive : styles.tabItemInactive}>
-                                <Image
-                                    source={isActive ? tab.activeIcon : tab.inactiveIcon}
-                                    style={styles.tabIcon}
-                                />
-                                <Text style={isActive ? styles.tabLabelActive : styles.tabLabel}>
-                                    {tab.label}
-                                </Text>
-                            </View>
-                        </TouchableOpacity>
-                    );
-                })}
-            </View>
+            <CustomerNavBar activeTab="CustomerProfile" />
         </SafeAreaView>
     );
 };
@@ -191,45 +152,6 @@ const styles = StyleSheet.create({
         fontSize: 15,
         fontWeight: '500',
         color: '#222222',
-    },
-    tabBar: {
-        flexDirection: 'row',
-        borderTopWidth: 1,
-        borderTopColor: '#E0E0E0',
-        backgroundColor: '#FFFFFF',
-        paddingVertical: 8,
-    },
-    tabItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    tabItemInactive: {
-        alignItems: 'center',
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-    },
-    tabItemActive: {
-        alignItems: 'center',
-        backgroundColor: '#0255AF',
-        borderRadius: 10,
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-        marginHorizontal: 4,
-    },
-    tabIcon: {
-        width: 22,
-        height: 22,
-        resizeMode: 'contain',
-        marginBottom: 2,
-    },
-    tabLabel: {
-        fontSize: 11,
-        color: '#555555',
-    },
-    tabLabelActive: {
-        fontSize: 11,
-        color: '#FFFFFF',
-        fontWeight: '600',
     },
 });
 

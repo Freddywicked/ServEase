@@ -1,24 +1,11 @@
 import React, { useState, useCallback } from 'react';
 import { View, Image, Text, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import CustomerNavBar from '../components/CustomerNavBar';
 import { useFocusEffect } from '@react-navigation/native';
 // Same backend endpoints the provider's Messages screen uses — GET /conversations
 // is role-aware, so a customer gets their threads with service providers here.
 import { getConversations } from '../api/providerWork_api';
-
-const ACTIVE_TAB = 'Chat';
-
-// Bottom tab definitions — each tab carries both its active (white) and
-// inactive (colored) icon so the same list can drive the bar regardless of
-// which tab is currently active.
-const TAB_ITEMS = [
-    { key: 'CustomerDashboard', label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
-    { key: 'FindServiceProvider', label: 'Find', activeIcon: require('../assets/icon_search_white.png'), inactiveIcon: require('../assets/icon_search_colored.png') },
-    { key: 'Track', label: 'Track', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
-    { key: 'Chat', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'History', label: 'History', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
-    { key: 'CustomerProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
-];
 
 const MessageCustomer = ({ navigation }) => {
     // Conversation shape (GET /conversations): { id ('SR-0007'), name, avatarUrl,
@@ -51,11 +38,6 @@ const MessageCustomer = ({ navigation }) => {
         setRefreshing(true);
         await loadConversations();
         setRefreshing(false);
-    };
-
-    const handleTabPress = (tabKey) => {
-        if (tabKey === ACTIVE_TAB) return;
-        navigation.navigate(tabKey);
     };
 
     const renderMessageItem = ({ item }) => (
@@ -114,19 +96,7 @@ const MessageCustomer = ({ navigation }) => {
                 }
             />
 
-            <View style={styles.tabBar}>
-                {TAB_ITEMS.map((tab) => {
-                    const isActive = tab.key === ACTIVE_TAB;
-                    return (
-                        <TouchableOpacity key={tab.key} style={styles.tabItem} onPress={() => handleTabPress(tab.key)}>
-                            <View style={isActive ? styles.tabItemActive : styles.tabItemInactive}>
-                                <Image source={isActive ? tab.activeIcon : tab.inactiveIcon} style={styles.tabIcon} />
-                                <Text style={isActive ? styles.tabLabelActive : styles.tabLabel}> {tab.label}</Text>
-                            </View>
-                        </TouchableOpacity>
-                    );
-                })}
-            </View>
+            <CustomerNavBar activeTab="MessageCustomer" />
         </SafeAreaView>
     );
 };
@@ -201,45 +171,6 @@ const styles = StyleSheet.create({
         fontSize: 13,
         color: '#999999',
         textAlign: 'center',
-    },
-    tabBar: {
-        flexDirection: 'row',
-        borderTopWidth: 1,
-        borderTopColor: '#E0E0E0',
-        backgroundColor: '#FFFFFF',
-        paddingVertical: 8,
-    },
-    tabItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    tabItemInactive: {
-        alignItems: 'center',
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-    },
-    tabItemActive: {
-        alignItems: 'center',
-        backgroundColor: '#0255AF',
-        borderRadius: 10,
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-        marginHorizontal: 4,
-    },
-    tabIcon: {
-        width: 22,
-        height: 22,
-        resizeMode: 'contain',
-        marginBottom: 2,
-    },
-    tabLabel: {
-        fontSize: 11,
-        color: '#555555',
-    },
-    tabLabelActive: {
-        fontSize: 11,
-        color: '#FFFFFF',
-        fontWeight: '600',
     },
 });
 

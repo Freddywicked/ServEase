@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl, Alert, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import CustomerNavBar from '../components/CustomerNavBar';
 import { useFocusEffect } from '@react-navigation/native';
 import { ROUTES } from '../navigation/routes';
 import {
@@ -39,19 +40,6 @@ import { formatDateTime } from '../utils/formatters';
  * see the commented Realtime subscription inside the component.
  *
  * ========================================================================== */
-
-const ACTIVE_TAB = ROUTES.TRACK;
-
-// Bottom tab definitions — same icon set and pattern as CustomerDashboard.js /
-// FindServiceProvider.js, just with Track as the active tab this time.
-const TAB_ITEMS = [
-    { key: ROUTES.CUSTOMER_HOME, label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
-    { key: 'FindServiceProvider', label: 'Find', activeIcon: require('../assets/icon_search_white.png'), inactiveIcon: require('../assets/icon_search_colored.png') },
-    { key: ROUTES.TRACK, label: 'Track', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
-    { key: 'MessageCustomer', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'History', label: 'History', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
-    { key: 'CustomerProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
-];
 
 // Tab labels. `key` is the property of the tracking response that holds that tab's cards.
 const STATUS_FILTERS = [
@@ -132,12 +120,6 @@ const Track = ({ navigation }) => {
     const visibleRequests = searchQuery.trim()
         ? statusRequests.filter((request) => getSearchableText(request).includes(searchQuery.trim().toLowerCase()))
         : statusRequests;
-
-    const handleTabPress = (tabKey) => {
-        if (tabKey === ACTIVE_TAB) return;
-        // TODO: confirm these screen names once the rest of the tabs are built
-        navigation.navigate(tabKey);
-    };
 
     const handleSelectStatus = (status) => {
         setSelectedStatus(status);
@@ -534,28 +516,7 @@ const Track = ({ navigation }) => {
                 {renderBody()}
             </ScrollView>
 
-            <View style={styles.tabBar}>
-                {TAB_ITEMS.map((tab) => {
-                    const isActive = tab.key === ACTIVE_TAB;
-                    return (
-                        <TouchableOpacity
-                            key={tab.key}
-                            style={styles.tabItem}
-                            onPress={() => handleTabPress(tab.key)}
-                        >
-                            <View style={isActive ? styles.tabItemActive : styles.tabItemInactive}>
-                                <Image
-                                    source={isActive ? tab.activeIcon : tab.inactiveIcon}
-                                    style={styles.tabIcon}
-                                />
-                                <Text style={isActive ? styles.tabLabelActive : styles.tabLabel}>
-                                    {tab.label}
-                                </Text>
-                            </View>
-                        </TouchableOpacity>
-                    );
-                })}
-            </View>
+            <CustomerNavBar activeTab={ROUTES.TRACK} />
         </SafeAreaView>
     );
 };
@@ -868,45 +829,6 @@ const styles = StyleSheet.create({
     emptyStateText: {
         fontSize: 13,
         color: '#999999',
-    },
-    tabBar: {
-        flexDirection: 'row',
-        borderTopWidth: 1,
-        borderTopColor: '#E0E0E0',
-        backgroundColor: '#FFFFFF',
-        paddingVertical: 8,
-    },
-    tabItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    tabItemInactive: {
-        alignItems: 'center',
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-    },
-    tabItemActive: {
-        alignItems: 'center',
-        backgroundColor: '#0255AF',
-        borderRadius: 10,
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-        marginHorizontal: 4,
-    },
-    tabIcon: {
-        width: 22,
-        height: 22,
-        resizeMode: 'contain',
-        marginBottom: 2,
-    },
-    tabLabel: {
-        fontSize: 11,
-        color: '#555555',
-    },
-    tabLabelActive: {
-        fontSize: 11,
-        color: '#FFFFFF',
-        fontWeight: '600',
     },
     loadingIndicator: {
         marginTop: 20,
