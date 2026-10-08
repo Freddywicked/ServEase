@@ -21,4 +21,11 @@ buildscript {
     }
 }
 
+// FCM push notifications. Resolved here with the plugins DSL (apply false = loaded
+// but not applied at the root); app/build.gradle applies it for real when
+// android/app/google-services.json exists.
+plugins {
+    id("com.google.gms.google-services") version "4.4.2" apply false
+}
+
 apply plugin: "com.facebook.react.rootproject"

@@ -2,11 +2,13 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
-// FCM push notifications. The plugin needs google-services.json (download from
-// Firebase Console -> your Android app 'com.serveasemobile') in THIS folder.
-// Guarded so the build keeps working before that file exists.
+// FCM push notifications. The plugin id is com.google.gms.google-services (DOTS —
+// a colon here is a different, invalid id and fails with "Plugin not found").
+// The plugin itself is declared in android/build.gradle (plugins DSL, apply false).
+// It needs google-services.json (Firebase Console -> Android app 'com.serveasemobile')
+// in THIS folder; guarded so the build keeps working before that file exists.
 if (file('google-services.json').exists()) {
-    apply plugin: 'com.google.gms:google-services'
+    apply plugin: 'com.google.gms.google-services'
 } else {
     logger.warn('ServEase: android/app/google-services.json is missing — FCM push notifications are disabled in this build.')
 }

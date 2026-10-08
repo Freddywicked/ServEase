@@ -1,4 +1,14 @@
-pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
+pluginManagement {
+    includeBuild("../node_modules/@react-native/gradle-plugin")
+    // google() is where the google-services plugin marker lives; needed so the root
+    // build.gradle can declare it with the plugins DSL (legacy `apply plugin:` in
+    // app/build.gradle could not see the root buildscript classpath on Gradle 9).
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
 plugins { id("com.facebook.react.settings") }
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
 rootProject.name = 'ServEase'
