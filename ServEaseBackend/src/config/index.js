@@ -86,6 +86,12 @@ const config = {
     baseUrl: env.PAYMONGO_BASE_URL || 'https://api.paymongo.com/v1',
   },
 
+  firebase: {
+    // FCM push notifications. Prefer FIREBASE_SERVICE_ACCOUNT_JSON (whole JSON as
+    // an env var — the only practical option on Render); this path is for local dev.
+    serviceAccountPath: (env.FIREBASE_SERVICE_ACCOUNT_PATH || '').trim(),
+  },
+
   // Public address of THIS server — used for PayMongo success/cancel redirect URLs.
   baseUrl: (env.BASE_URL || 'http://localhost:5000').replace(/\/+$/, ''),
 };

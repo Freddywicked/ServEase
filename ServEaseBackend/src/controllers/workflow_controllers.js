@@ -1042,6 +1042,25 @@ const sendMessage = asyncHandler(async (req, res) => {
   res.status(201).json({ message: toMessageDto(saved, new Set(recipients.map((r) => r.provider_id))) });
 });
 
+// ===================== DEVICES (FCM push registration) =====================
+
+// POST /api/devices  { fcmToken, platform } — the mobile app calls this after login
+// and whenever Firebase rotates the token.
+const registerDevice = asyncHandler(async (req, res) => {
+  const fcmToken = String(req.body.fcmToken || '').trim();
+  if (!fcmToken) throw new ApiError(400, 'fcmToken is required');
+  await Workflow.upsertDeviceToken(req.user.user_id, fcmToken, String(req.body.platform || 'android'));
+  res.status(201).json({ ok: true });
+});
+
+// DELETE /api/devices  { fcmToken } — on logout, so this phone stops getting the
+// signed-out account's pushes.
+const unregisterDevice = asyncHandler(async (req, res) => {
+  const fcmToken = String(req.body.fcmToken || '').trim();
+  if (fcmToken) await Workflow.deleteDeviceToken(fcmToken);
+  res.json({ ok: true });
+});
+
 // ===================== PROVIDER AVAILABILITY (dashboard calendar) =====================
 // Stored 24-hour 'HH:00'. The web app reads the 12-hour-labelled map; the mobile
 // app reads `slots` ('YYYY-MM-DDTHH:00' strings).
@@ -1179,4 +1198,6 @@ module.exports = {
   getAvailability,
   setAvailability,
   browseProviders,
+  registerDevice,
+  unregisterDevice,
 };

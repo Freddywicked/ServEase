@@ -38,6 +38,10 @@ local.properties
 # node.js
 #
 node_modules/
+
+# Firebase (FCM) — download google-services.json from the Firebase Console; it
+# belongs in android/app/ but must not be committed.
+android/app/google-services.json
 npm-debug.log
 yarn-error.log
 

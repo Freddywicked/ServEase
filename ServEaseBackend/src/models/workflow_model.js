@@ -17,7 +17,21 @@ const addNotification = async ({ userId, type = 'general', message, requestId = 
   );
 
 // Best-effort: a notification must never break the action that triggered it.
-const notify = (args) => addNotification(args).catch((err) => console.error('[notify]', err.message));
+// Also fires the FCM push (utils/push.js) — lazy require so the two modules can
+// reference each other without a load-time cycle.
+const notify = (args) =>
+  addNotification(args)
+    .then((row) => {
+      require('../utils/push')
+        .sendPushToUser(args.userId, {
+          title: 'ServEase',
+          body: args.message,
+          data: { type: args.type || 'general', requestId: args.requestId || '', notificationId: row.notification_id },
+        })
+        .catch((err) => console.error('[push]', err.message));
+      return row;
+    })
+    .catch((err) => console.error('[notify]', err.message));
 
 const listNotifications = async (userId, limit = 20) =>
   unwrap(
@@ -150,10 +164,36 @@ const setUnavailableSlot = async (providerId, date, slot, unavailable) => {
   );
 };
 
+// ---------- device_tokens (FCM) ----------
+// A token belongs to whoever registered it most recently (a phone can change hands
+// between logins), so upsert re-assigns the user_id.
+const upsertDeviceToken = async (userId, fcmToken, platform = 'android') =>
+  unwrap(
+    await supabase
+      .from('device_tokens')
+      .upsert({ fcm_token: fcmToken, user_id: userId, platform, updated_at: new Date().toISOString() })
+      .select()
+      .single()
+  );
+
+const deleteDeviceToken = async (fcmToken) => {
+  const { error } = await supabase.from('device_tokens').delete().eq('fcm_token', fcmToken);
+  if (error) console.error('[devices] delete failed:', error.message);
+};
+
+const listDeviceTokens = async (userId) => {
+  const { data, error } = await supabase.from('device_tokens').select('fcm_token').eq('user_id', userId);
+  if (error) return []; // table missing (migration 004 not run) -> just skip pushes
+  return (data || []).map((r) => r.fcm_token);
+};
+
 module.exports = {
   addNotification,
   notify,
   listNotifications,
+  upsertDeviceToken,
+  deleteDeviceToken,
+  listDeviceTokens,
   addScheduleProposal,
   findScheduleProposal,
   updateScheduleProposal,

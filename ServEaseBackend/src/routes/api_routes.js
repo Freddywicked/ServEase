@@ -48,4 +48,9 @@ router.post('/conversations/:id/messages', authenticate, workflow.sendMessage);
 router.post('/payments/webhook', workflow.paymongoWebhook);
 router.get('/payments/return', workflow.paymentReturn);
 
+// FCM push registration: the app registers its device token after login and
+// removes it on logout. Every notification then also arrives as a push.
+router.post('/devices', authenticate, workflow.registerDevice);
+router.delete('/devices', authenticate, workflow.unregisterDevice);
+
 module.exports = router;

@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { getToken, me, logout, setOnUnauthorized } from '../api/client';
+import { setupPushNotifications, teardownPushNotifications } from '../utils/pushNotifications';
 
 // Must match service_providers.verification_status for an approved provider
 // (same value as VERIFIED in the backend's middleware/auth.js).
@@ -50,6 +51,18 @@ export const AuthProvider = ({ children }) => {
         return () => setOnUnauthorized(null);
     }, []);
 
+    // FCM push notifications: while logged in, this device's token is registered
+    // with the backend so every notification also arrives as a push. No-ops until
+    // google-services.json exists (see utils/pushNotifications.js).
+    useEffect(() => {
+        if (!user) return undefined;
+        let cleanup;
+        setupPushNotifications().then((fn) => {
+            cleanup = fn;
+        });
+        return () => cleanup?.();
+    }, [user]);
+
     // Re-fetch user + provider status (e.g. after submitting a provider application).
     const refreshUser = useCallback(async () => {
         const data = await me();
@@ -59,6 +72,8 @@ export const AuthProvider = ({ children }) => {
     }, []);
 
     const signOut = useCallback(async () => {
+        // Unregister first — the call needs the auth token that logout() clears.
+        await teardownPushNotifications();
         await logout();
         setUser(null);
         setProvider(null);

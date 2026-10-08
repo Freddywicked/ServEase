@@ -210,3 +210,12 @@ export const setProviderSlotAvailability = (date, slot, makeAvailable) =>
     method: 'PUT',
     body: { date, slot, status: makeAvailable ? 'available' : 'unavailable' },
   });
+
+// --- Push notifications (FCM) ---
+// Called by utils/pushNotifications.js: after login + whenever Firebase rotates
+// the token, and on logout so this phone stops getting the old account's pushes.
+export const registerDeviceToken = (fcmToken, platform = 'android') =>
+  request('/devices', { method: 'POST', body: { fcmToken, platform } });
+
+export const unregisterDeviceToken = (fcmToken) =>
+  request('/devices', { method: 'DELETE', body: { fcmToken } });
