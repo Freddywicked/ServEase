@@ -89,7 +89,7 @@ const CustomerNavBar = ({ navigationRef, routeName }) => {
                             accessibilityState={{ selected: isActive }}
                         >
                             <View style={[styles.iconWrap, isActive && styles.iconWrapActive]}>
-                                <Image source={isActive ? tab.activeIcon : tab.inactiveIcon} style={styles.icon} />
+                                <Image source={tab.inactiveIcon} style={[styles.icon, isActive && styles.iconActive]} />
                             </View>
                             <Text style={styles.label}>{tab.label}</Text>
                         </TouchableOpacity>
@@ -126,12 +126,13 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    // Every tab reserves the same 34px circle, so only its fill changes when active
+    // Every tab reserves the same 32px circle, so only its fill changes when active
     // (no layout shift). Active = filled navy circle with the white icon inside.
     iconWrap: {
-        width: 34,
-        height: 34,
-        borderRadius: 17,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        overflow: 'hidden', // clips the fill to a true circle
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -142,6 +143,11 @@ const styles = StyleSheet.create({
         width: 20,
         height: 20,
         resizeMode: 'contain',
+    },
+    // Active = the same glyph tinted white on the navy circle (instead of a separate *_white.png,
+    // which can carry its own square background and show up as a square behind the circle).
+    iconActive: {
+        tintColor: '#FFFFFF',
     },
     label: {
         fontSize: 12,

@@ -5,6 +5,7 @@ import { StatusBar, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from './context/auth_context';
 import CustomerNavBar from './components/CustomerNavBar';
+import ServiceProviderNavBar from './components/ServiceProviderNavBar';
 import SplashScreen from './screens/SplashScreen';
 import SignupScreen from './screens/SignupScreen';
 import OTPVerification from './screens/OTPVerification';
@@ -94,6 +95,8 @@ const App = () => {
     </View>
     {/* Outside the stack, so it stays put while screens animate */}
     <CustomerNavBar navigationRef={navigationRef} routeName={routeName} />
+    {/* Each bar only renders on its own screens (returns null elsewhere), so both can sit here. */}
+    <ServiceProviderNavBar navigationRef={navigationRef} routeName={routeName} />
     </View>
     </NavigationContainer>
     </AuthProvider>
