@@ -125,14 +125,15 @@ const getTracking = asyncHandler(async (req, res) => {
   const rows = await Request.listForCustomer(req.user.user_id);
   const requestIds = rows.map((r) => r.request_id);
 
-  const [recipientLists, quotationLists, proposals, paymentRequests, progressRows, paymentRows] =
+  // NOTE: payments are intentionally NOT fetched here — no tracking card uses them,
+  // and a payments-table problem must never blank out the whole Track screen.
+  const [recipientLists, quotationLists, proposals, paymentRequests, progressRows] =
     await Promise.all([
       Promise.all(rows.map((r) => Request.listRecipients(r.request_id))),
       Promise.all(rows.map((r) => Request.listQuotations(r.request_id))),
       Workflow.listScheduleProposals(requestIds),
       Workflow.listPaymentRequests(requestIds),
       Workflow.listProgressUpdates(requestIds),
-      Workflow.listPayments(requestIds),
     ]);
 
   const providerIds = [
@@ -1109,18 +1110,70 @@ const setAvailability = asyncHandler(async (req, res) => {
 
 // ===================== BROWSE PROVIDERS (customer Find screen) =====================
 
-// GET /api/service-providers?category&search -> { providers: [...] }
+// "Right now" in the provider's Manage Calendar grid: today's date and the
+// current hour slot ('HH:00'), in server-local time (the same clock the
+// provider app uses when it marks slots).
+const currentCalendarSlot = () => {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return {
+    date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
+    slot: `${pad(now.getHours())}:00`,
+  };
+};
+
+// Ids of the providers who marked the current date/hour unavailable.
+const unavailableProviderIds = async (providerIds) => {
+  const { date, slot } = currentCalendarSlot();
+  const rows = await Workflow.listUnavailableSlotsFor(providerIds, date);
+  return new Set(rows.filter((r) => r.slot === slot).map((r) => r.provider_id));
+};
+
+// Reviewer privacy: only the first letter (and the last two of longer words)
+// stay readable — 'Marco Otea' -> 'M***o O*a'.
+const maskNamePart = (part) => {
+  if (part.length <= 1) return part;
+  if (part.length <= 4) return part[0] + '*'.repeat(part.length - 1);
+  return part[0] + '*'.repeat(part.length - 3) + part.slice(-2);
+};
+const maskReviewerName = (name) =>
+  String(name || 'Customer').trim().split(/\s+/).map(maskNamePart).join(' ');
+
+// Chips under "AI Summary Insights": mined from what reviewers actually wrote,
+// falling back to the provider's stats when there are no comments to mine yet.
+const deriveSummaryTags = (reviews, { rating, experienceYears }) => {
+  const text = reviews.map((r) => (r.comment || '').toLowerCase()).join(' ');
+  const tags = [];
+  if (/profession/.test(text)) tags.push('Professional');
+  if (/on time|punctual|prompt/.test(text)) tags.push('Always on Time');
+  if (/clean|neat|tidy/.test(text)) tags.push('Clean Work');
+  if (/afford|fair price|reasonable/.test(text)) tags.push('Fair Pricing');
+  if (/friendly|approachable|accommodat/.test(text)) tags.push('Friendly');
+  if (/recommend/.test(text)) tags.push('Recommended');
+  if (tags.length === 0) {
+    if (rating != null && rating >= 4.5) tags.push('Highly Rated');
+    if ((experienceYears ?? 0) >= 5) tags.push('Experienced');
+  }
+  return tags.slice(0, 4);
+};
+
+// GET /api/service-providers?category&search&available&sort -> { providers: [...] }
 // Verified providers only; category matches against specialization names,
 // punctuation-insensitive, so 'IT and Phone Repair' also matches 'IT-Related
 // Device Repair' and 'Phone Repair' specializations via word overlap below.
+// available=true keeps only providers free right now; sort=rating (the default
+// order) puts the highest rated first.
 const browseProviders = asyncHandler(async (req, res) => {
   const search = String(req.query.search || '').trim().toLowerCase();
   const wantedCategory = String(req.query.category || '').trim();
+  const onlyAvailable = String(req.query.available || '') === 'true';
 
   const providers = await Request.listVerifiedProviders();
-  const [users, ratings] = await Promise.all([
-    Request.findUsersByIds(providers.map((p) => p.user_id)),
-    Request.listRatingsForProviders(providers.map((p) => p.user_id)),
+  const providerIds = providers.map((p) => p.user_id);
+  const [users, ratings, unavailable] = await Promise.all([
+    Request.findUsersByIds(providerIds),
+    Request.listRatingsForProviders(providerIds),
+    unavailableProviderIds(providerIds),
   ]);
 
   // Words shared between the picked category label and a specialization name,
@@ -1153,9 +1206,9 @@ const browseProviders = asyncHandler(async (req, res) => {
       specialty: p.specializations[0] || 'Service provider',
       specialities: p.specializations.join(', '),
       verified: true,
-      available: true,
+      available: !unavailable.has(p.user_id),
       rating: rating ? Math.round(rating.rating * 10) / 10 : null,
-      reviews: rating?.reviewCount || 0,
+      reviewCount: rating?.reviewCount || 0,
       experienceYears: p.years_of_experience ?? null,
       locationName: p.company_address || '',
       availabilitySchedule: p.availability || '',
@@ -1163,8 +1216,54 @@ const browseProviders = asyncHandler(async (req, res) => {
       photoUrl: await getProviderFileUrl(p.profile_photo),
     });
   }
-  list.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-  res.json({ providers: list });
+  const result = onlyAvailable ? list.filter((p) => p.available) : list;
+  result.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+  res.json({ providers: result });
+});
+
+// GET /api/service-providers/:id -> { provider: {...} }
+// The Find screen's "View Profile" target (ProviderDetails.js): everything the
+// browse card has, plus the full stats block and the masked review list.
+const getProviderDetails = asyncHandler(async (req, res) => {
+  const p = await Request.findVerifiedProviderById(String(req.params.id || '').trim());
+  if (!p) throw new ApiError(404, 'Service provider not found');
+
+  const [users, reviews, unavailable] = await Promise.all([
+    Request.findUsersByIds([p.user_id]),
+    Request.listReviewsForProvider(p.user_id),
+    unavailableProviderIds([p.user_id]),
+  ]);
+
+  const values = reviews.map((r) => Number(r.rating)).filter(Number.isFinite);
+  const reviewCount = values.length;
+  const rating = reviewCount
+    ? Math.round((values.reduce((sum, n) => sum + n, 0) / reviewCount) * 10) / 10
+    : null;
+  const positiveFeedbackPercent = reviewCount
+    ? Math.round((values.filter((n) => n >= 4).length / reviewCount) * 100)
+    : null;
+
+  res.json({
+    provider: {
+      id: p.user_id,
+      name: users[p.user_id]?.name || p.company_name || 'Service provider',
+      photoUrl: await getProviderFileUrl(p.profile_photo),
+      specialty: p.specializations[0] || 'Service provider',
+      specialities: p.specializations.join(', '),
+      verified: true,
+      available: !unavailable.has(p.user_id),
+      experienceYears: p.years_of_experience ?? null,
+      locationName: p.company_address || '',
+      availabilitySchedule: p.availability || '',
+      workplace: p.company_name || '',
+      offersHomeServices: Boolean(p.offers_home_service),
+      rating,
+      reviewCount,
+      positiveFeedbackPercent,
+      aiSummaryTags: deriveSummaryTags(reviews, { rating, experienceYears: p.years_of_experience }),
+      reviews: reviews.map((r) => ({ ...r, reviewerName: maskReviewerName(r.reviewerName) })),
+    },
+  });
 });
 
 module.exports = {
@@ -1198,6 +1297,7 @@ module.exports = {
   getAvailability,
   setAvailability,
   browseProviders,
+  getProviderDetails,
   registerDevice,
   unregisterDevice,
 };

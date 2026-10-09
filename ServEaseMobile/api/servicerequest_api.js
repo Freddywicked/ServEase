@@ -33,6 +33,8 @@ import { API_BASE_URL as BASE_URL, getToken } from './client';
  *   GET  /location/reverse-geocode         ?latitude&longitude -> { address, mapImageUri }
  *   POST /service-requests/diagnose        -> { probableCause, confidence, tags[], troubleshootingSteps[], lowConfidence? }
  *   GET  /service-providers/recommended    -> [provider]   (shape documented below)
+ *   GET  /service-providers                -> { providers } (Find screen; ?search&category&available&sort)
+ *   GET  /service-providers/:id            -> { provider }  (ProviderDetails: full profile + reviews)
  *   POST /service-requests                 -> { requestId, requestStatus }
  *   GET  /service-requests/active          -> { requestId, requestStatus, statusLabel, providerName } | 404/204 if none
  *   GET  /notifications                    ?limit -> [{ id, message, createdAt }]
@@ -336,9 +338,17 @@ export const rateServiceRequest = (requestId, { rating, review }) =>
     request(`/service-requests/${requestId}/rating`, { method: 'POST', body: { rating, review } });
 
 // Find screen: browse verified providers. category is a label from GET /categories
-// ('All' = no filter); search matches name/company/specializations.
-export const browseServiceProviders = ({ category, search } = {}) =>
-    request('/service-providers', { query: { category, search } }).then(pick('providers'));
+// ('All' = no filter); search matches name/company/specializations; available=true
+// keeps only providers free right now; sort 'rating' is the backend's default order.
+export const browseServiceProviders = ({ category, search, available, sort } = {}) =>
+    request('/service-providers', {
+        query: { category, search, available: available ? true : undefined, sort },
+    }).then(pick('providers'));
+
+// ProviderDetails.js: one verified provider's full profile — stats, masked
+// reviews and AI summary tags (GET /service-providers/:id).
+export const getServiceProviderDetails = (providerId) =>
+    request(`/service-providers/${encodeURIComponent(providerId)}`).then(pick('provider'));
 
 /* ------------------------- Provider side (Service Provider app) ------------------------- */
 // The provider sees exactly the SERVICE_REQUEST rows customers sent to them from

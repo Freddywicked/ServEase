@@ -120,7 +120,9 @@ const ProviderDetails = ({ navigation, route }) => {
             provider.distanceKm != null ? `${provider.distanceKm} km away` : null,
         ].filter(Boolean).join(' · ');
         const headline = provider.headline || (provider.specialty ? `${provider.specialty} Service Provider` : 'Service Provider');
-        const reviews = provider.reviews ?? [];
+        // The card object passed from FindServiceProvider carries reviewCount (a
+        // number), not the review rows — only the details endpoint returns those.
+        const reviews = Array.isArray(provider.reviews) ? provider.reviews : [];
 
         return (
             <>

@@ -1,95 +1,99 @@
-import React from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Image, Text, TouchableOpacity, FlatList, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAuth, VERIFIED_STATUS } from '../context/auth_context';
+import { useFocusEffect } from '@react-navigation/native';
+// Same backend endpoints the provider's Messages screen uses — GET /conversations
+// is role-aware, so a customer gets their threads with service providers here.
+import { getConversations } from '../api/providerWork_api';
 
-const CustomerProfile = ({ navigation }) => {
-    // `user` and `provider` come from auth_context, populated on login and kept in sync
-    // via refreshUser() — `user.name`/`user.phone_number` match the backend's registration
-    // field names (see client.js's toRegistrationPayload), not hard-coded sample data.
-    const { user, provider, signOut } = useAuth();
+const MessageCustomer = ({ navigation }) => {
+    // Conversation shape (GET /conversations): { id ('SR-0007'), name, avatarUrl,
+    // lastMessage, hasUnread, jobTitle, isOnline }.
+    const [conversations, setConversations] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [loadFailed, setLoadFailed] = useState(false);
 
-    const name = user?.name || 'Your Name';
-    const contactText = [user?.email, user?.phone_number].filter(Boolean).join(' | ');
+    const loadConversations = useCallback(async () => {
+        try {
+            const data = await getConversations();
+            setConversations(data?.conversations ?? []);
+            setLoadFailed(false);
+        } catch (error) {
+            // Keep the last known list. A 401 is already handled by api/client.
+            setLoadFailed(true);
+        }
+    }, []);
 
-    // "Switch Account" only appears once the service provider application has been
-    // approved. Until then (no application yet, or still pending), the customer
-    // sees "Apply as Service Provider" instead.
-    const hasProviderAccount = provider?.verification_status === VERIFIED_STATUS;
+    // Reload on focus and pull-to-refresh, so a provider's reply (and the unread
+    // dot clearing after reading a thread) shows up without restarting the app.
+    useFocusEffect(
+        useCallback(() => {
+            loadConversations().finally(() => setLoading(false));
+        }, [loadConversations]),
+    );
 
-    const handleEditProfile = () => {
-        // TODO: point this to the actual edit-profile screen once it exists
-        navigation.navigate('EditProfile');
+    const handleRefresh = async () => {
+        setRefreshing(true);
+        await loadConversations();
+        setRefreshing(false);
     };
 
-    const handleApplyAsServiceProvider = () => {
-        // First step of the application flow:
-        // ServiceProviderServiceCategory -> ServiceProviderVerificationRequirements
-        navigation.navigate('ServiceProviderServiceCategory');
-    };
-
-    const handleSwitchAccount = () => {
-        // ---------------------------------------------------------------------
-        // BACKEND-READY: persist the user's active mode as "service_provider"
-        // (e.g. PATCH /api/users/me { activeMode: 'service_provider' }) so the
-        // account opens in Service Provider mode on future logins too. A single
-        // account holds both roles, so this only flips which side of the app is
-        // shown — it does not create a separate account.
-        // ---------------------------------------------------------------------
-        navigation.reset({
-            index: 0,
-            routes: [{ name: 'ServiceProviderDashboard' }],
-        });
-    };
-
-    const handleLogout = async () => {
-        // signOut() (auth_context.js) clears the persisted token via api/client's
-        // logout() and resets user/provider to null — no manual state clearing needed.
-        await signOut();
-        navigation.reset({
-            index: 0,
-            routes: [{ name: 'LoginScreen' }],
-        });
-    };
+    const renderMessageItem = ({ item }) => (
+        <TouchableOpacity
+            style={styles.card}
+            onPress={() =>
+                navigation.navigate('ConversationCustomer', {
+                    conversationId: item.id,
+                    contactName: item.name,
+                    jobTitle: item.jobTitle,
+                    isOnline: item.isOnline,
+                })
+            }
+        >
+            {item.avatarUrl ? (
+                <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
+            ) : (
+                <View style={styles.avatar} />
+            )}
+            <View style={styles.cardContent}>
+                <Text style={styles.senderName}>{item.name}</Text>
+                <Text style={styles.lastMessage} numberOfLines={1}>
+                    {item.lastMessage || `About your request ${item.id}`}
+                </Text>
+            </View>
+            {item.hasUnread && <View style={styles.unreadDot} />}
+        </TouchableOpacity>
+    );
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-            <ScrollView contentContainerStyle={styles.scrollContent}>
-                <Text style={styles.headerTitle}>Profile</Text>
-
-                <View style={styles.profileHeader}>
-                    <Image
-                        source={user?.photoUrl ? { uri: user.photoUrl } : require('../assets/icon_profile_photo.png')}
-                        style={styles.avatar}
-                    />
-                    <Text style={styles.name}>{name}</Text>
-                    {contactText ? <Text style={styles.contactText}>{contactText}</Text> : null}
-                </View>
-
-                <View style={styles.menuList}>
-                    <TouchableOpacity style={styles.menuItem} onPress={handleEditProfile}>
-                        <Image source={require('../assets/icon_edit_profile.png')} style={styles.menuIcon} />
-                        <Text style={styles.menuLabel}>Edit Profile</Text>
-                    </TouchableOpacity>
-
-                    {hasProviderAccount ? (
-                        <TouchableOpacity style={styles.menuItem} onPress={handleSwitchAccount}>
-                            <Image source={require('../assets/icon_switch_account.png')} style={styles.menuIcon} />
-                            <Text style={styles.menuLabel}>Switch Account</Text>
-                        </TouchableOpacity>
-                    ) : (
-                        <TouchableOpacity style={styles.menuItem} onPress={handleApplyAsServiceProvider}>
-                            <Image source={require('../assets/icon_form.png')} style={styles.menuIcon} />
-                            <Text style={styles.menuLabel}>Apply as Service Provider</Text>
-                        </TouchableOpacity>
-                    )}
-
-                    <TouchableOpacity style={styles.menuItem} onPress={handleLogout}>
-                        <Image source={require('../assets/icon_exit.png')} style={styles.menuIcon} />
-                        <Text style={styles.menuLabel}>Log out</Text>
-                    </TouchableOpacity>
-                </View>
-            </ScrollView>
+            <FlatList
+                data={conversations}
+                keyExtractor={(item) => item.id}
+                renderItem={renderMessageItem}
+                contentContainerStyle={styles.listContent}
+                showsVerticalScrollIndicator={false}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+                ListHeaderComponent={
+                    <View>
+                        <Text style={styles.header}>Messages</Text>
+                        {loadFailed && (
+                            <TouchableOpacity onPress={loadConversations}>
+                                <Text style={styles.errorText}>Couldn't load your messages. Tap to retry.</Text>
+                            </TouchableOpacity>
+                        )}
+                        {loading && <ActivityIndicator color="#0255AF" style={{ marginBottom: 12 }} />}
+                    </View>
+                }
+                ListEmptyComponent={
+                    !loading ? (
+                        <View style={styles.emptyState}>
+                            <Text style={styles.emptyStateText}>No Messages yet</Text>
+                        </View>
+                    ) : null
+                }
+            />
         </SafeAreaView>
     );
 };
@@ -99,57 +103,72 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#FFFFFF',
     },
-    scrollContent: {
+    listContent: {
         paddingHorizontal: 24,
         paddingTop: 16,
         paddingBottom: 24,
+        flexGrow: 1,
     },
-    headerTitle: {
-        fontSize: 26,
+    header: {
+        fontSize: 24,
         fontWeight: '800',
         color: '#1B2A8C',
-        marginBottom: 24,
+        marginBottom: 20,
     },
-    profileHeader: {
-        alignItems: 'center',
-        marginBottom: 28,
-    },
-    avatar: {
-        width: 110,
-        height: 110,
-        borderRadius: 55,
-        marginBottom: 14,
-        backgroundColor: '#EDEAE4',
-    },
-    name: {
-        fontSize: 17,
-        fontWeight: '700',
-        color: '#111111',
-        marginBottom: 4,
-    },
-    contactText: {
-        fontSize: 13,
-        color: '#666666',
-    },
-    menuList: {
-        marginTop: 4,
-    },
-    menuItem: {
+    card: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 14,
+        borderWidth: 1,
+        borderColor: '#E0E0E0',
+        borderRadius: 10,
+        backgroundColor: '#FFFFFF',
+        padding: 16,
+        marginBottom: 14,
     },
-    menuIcon: {
-        width: 22,
-        height: 22,
-        resizeMode: 'contain',
-        marginRight: 16,
+    avatar: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#E0E0E0',
+        marginRight: 14,
     },
-    menuLabel: {
-        fontSize: 15,
-        fontWeight: '500',
-        color: '#222222',
+    cardContent: {
+        flex: 1,
+    },
+    senderName: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#333333',
+    },
+    lastMessage: {
+        fontSize: 13,
+        color: '#777777',
+        marginTop: 2,
+    },
+    unreadDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#0255AF',
+        marginLeft: 10,
+    },
+    errorText: {
+        fontSize: 12,
+        color: '#B00020',
+        textAlign: 'center',
+        marginBottom: 12,
+    },
+    emptyState: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingTop: 80,
+    },
+    emptyStateText: {
+        fontSize: 13,
+        color: '#999999',
+        textAlign: 'center',
     },
 });
 
-export default CustomerProfile;
+export default MessageCustomer;

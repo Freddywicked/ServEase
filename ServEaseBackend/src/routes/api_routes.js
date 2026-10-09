@@ -30,6 +30,9 @@ router.get('/location/reverse-geocode', authenticate, serviceRequestController.r
 router.get('/service-providers/recommended', authenticate, serviceRequestController.recommendedForDraft);
 // Customer Find screen: browse all verified providers (optionally filtered).
 router.get('/service-providers', authenticate, workflow.browseProviders);
+// Find screen -> "View Profile": one provider's full profile + masked reviews.
+// Registered after /recommended above so that path isn't captured by :id.
+router.get('/service-providers/:id', authenticate, workflow.getProviderDetails);
 // The mobile provider app fetches its inbox at /api/provider/service-requests; the same
 // router also serves the web app at /api/providers/requests (see provider_routes.js).
 router.use('/provider/service-requests', require('./servicerequest_routes').provider);

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Image, Text, TouchableOpacity, Keyboard, Platform, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const NAVY = '#1B2A5C';
+const NAVY = '#18315B'; // matches the design: active circle + labels
 
 // History is NOT a tab: it is reached from the arrow on the dashboard's History card.
 // Each tab carries an active (white) and inactive (colored) icon.
@@ -108,26 +108,30 @@ const styles = StyleSheet.create({
     },
     bar: {
         flexDirection: 'row',
+        alignItems: 'center',
+        minHeight: 77,
         backgroundColor: '#FFFFFF',
-        borderRadius: 24,
-        paddingVertical: 10,
+        borderRadius: 20,
+        borderTopWidth: 1,
+        borderTopColor: '#CCCCCC',
         paddingHorizontal: 6,
-        borderWidth: 1,
-        borderColor: '#E6E6E6',
         shadowColor: '#000000',
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 8,
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
         elevation: 8,
     },
     tabItem: {
         flex: 1,
         alignItems: 'center',
+        justifyContent: 'center',
     },
+    // Every tab reserves the same 34px circle, so only its fill changes when active
+    // (no layout shift). Active = filled navy circle with the white icon inside.
     iconWrap: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 34,
+        height: 34,
+        borderRadius: 17,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -135,12 +139,13 @@ const styles = StyleSheet.create({
         backgroundColor: NAVY,
     },
     icon: {
-        width: 22,
-        height: 22,
+        width: 20,
+        height: 20,
         resizeMode: 'contain',
     },
     label: {
         fontSize: 12,
+        lineHeight: 18,
         color: NAVY,
         marginTop: 2,
     },

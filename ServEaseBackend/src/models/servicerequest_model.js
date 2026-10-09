@@ -194,6 +194,61 @@ const listRatingsForProviders = async (providerIds) => {
   );
 };
 
+// One verified provider by user id, with the same specialization gathering
+// listVerifiedProviders does (used by the customer ProviderDetails screen).
+const findVerifiedProviderById = async (userId) => {
+  const provider = unwrap(
+    await supabase
+      .from('service_providers')
+      .select('user_id, years_of_experience, profile_photo, availability, company_name, company_address')
+      .eq('user_id', userId)
+      .eq('verification_status', 'verified')
+      .maybeSingle()
+  );
+  if (!provider) return null;
+
+  const specs = unwrap(
+    await supabase
+      .from('service_provider_specialization')
+      .select('specialization_name, offers_home_service')
+      .eq('provider_id', userId)
+  );
+
+  return {
+    ...provider,
+    specializations: specs.map((s) => s.specialization_name),
+    offers_home_service: specs.some((s) => s.offers_home_service),
+  };
+};
+
+// Full review rows for one provider (ProviderDetails screen), newest first. Same
+// tolerance as listRatingsForProviders: a missing ratings table means "no reviews
+// yet", never a failed request. Reviewer names are returned raw — the controller
+// masks them before they leave the server.
+const listReviewsForProvider = async (providerId) => {
+  const { data, error } = await supabase
+    .from('ratings')
+    .select('rating_id, request_id, customer_id, rating, review, created_at')
+    .eq('provider_id', providerId)
+    .order('created_at', { ascending: false });
+  if (error || !data || data.length === 0) return [];
+
+  const [users, requests] = await Promise.all([
+    findUsersByIds(data.map((r) => r.customer_id)),
+    findByIds([...new Set(data.map((r) => r.request_id).filter(Boolean))]),
+  ]);
+  const categoryByRequest = Object.fromEntries(requests.map((r) => [r.request_id, r.category]));
+
+  return data.map((row) => ({
+    id: row.rating_id,
+    reviewerName: users[row.customer_id]?.name || 'Customer',
+    rating: row.rating,
+    comment: row.review || '',
+    serviceAvailed: categoryByRequest[row.request_id] || null,
+    createdAt: row.created_at,
+  }));
+};
+
 // ---------- storage ----------
 // Uploads the customer's photo to the private request-photos bucket and returns
 // its PATH. Store the path in service_request_attachments.file_url; sign a URL
@@ -220,6 +275,8 @@ module.exports = {
   photoUrlsFor,
   findUsersByIds,
   listVerifiedProviders,
+  findVerifiedProviderById,
   listRatingsForProviders,
+  listReviewsForProvider,
   uploadPhoto,
 };

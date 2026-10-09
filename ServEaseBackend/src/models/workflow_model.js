@@ -146,6 +146,20 @@ const markMessagesSeen = async (requestId, viewer) => {
 const listUnavailableSlots = async (providerId) =>
   unwrap(await supabase.from('provider_unavailable_slots').select('date, slot').eq('provider_id', providerId));
 
+// Which of these providers marked a given date ('YYYY-MM-DD') unavailable, and at
+// which slots. Error-tolerant like the ratings reads: no table -> everyone available.
+const listUnavailableSlotsFor = async (providerIds, date) => {
+  const ids = [...new Set(providerIds.filter(Boolean))];
+  if (ids.length === 0) return [];
+  const { data, error } = await supabase
+    .from('provider_unavailable_slots')
+    .select('provider_id, slot')
+    .in('provider_id', ids)
+    .eq('date', date);
+  if (error || !data) return [];
+  return data;
+};
+
 const setUnavailableSlot = async (providerId, date, slot, unavailable) => {
   if (unavailable) {
     const { error } = await supabase
@@ -217,5 +231,6 @@ module.exports = {
   listMessagesForRequests,
   markMessagesSeen,
   listUnavailableSlots,
+  listUnavailableSlotsFor,
   setUnavailableSlot,
 };
