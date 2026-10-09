@@ -5,18 +5,6 @@ import LinearGradient from 'react-native-linear-gradient';
 import { ROUTES } from '../navigation/routes';
 import { getServiceRequest, respondToQuotation } from '../api/servicerequest_api';
 
-const ACTIVE_TAB = 'Track';
-
-// Bottom tab definitions — same icon set and pattern as Track.js.
-const TAB_ITEMS = [
-    { key: 'CustomerDashboard', label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
-    { key: 'FindServiceProvider', label: 'Find', activeIcon: require('../assets/icon_gear_white.png'), inactiveIcon: require('../assets/icon_gear_colored.png') },
-    { key: 'Track', label: 'Track', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
-    { key: 'Chat', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'History', label: 'History', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
-    { key: 'CustomerProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
-];
-
 /* ============================================================================
  * BACKEND-READY — RequestDetails
  * ----------------------------------------------------------------------------
@@ -99,11 +87,6 @@ const RequestDetails = ({ navigation, route }) => {
         navigation.goBack();
     };
 
-    const handleTabPress = (tabKey) => {
-        if (tabKey === ACTIVE_TAB) return;
-        navigation.navigate(tabKey);
-    };
-
     // Approving books the provider (request_status -> 'Approved') and notifies them.
     const handleApprove = async () => {
         if (acting) return;
@@ -143,7 +126,7 @@ const RequestDetails = ({ navigation, route }) => {
     };
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <TouchableOpacity onPress={handleClose}>
                     <Image source={require('../assets/icon_back_button.png')} style={styles.backIcon} />
@@ -196,20 +179,6 @@ const RequestDetails = ({ navigation, route }) => {
                     </>
                 )}
             </ScrollView>
-
-            <View style={styles.tabBar}>
-                {TAB_ITEMS.map((tab) => {
-                    const isActive = tab.key === ACTIVE_TAB;
-                    return (
-                        <TouchableOpacity key={tab.key} style={styles.tabItem} onPress={() => handleTabPress(tab.key)}>
-                            <View style={isActive ? styles.tabItemActive : styles.tabItemInactive}>
-                                <Image source={isActive ? tab.activeIcon : tab.inactiveIcon} style={styles.tabIcon} />
-                                <Text style={isActive ? styles.tabLabelActive : styles.tabLabel}> {tab.label}</Text>
-                            </View>
-                        </TouchableOpacity>
-                    );
-                })}
-            </View>
 
             {/* Modal — asks for the initial payment after approving the quotation. */}
             <Modal visible={modalStep === 'approved'} transparent animationType="fade" onRequestClose={() => setModalStep(null)}>
@@ -332,45 +301,6 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: '#FFFFFF',
         fontWeight: '700',
-    },
-    tabBar: {
-        flexDirection: 'row',
-        borderTopWidth: 1,
-        borderTopColor: '#E0E0E0',
-        backgroundColor: '#FFFFFF',
-        paddingVertical: 8,
-    },
-    tabItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    tabItemInactive: {
-        alignItems: 'center',
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-    },
-    tabItemActive: {
-        alignItems: 'center',
-        backgroundColor: '#0255AF',
-        borderRadius: 10,
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-        marginHorizontal: 4,
-    },
-    tabIcon: {
-        width: 22,
-        height: 22,
-        resizeMode: 'contain',
-        marginBottom: 2,
-    },
-    tabLabel: {
-        fontSize: 11,
-        color: '#555555',
-    },
-    tabLabelActive: {
-        fontSize: 11,
-        color: '#FFFFFF',
-        fontWeight: '600',
     },
     modalOverlay: {
         flex: 1,

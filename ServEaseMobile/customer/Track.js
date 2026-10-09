@@ -1,7 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl, Alert, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import CustomerNavBar from '../components/CustomerNavBar';
 import { useFocusEffect } from '@react-navigation/native';
 import { ROUTES } from '../navigation/routes';
 import {
@@ -476,7 +475,7 @@ const Track = ({ navigation }) => {
     };
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <ScrollView
                 contentContainerStyle={styles.scrollContent}
                 refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => loadTracking({ refresh: true })} />}
@@ -515,8 +514,6 @@ const Track = ({ navigation }) => {
 
                 {renderBody()}
             </ScrollView>
-
-            <CustomerNavBar activeTab={ROUTES.TRACK} />
         </SafeAreaView>
     );
 };

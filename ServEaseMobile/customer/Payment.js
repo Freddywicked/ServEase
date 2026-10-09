@@ -8,18 +8,6 @@ import { payForServiceRequest, getPaymentStatus } from '../api/servicerequest_ap
 const POLL_INTERVAL_MS = 4000;
 const POLL_TIMEOUT_MS = 3 * 60 * 1000;
 
-const ACTIVE_TAB = 'Track';
-
-// Bottom tab definitions — copied verbatim from Track.js so the route keys match.
-const TAB_ITEMS = [
-    { key: 'CustomerDashboard', label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
-    { key: 'FindServiceProvider', label: 'Find', activeIcon: require('../assets/icon_gear_white.png'), inactiveIcon: require('../assets/icon_gear_colored.png') },
-    { key: 'Track', label: 'Track', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
-    { key: 'MessageCustomer', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'History', label: 'History', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
-    { key: 'CustomerProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
-];
-
 // Available payment methods — logos are provided assets, nothing hardcoded
 // here needs backend data.
 const PAYMENT_METHODS = [
@@ -132,14 +120,8 @@ const Payment = ({ navigation, route }) => {
         }
     };
 
-    const handleTabPress = (tabKey) => {
-        if (tabKey === ACTIVE_TAB) return;
-        // TODO: confirm these screen names once the rest of the tabs are built
-        navigation.navigate(tabKey);
-    };
-
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <TouchableOpacity style={styles.backButton} onPress={handleBack}>
                     <Image source={require('../assets/icon_back_button.png')} style={styles.backIcon} />
@@ -181,29 +163,6 @@ const Payment = ({ navigation, route }) => {
                     </Text>
                 </TouchableOpacity>
             </ScrollView>
-
-            <View style={styles.tabBar}>
-                {TAB_ITEMS.map((tab) => {
-                    const isActive = tab.key === ACTIVE_TAB;
-                    return (
-                        <TouchableOpacity
-                            key={tab.key}
-                            style={styles.tabItem}
-                            onPress={() => handleTabPress(tab.key)}
-                        >
-                            <View style={isActive ? styles.tabItemActive : styles.tabItemInactive}>
-                                <Image
-                                    source={isActive ? tab.activeIcon : tab.inactiveIcon}
-                                    style={styles.tabIcon}
-                                />
-                                <Text style={isActive ? styles.tabLabelActive : styles.tabLabel}>
-                                    {tab.label}
-                                </Text>
-                            </View>
-                        </TouchableOpacity>
-                    );
-                })}
-            </View>
 
             <Modal visible={showProcessedModal} transparent animationType="fade" onRequestClose={handleCloseProcessedModal}>
                 <View style={styles.modalOverlay}>
@@ -314,45 +273,6 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: '700',
         color: '#111111',
-    },
-    tabBar: {
-        flexDirection: 'row',
-        borderTopWidth: 1,
-        borderTopColor: '#E0E0E0',
-        backgroundColor: '#FFFFFF',
-        paddingVertical: 8,
-    },
-    tabItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    tabItemInactive: {
-        alignItems: 'center',
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-    },
-    tabItemActive: {
-        alignItems: 'center',
-        backgroundColor: '#0255AF',
-        borderRadius: 10,
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-        marginHorizontal: 4,
-    },
-    tabIcon: {
-        width: 22,
-        height: 22,
-        resizeMode: 'contain',
-        marginBottom: 2,
-    },
-    tabLabel: {
-        fontSize: 11,
-        color: '#555555',
-    },
-    tabLabelActive: {
-        fontSize: 11,
-        color: '#FFFFFF',
-        fontWeight: '600',
     },
     modalOverlay: {
         flex: 1,

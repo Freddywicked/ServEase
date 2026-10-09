@@ -5,7 +5,6 @@ import { useFocusEffect } from '@react-navigation/native';
 import { getMyServiceRequests } from '../api/servicerequest_api';
 import { formatShortDate } from '../utils/formatters';
 import { ROUTES } from '../navigation/routes';
-import CustomerNavBar from '../components/CustomerNavBar';
 
 // Filter chips for the history list.
 const FILTERS = [
@@ -65,7 +64,7 @@ const History = ({ navigation }) => {
     );
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <FlatList
                 data={history}
                 keyExtractor={(item) => item.id}
@@ -112,9 +111,6 @@ const History = ({ navigation }) => {
                     </View>
                 }
             />
-
-            {/* History is no longer a tab; it lives under Home, so Home stays highlighted. */}
-            <CustomerNavBar activeTab={ROUTES.CUSTOMER_HOME} />
         </SafeAreaView>
     );
 };

@@ -4,18 +4,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { getConversations } from '../api/providerWork_api';
 
-const ACTIVE_TAB = 'Chat';
-
-// Bottom tab definitions — identical set/route names to Job.js.
-const TAB_ITEMS = [
-    { key: 'ServiceProviderDashboard', label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
-    { key: 'IncomingServiceRequest', label: 'Requests', activeIcon: require('../assets/icon_request_white.png'), inactiveIcon: require('../assets/icon_request_colored.png') },
-    { key: 'Jobs', label: 'Jobs', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
-    { key: 'Chat', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'Earnings', label: 'Earnings', activeIcon: require('../assets/icon_dollar_white.png'), inactiveIcon: require('../assets/icon_dollar_colored.png') },
-    { key: 'ServiceProviderProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
-];
-
 const MessageServiceProvider = ({ navigation }) => {
     // Conversations come from GET /conversations (see api/providerWorkApi.js for the shape).
     const [conversations, setConversations] = useState([]);
@@ -56,14 +44,8 @@ const MessageServiceProvider = ({ navigation }) => {
         });
     };
 
-    const handleTabPress = (tabKey) => {
-        if (tabKey === ACTIVE_TAB) return;
-        // TODO: confirm these screen names once the rest of the tabs are built
-        navigation.navigate(tabKey);
-    };
-
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <ScrollView
                 contentContainerStyle={styles.scrollContent}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
@@ -104,29 +86,6 @@ const MessageServiceProvider = ({ navigation }) => {
                     !loadFailed && <Text style={styles.emptyStateText}>No messages yet</Text>
                 )}
             </ScrollView>
-
-            <View style={styles.tabBar}>
-                {TAB_ITEMS.map((tab) => {
-                    const isActive = tab.key === ACTIVE_TAB;
-                    return (
-                        <TouchableOpacity
-                            key={tab.key}
-                            style={styles.tabItem}
-                            onPress={() => handleTabPress(tab.key)}
-                        >
-                            <View style={isActive ? styles.tabItemActive : styles.tabItemInactive}>
-                                <Image
-                                    source={isActive ? tab.activeIcon : tab.inactiveIcon}
-                                    style={styles.tabIcon}
-                                />
-                                <Text style={isActive ? styles.tabLabelActive : styles.tabLabel}>
-                                    {tab.label}
-                                </Text>
-                            </View>
-                        </TouchableOpacity>
-                    );
-                })}
-            </View>
         </SafeAreaView>
     );
 };
@@ -182,45 +141,6 @@ const styles = StyleSheet.create({
         borderRadius: 4.5,
         backgroundColor: '#3B6FD6',
         marginLeft: 10,
-    },
-    tabBar: {
-        flexDirection: 'row',
-        borderTopWidth: 1,
-        borderTopColor: '#E0E0E0',
-        backgroundColor: '#FFFFFF',
-        paddingVertical: 8,
-    },
-    tabItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    tabItemInactive: {
-        alignItems: 'center',
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-    },
-    tabItemActive: {
-        alignItems: 'center',
-        backgroundColor: '#0255AF',
-        borderRadius: 10,
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-        marginHorizontal: 4,
-    },
-    tabIcon: {
-        width: 22,
-        height: 22,
-        resizeMode: 'contain',
-        marginBottom: 2,
-    },
-    tabLabel: {
-        fontSize: 11,
-        color: '#555555',
-    },
-    tabLabelActive: {
-        fontSize: 11,
-        color: '#FFFFFF',
-        fontWeight: '600',
     },
     loader: {
         marginTop: 30,

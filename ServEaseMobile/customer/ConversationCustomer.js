@@ -7,20 +7,6 @@ import { useFocusEffect } from '@react-navigation/native';
 // marks the thread read for whichever side opens it.
 import { getConversationMessages, sendConversationMessage } from '../api/providerWork_api';
 
-const ACTIVE_TAB = 'Chat';
-
-// Bottom tab definitions — each tab carries both its active (white) and
-// inactive (colored) icon so the same list can drive the bar regardless of
-// which tab is currently active.
-const TAB_ITEMS = [
-    { key: 'CustomerDashboard', label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
-    { key: 'FindServiceProvider', label: 'Find', activeIcon: require('../assets/icon_gear_white.png'), inactiveIcon: require('../assets/icon_gear_colored.png') },
-    { key: 'Track', label: 'Track', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
-    { key: 'Chat', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'History', label: 'History', activeIcon: require('../assets/icon_history_white.png'), inactiveIcon: require('../assets/icon_history_colored.png') },
-    { key: 'CustomerProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
-];
-
 // How often the open thread checks for new messages (ms). Replace the polling with a
 // realtime subscription (Supabase Realtime / FCM) once that is enabled.
 const POLL_INTERVAL_MS = 5000;
@@ -78,11 +64,6 @@ const ConversationCustomer = ({ navigation, route }) => {
         listRef.current?.scrollToEnd({ animated: true });
     }, [messages.length]);
 
-    const handleTabPress = (tabKey) => {
-        if (tabKey === ACTIVE_TAB) return;
-        navigation.navigate(tabKey);
-    };
-
     const handleSend = async () => {
         const text = draft.trim();
         if (!text || sending || !conversationId) return;
@@ -117,7 +98,7 @@ const ConversationCustomer = ({ navigation, route }) => {
     );
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <View style={styles.topBar}>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
                     <Image source={require('../assets/icon_back_button.png')} style={styles.backIcon} />
@@ -175,20 +156,6 @@ const ConversationCustomer = ({ navigation, route }) => {
                         <Text style={styles.sendButtonText}>Send</Text>
                     </LinearGradient>
                 </TouchableOpacity>
-            </View>
-
-            <View style={styles.tabBar}>
-                {TAB_ITEMS.map((tab) => {
-                    const isActive = tab.key === ACTIVE_TAB;
-                    return (
-                        <TouchableOpacity key={tab.key} style={styles.tabItem} onPress={() => handleTabPress(tab.key)}>
-                            <View style={isActive ? styles.tabItemActive : styles.tabItemInactive}>
-                                <Image source={isActive ? tab.activeIcon : tab.inactiveIcon} style={styles.tabIcon} />
-                                <Text style={isActive ? styles.tabLabelActive : styles.tabLabel}> {tab.label}</Text>
-                            </View>
-                        </TouchableOpacity>
-                    );
-                })}
             </View>
         </SafeAreaView>
     );
@@ -329,45 +296,6 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '700',
         color: '#FFFFFF',
-    },
-    tabBar: {
-        flexDirection: 'row',
-        borderTopWidth: 1,
-        borderTopColor: '#E0E0E0',
-        backgroundColor: '#FFFFFF',
-        paddingVertical: 8,
-    },
-    tabItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    tabItemInactive: {
-        alignItems: 'center',
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-    },
-    tabItemActive: {
-        alignItems: 'center',
-        backgroundColor: '#0255AF',
-        borderRadius: 10,
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-        marginHorizontal: 4,
-    },
-    tabIcon: {
-        width: 22,
-        height: 22,
-        resizeMode: 'contain',
-        marginBottom: 2,
-    },
-    tabLabel: {
-        fontSize: 11,
-        color: '#555555',
-    },
-    tabLabelActive: {
-        fontSize: 11,
-        color: '#FFFFFF',
-        fontWeight: '600',
     },
 });
 

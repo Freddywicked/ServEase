@@ -29,19 +29,6 @@ import { formatShortDate, formatAiSuggestion } from '../utils/formatters';
  * subscription at the bottom of the component.
  * ========================================================================== */
 
-const ACTIVE_TAB = ROUTES.INCOMING_SERVICE_REQUEST;
-
-// Bottom tab definitions — identical set/route names to ServiceProviderDashboard.js,
-// with Requests as the active tab this time.
-const TAB_ITEMS = [
-    { key: ROUTES.SERVICE_PROVIDER_DASHBOARD, label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
-    { key: ROUTES.INCOMING_SERVICE_REQUEST, label: 'Requests', activeIcon: require('../assets/icon_request_white.png'), inactiveIcon: require('../assets/icon_request_colored.png') },
-    { key: 'Jobs', label: 'Jobs', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
-    { key: 'MessageServiceProvider', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'Earnings', label: 'Earnings', activeIcon: require('../assets/icon_dollar_white.png'), inactiveIcon: require('../assets/icon_dollar_colored.png') },
-    { key: 'ServiceProviderProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
-];
-
 // Filter chips. `key` is sent to the backend as ?filter=<key>, which decides which
 // request statuses each one covers — the app no longer matches status strings itself.
 // 'Appointment' is intentionally left out — that feature (with its calendar and
@@ -144,11 +131,6 @@ const IncomingServiceRequest = ({ navigation }) => {
         }
     };
 
-    const handleTabPress = (tabKey) => {
-        if (tabKey === ACTIVE_TAB) return;
-        // TODO: confirm these screen names once the rest of the tabs are built
-        navigation.navigate(tabKey);
-    };
 
     const renderBody = () => {
         if (isLoading) {
@@ -218,7 +200,7 @@ const IncomingServiceRequest = ({ navigation }) => {
     };
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <ScrollView
                 contentContainerStyle={styles.scrollContent}
                 refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => loadRequests({ refresh: true })} />}
@@ -244,29 +226,6 @@ const IncomingServiceRequest = ({ navigation }) => {
 
                 {renderBody()}
             </ScrollView>
-
-            <View style={styles.tabBar}>
-                {TAB_ITEMS.map((tab) => {
-                    const isActive = tab.key === ACTIVE_TAB;
-                    return (
-                        <TouchableOpacity
-                            key={tab.key}
-                            style={styles.tabItem}
-                            onPress={() => handleTabPress(tab.key)}
-                        >
-                            <View style={isActive ? styles.tabItemActive : styles.tabItemInactive}>
-                                <Image
-                                    source={isActive ? tab.activeIcon : tab.inactiveIcon}
-                                    style={styles.tabIcon}
-                                />
-                                <Text style={isActive ? styles.tabLabelActive : styles.tabLabel}>
-                                    {tab.label}
-                                </Text>
-                            </View>
-                        </TouchableOpacity>
-                    );
-                })}
-            </View>
         </SafeAreaView>
     );
 };
@@ -409,45 +368,6 @@ const styles = StyleSheet.create({
         color: '#999999',
         textAlign: 'center',
         marginTop: 20,
-    },
-    tabBar: {
-        flexDirection: 'row',
-        borderTopWidth: 1,
-        borderTopColor: '#E0E0E0',
-        backgroundColor: '#FFFFFF',
-        paddingVertical: 8,
-    },
-    tabItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    tabItemInactive: {
-        alignItems: 'center',
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-    },
-    tabItemActive: {
-        alignItems: 'center',
-        backgroundColor: '#0255AF',
-        borderRadius: 10,
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-        marginHorizontal: 4,
-    },
-    tabIcon: {
-        width: 22,
-        height: 22,
-        resizeMode: 'contain',
-        marginBottom: 2,
-    },
-    tabLabel: {
-        fontSize: 11,
-        color: '#555555',
-    },
-    tabLabelActive: {
-        fontSize: 11,
-        color: '#FFFFFF',
-        fontWeight: '600',
     },
     loadingIndicator: {
         marginTop: 20,

@@ -1,8 +1,10 @@
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useState } from 'react';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { StatusBar } from 'react-native';
+import { StatusBar, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from './context/auth_context';
+import CustomerNavBar from './components/CustomerNavBar';
 import SplashScreen from './screens/SplashScreen';
 import SignupScreen from './screens/SignupScreen';
 import OTPVerification from './screens/OTPVerification';
@@ -17,6 +19,7 @@ import AIResult from './customer/AIResult';
 import RecommendServiceProvider from './customer/RecommendServiceProvider';
 import SubmitServiceRequest from './customer/SubmitServiceRequest';
 import FindServiceProvider from './customer/FindServiceProvider';
+import ProviderDetails from './customer/ProviderDetails';
 import Track from './customer/Track';
 import Payment from './customer/Payment';
 import Ratings from './customer/Ratings';
@@ -37,11 +40,22 @@ import Earnings from './serviceprovider/Earnings';
 import ServiceProviderProfile from './serviceprovider/ServiceProviderProfile';
 
 const Stack = createNativeStackNavigator();
+// Lets the navbar (rendered outside the stack) navigate and know the focused screen.
+const navigationRef = createNavigationContainerRef();
 
 const App = () => {
+  const [routeName, setRouteName] = useState();
+  const syncRoute = () => setRouteName(navigationRef.getCurrentRoute()?.name);
+
   return (
+    <SafeAreaProvider>
+    {/* Dark icons on the white screens. Without this, a phone in dark mode (or a transparent
+        status bar) can draw white icons on white, so the clock/battery look missing. */}
+    <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
     <AuthProvider>
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef} onReady={syncRoute} onStateChange={syncRoute}>
+    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1 }}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="SplashScreen" component={SplashScreen}/>
         <Stack.Screen name="SignupScreen" component={SignupScreen}/>
@@ -55,6 +69,7 @@ const App = () => {
         <Stack.Screen name="AIDiagnosis" component={AIDiagnosis}/>
         <Stack.Screen name="AIResult" component={AIResult}/>
         <Stack.Screen name="FindServiceProvider" component={FindServiceProvider}/>
+        <Stack.Screen name="ProviderDetails" component={ProviderDetails}/>
         <Stack.Screen name="Track" component={Track}/>
         <Stack.Screen name="Payment" component={Payment}/>
         <Stack.Screen name="Ratings" component={Ratings}/>
@@ -76,8 +91,13 @@ const App = () => {
         <Stack.Screen name="Earnings" component={Earnings}/>
         <Stack.Screen name="ServiceProviderProfile" component={ServiceProviderProfile}/>
       </Stack.Navigator>
+    </View>
+    {/* Outside the stack, so it stays put while screens animate */}
+    <CustomerNavBar navigationRef={navigationRef} routeName={routeName} />
+    </View>
     </NavigationContainer>
     </AuthProvider>
+    </SafeAreaProvider>
   );
 };
 

@@ -7,22 +7,9 @@ import { useAuth, VERIFIED_STATUS } from '../context/auth_context';
 import { getProviderProfile, getProviderUnavailableSlots, setProviderSlotAvailability } from '../api/client';
 import { ROUTES } from '../navigation/routes';
 import { getCategories, getProviderDashboard } from '../api/servicerequest_api';
-import { formatTimeAgo } from '../utils/formatters';
-
-// Must match the `key` of the Home tab below so it is highlighted.
-const ACTIVE_TAB = ROUTES.SERVICE_PROVIDER_DASHBOARD;
-
-// Bottom tab definitions — each tab carries both its active (white) and
-// inactive (colored) icon so the same list can drive the bar regardless of
-// which tab is currently active. Same icon set as the Customer Home screen.
-const TAB_ITEMS = [
-    { key: ROUTES.SERVICE_PROVIDER_DASHBOARD, label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
-    { key: ROUTES.INCOMING_SERVICE_REQUEST, label: 'Requests', activeIcon: require('../assets/icon_request_white.png'), inactiveIcon: require('../assets/icon_request_colored.png') },
-    { key: 'Jobs', label: 'Jobs', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
-    { key: 'MessageServiceProvider', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
-    { key: 'Earnings', label: 'Earnings', activeIcon: require('../assets/icon_dollar_white.png'), inactiveIcon: require('../assets/icon_dollar_colored.png') },
-    { key: 'ServiceProviderProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
-];
+import { getProviderEarnings } from '../api/providerWork_api';
+import { formatPeso } from '../utils/provider_formatters';
+import NotificationsModal from '../components/NotificationsModal';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -88,6 +75,10 @@ const ServiceProviderDashboard = ({ navigation }) => {
     const [selectedTime, setSelectedTime] = useState(null);
     const [savingDate, setSavingDate] = useState(false);
 
+    // Bell -> NotificationsModal, and the summary shown in the EARNINGS container.
+    const [notificationsVisible, setNotificationsVisible] = useState(false);
+    const [earningsSummary, setEarningsSummary] = useState(null); // null until loaded / on failure
+
     // The provider's title is the first of their saved specializations that is a service category.
     // Registration stores specialization names as free text mixed with chosen services
     // ("Phone Repair", "Home Repair Services", a custom service ...), so the category-level
@@ -152,6 +143,22 @@ const ServiceProviderDashboard = ({ navigation }) => {
         useCallback(() => {
             loadDashboard();
         }, [loadDashboard]),
+    );
+
+    // EARNINGS container: summary from GET /provider/earnings, refreshed on every focus.
+    const loadEarningsSummary = useCallback(async () => {
+        try {
+            const data = await getProviderEarnings();
+            setEarningsSummary(data?.summary ?? null);
+        } catch (error) {
+            // Keep the last known figures. A 401 is already handled by api/client.
+        }
+    }, []);
+
+    useFocusEffect(
+        useCallback(() => {
+            loadEarningsSummary();
+        }, [loadEarningsSummary]),
     );
 
     // Re-sync whenever this screen comes into focus, so an admin approval shows
@@ -231,18 +238,19 @@ const ServiceProviderDashboard = ({ navigation }) => {
     };
 
     const handleNotificationsPress = () => {
-        // TODO: point this to a full notifications screen once it exists
-        navigation.navigate(ROUTES.NOTIFICATIONS);
+        setNotificationsVisible(true);
+    };
+
+    const handleActiveRepairPress = () => {
+        navigation.navigate('Jobs');
+    };
+
+    const handleEarningsPress = () => {
+        navigation.navigate('Earnings');
     };
 
     const handlePendingRequestPress = () => {
         navigation.navigate(ROUTES.INCOMING_SERVICE_REQUEST);
-    };
-
-    const handleTabPress = (tabKey) => {
-        if (tabKey === ACTIVE_TAB) return;
-        // TODO: confirm these screen names once the rest of the tabs are built
-        navigation.navigate(tabKey);
     };
 
     const todayKey = toDateKey(new Date());
@@ -251,17 +259,21 @@ const ServiceProviderDashboard = ({ navigation }) => {
     const selectedIsUnavailable = selectedSlotKey ? unavailableSlots.includes(selectedSlotKey) : false;
     const selectedTimeLabel = TIME_SLOTS.find((slot) => slot.value === selectedTime)?.label;
 
-    const showStat = (value) => (value === null || value === undefined ? '–' : String(value));
-
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.headerRow}>
                     <View style={styles.headerTextWrap}>
-                        <Text style={styles.welcomeText}>Welcome, {providerName}!</Text>
+                        <Text style={styles.welcomeText} numberOfLines={1} adjustsFontSizeToFit>
+                            Welcome, {providerName}!
+                        </Text>
                         <Text style={styles.subtitle}>{providerTitle}</Text>
                     </View>
-                    <TouchableOpacity onPress={handleNotificationsPress}>
+                    <TouchableOpacity
+                        onPress={handleNotificationsPress}
+                        accessibilityRole="button"
+                        accessibilityLabel="Notifications"
+                    >
                         <Image source={require('../assets/icon_ringbell.png')} style={styles.bellIcon} />
                     </TouchableOpacity>
                 </View>
@@ -282,23 +294,6 @@ const ServiceProviderDashboard = ({ navigation }) => {
                     </TouchableOpacity>
                 )}
 
-                <View style={styles.statsRow}>
-                    <View style={styles.statCard}>
-                        <Text style={styles.statNumber}>{showStat(stats?.activeJobs)}</Text>
-                        <Text style={styles.statLabel}>Active jobs</Text>
-                    </View>
-                    <View style={styles.statCard}>
-                        <Text style={styles.statNumber}>{showStat(stats?.jobsThisMonth)}</Text>
-                        <Text style={styles.statLabel}>This month</Text>
-                    </View>
-                    <View style={styles.statCard}>
-                        <Text style={styles.statNumber}>
-                            {stats?.rating !== null && stats?.rating !== undefined ? Number(stats.rating).toFixed(1) : '–'}
-                        </Text>
-                        <Text style={styles.statLabel}>Rating</Text>
-                    </View>
-                </View>
-
                 <TouchableOpacity onPress={handleManageCalendar} activeOpacity={0.85}>
                     <LinearGradient
                         colors={['#0255AF', '#04A5A5']}
@@ -313,7 +308,13 @@ const ServiceProviderDashboard = ({ navigation }) => {
                 <View style={styles.divider} />
 
                 <Text style={styles.sectionLabel}>ACTIVE REPAIR</Text>
-                <View style={styles.card}>
+                <TouchableOpacity
+                    style={styles.card}
+                    activeOpacity={0.85}
+                    onPress={handleActiveRepairPress}
+                    accessibilityRole="button"
+                    accessibilityLabel="View active repair"
+                >
                     {activeRepair ? (
                         <Text style={styles.activeRepairText}>
                             {activeRepair.customerName ? `${activeRepair.customerName} — ` : ''}
@@ -322,60 +323,55 @@ const ServiceProviderDashboard = ({ navigation }) => {
                     ) : (
                         <Text style={styles.emptyStateText}>No Active Repair</Text>
                     )}
-                </View>
-
-                <Text style={styles.sectionLabel}>NOTIFICATIONS</Text>
-                <View style={styles.card}>
-                    {notifications.length > 0 ? (
-                        notifications.map((item) => (
-                            <View key={item.id} style={styles.notificationItem}>
-                                <Text style={styles.notificationMessage}>{item.message}</Text>
-                                <Text style={styles.notificationTime}>{formatTimeAgo(item.createdAt)}</Text>
-                            </View>
-                        ))
-                    ) : (
-                        <Text style={styles.emptyStateText}>No Notifications</Text>
-                    )}
-                </View>
+                </TouchableOpacity>
 
                 <Text style={styles.sectionLabel}>PENDING REQUESTS</Text>
-                <View style={styles.card}>
+                <TouchableOpacity
+                    style={styles.card}
+                    activeOpacity={0.85}
+                    onPress={handlePendingRequestPress}
+                    accessibilityRole="button"
+                    accessibilityLabel="View pending requests"
+                >
                     {pendingRequests.length > 0 ? (
-                        pendingRequests.map((item) => (
-                            <TouchableOpacity key={item.id} style={styles.notificationItem} onPress={handlePendingRequestPress}>
-                                <Text style={styles.notificationMessage}>
-                                    #{item.requestNumber} · {item.customerName}
-                                </Text>
-                            </TouchableOpacity>
-                        ))
+                        <View>
+                            {pendingRequests.slice(0, 3).map((item) => (
+                                <View key={item.id} style={styles.notificationItem}>
+                                    <Text style={styles.notificationMessage}>
+                                        #{item.requestNumber} · {item.customerName}
+                                    </Text>
+                                </View>
+                            ))}
+                        </View>
                     ) : (
                         <Text style={styles.emptyStateText}>No Pending Requests</Text>
                     )}
-                </View>
-            </ScrollView>
+                </TouchableOpacity>
 
-            <View style={styles.tabBar}>
-                {TAB_ITEMS.map((tab) => {
-                    const isActive = tab.key === ACTIVE_TAB;
-                    return (
-                        <TouchableOpacity
-                            key={tab.key}
-                            style={styles.tabItem}
-                            onPress={() => handleTabPress(tab.key)}
-                        >
-                            <View style={isActive ? styles.tabItemActive : styles.tabItemInactive}>
-                                <Image
-                                    source={isActive ? tab.activeIcon : tab.inactiveIcon}
-                                    style={styles.tabIcon}
-                                />
-                                <Text style={isActive ? styles.tabLabelActive : styles.tabLabel}>
-                                    {tab.label}
-                                </Text>
+                <Text style={styles.sectionLabel}>EARNINGS</Text>
+                <TouchableOpacity
+                    style={styles.card}
+                    activeOpacity={0.85}
+                    onPress={handleEarningsPress}
+                    accessibilityRole="button"
+                    accessibilityLabel="View earnings"
+                >
+                    {earningsSummary ? (
+                        <View style={styles.earningsRow}>
+                            <View style={styles.earningsItem}>
+                                <Text style={styles.earningsAmount}>{formatPeso(earningsSummary.thisWeek)}</Text>
+                                <Text style={styles.earningsLabel}>This week</Text>
                             </View>
-                        </TouchableOpacity>
-                    );
-                })}
-            </View>
+                            <View style={styles.earningsItem}>
+                                <Text style={styles.earningsAmount}>{formatPeso(earningsSummary.pendingPayment)}</Text>
+                                <Text style={styles.earningsLabel}>Pending Payment</Text>
+                            </View>
+                        </View>
+                    ) : (
+                        <Text style={styles.emptyStateText}>No Earnings Yet</Text>
+                    )}
+                </TouchableOpacity>
+            </ScrollView>
 
             <Modal
                 visible={calendarVisible}
@@ -529,6 +525,8 @@ const ServiceProviderDashboard = ({ navigation }) => {
                     </View>
                 </View>
             </Modal>
+
+            <NotificationsModal visible={notificationsVisible} onClose={() => setNotificationsVisible(false)} />
         </SafeAreaView>
     );
 };
@@ -539,36 +537,37 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFFFF',
     },
     scrollContent: {
-        paddingHorizontal: 24,
-        paddingTop: 16,
+        paddingHorizontal: 26,
+        paddingTop: 20,
         paddingBottom: 24,
     },
     headerRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        marginBottom: 12,
+        marginBottom: 16,
     },
     headerTextWrap: {
         flex: 1,
         marginRight: 12,
     },
     welcomeText: {
-        fontSize: 24,
-        fontWeight: '800',
-        color: '#1B2A8C',
+        fontSize: 32,
+        fontWeight: '700',
+        color: '#021E79',
     },
     subtitle: {
         fontSize: 14,
-        fontWeight: '600',
-        color: '#333333',
+        fontWeight: '700',
+        color: '#000000',
+        opacity: 0.7,
         marginTop: 6,
     },
     bellIcon: {
-        width: 24,
-        height: 24,
+        width: 27,
+        height: 27,
         resizeMode: 'contain',
-        marginTop: 4,
+        marginTop: 10,
     },
     pendingBanner: {
         borderWidth: 1,
@@ -582,60 +581,42 @@ const styles = StyleSheet.create({
         fontSize: 13,
         color: '#555555',
     },
-    statsRow: {
-        flexDirection: 'row',
-        marginTop: 12,
-        marginBottom: 20,
-    },
-    statCard: {
-        flex: 1,
-        backgroundColor: '#F0F0F0',
-        borderRadius: 10,
-        paddingVertical: 14,
-        marginHorizontal: 4,
-        alignItems: 'center',
-    },
-    statNumber: {
-        fontSize: 22,
-        fontWeight: '800',
-        color: '#1B2A8C',
-    },
-    statLabel: {
-        fontSize: 11,
-        color: '#666666',
-        marginTop: 4,
-        textAlign: 'center',
-    },
     calendarButton: {
-        borderRadius: 12,
-        paddingVertical: 15,
+        height: 44,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(0, 0, 0, 0.3)',
+        marginTop: 16,
         alignItems: 'center',
+        justifyContent: 'center',
     },
     calendarButtonText: {
         color: '#FFFFFF',
-        fontSize: 16,
+        fontSize: 14,
         fontWeight: '700',
     },
     divider: {
         height: 1,
-        backgroundColor: '#E0E0E0',
-        marginTop: 20,
+        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+        marginTop: 18,
     },
     sectionLabel: {
-        fontSize: 11,
-        fontWeight: '600',
-        color: '#888888',
-        letterSpacing: 1,
-        marginTop: 20,
+        fontSize: 12,
+        lineHeight: 14,
+        fontWeight: '700',
+        color: '#000000',
+        opacity: 0.5,
+        marginTop: 18,
         marginBottom: 10,
+        marginLeft: 2,
     },
     card: {
-        borderWidth: 1,
-        borderColor: '#E0E0E0',
-        borderRadius: 10,
+        borderWidth: 0.5,
+        borderColor: 'rgba(31, 29, 29, 0.45)',
+        borderRadius: 8,
         backgroundColor: '#FFFFFF',
         padding: 16,
-        minHeight: 90,
+        minHeight: 119,
         justifyContent: 'center',
     },
     activeRepairText: {
@@ -644,8 +625,9 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
     emptyStateText: {
-        fontSize: 13,
-        color: '#999999',
+        fontSize: 10,
+        fontWeight: '500',
+        color: '#817C7C',
         textAlign: 'center',
     },
     notificationItem: {
@@ -660,44 +642,22 @@ const styles = StyleSheet.create({
         color: '#999999',
         marginTop: 2,
     },
-    tabBar: {
+    earningsRow: {
         flexDirection: 'row',
-        borderTopWidth: 1,
-        borderTopColor: '#E0E0E0',
-        backgroundColor: '#FFFFFF',
-        paddingVertical: 8,
+        justifyContent: 'space-around',
     },
-    tabItem: {
-        flex: 1,
+    earningsItem: {
         alignItems: 'center',
     },
-    tabItemInactive: {
-        alignItems: 'center',
-        paddingVertical: 6,
-        paddingHorizontal: 4,
+    earningsAmount: {
+        fontSize: 20,
+        fontWeight: '800',
+        color: '#111111',
+        marginBottom: 4,
     },
-    tabItemActive: {
-        alignItems: 'center',
-        backgroundColor: '#0255AF',
-        borderRadius: 10,
-        paddingVertical: 6,
-        paddingHorizontal: 4,
-        marginHorizontal: 4,
-    },
-    tabIcon: {
-        width: 22,
-        height: 22,
-        resizeMode: 'contain',
-        marginBottom: 2,
-    },
-    tabLabel: {
+    earningsLabel: {
         fontSize: 11,
-        color: '#555555',
-    },
-    tabLabelActive: {
-        fontSize: 11,
-        color: '#FFFFFF',
-        fontWeight: '600',
+        color: '#666666',
     },
     modalBackdrop: {
         flex: 1,

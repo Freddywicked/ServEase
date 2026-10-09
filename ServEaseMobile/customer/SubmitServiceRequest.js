@@ -50,7 +50,7 @@ const SubmitServiceRequest = ({ navigation }) => {
     };
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.headerRow}>
                     <Text style={styles.headerTitle}>Creating Service Request</Text>

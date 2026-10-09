@@ -1,7 +1,6 @@
 import React from 'react';
 import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import CustomerNavBar from '../components/CustomerNavBar';
 import { useAuth, VERIFIED_STATUS } from '../context/auth_context';
 
 const CustomerProfile = ({ navigation }) => {
@@ -54,7 +53,7 @@ const CustomerProfile = ({ navigation }) => {
     };
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <Text style={styles.headerTitle}>Profile</Text>
 
@@ -91,8 +90,6 @@ const CustomerProfile = ({ navigation }) => {
                     </TouchableOpacity>
                 </View>
             </ScrollView>
-
-            <CustomerNavBar activeTab="CustomerProfile" />
         </SafeAreaView>
     );
 };

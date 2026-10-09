@@ -1,159 +1,204 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import CustomerNavBar from '../components/CustomerNavBar';
-import { ROUTES } from '../navigation/routes';
 import { getCategories, browseServiceProviders } from '../api/servicerequest_api';
 
-// Category chips and provider cards both come from the backend now:
-//   GET /categories          -> the chips ('All' + the live category labels)
-//   GET /service-providers   -> verified providers, filtered server-side by category
-// Nothing here is hardcoded sample data anymore.
+// Icons (assets folder). NOTE: icon_location.png is the map-pin next to the address.
+const ICON_PIN = require('../assets/icon_location.png');
+const ICON_ELLIPSE = require('../assets/icon_ellipse.png');
+const ICON_CHECK = require('../assets/icon_check.png');
+
+const SEARCH_DEBOUNCE_MS = 400;
+
+// Fixed chips shown first. The category chips after them come from the backend.
+const STATIC_FILTERS = [
+    { id: 'all', label: 'All' },
+    { id: 'available', label: 'Available' },
+    { id: 'top_rated', label: 'Top-rated' },
+];
+
+/* ============================================================================
+ * Find Service Providers (Customer app)
+ * ----------------------------------------------------------------------------
+ *   GET /categories          -> category chips (after All / Available / Top-rated)
+ *   GET /service-providers   -> verified providers. Query params sent from here:
+ *                                 search     text typed in the search bar (debounced)
+ *                                 category   selected category chip label
+ *                                 available  true when the "Available" chip is selected
+ *                                 sort       'rating' when the "Top-rated" chip is selected
+ *
+ * Every change to the search text or the selected chip re-fetches from the backend.
+ * ========================================================================== */
 
 const FindServiceProvider = ({ navigation }) => {
-    const [categories, setCategories] = useState(['All']);
-    const [selectedCategory, setSelectedCategory] = useState('All');
+    const [categories, setCategories] = useState([]);
+    const [selectedFilter, setSelectedFilter] = useState(STATIC_FILTERS[0]);
+    const [searchQuery, setSearchQuery] = useState('');
     const [providers, setProviders] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
+    const latestRequest = useRef(0); // ignores responses that arrive after a newer request
 
-    const loadProviders = useCallback(async (category) => {
+    const filterChips = [
+        ...STATIC_FILTERS,
+        ...categories.map((label) => ({ id: `category:${label}`, label, category: label })),
+    ];
+
+    const loadProviders = useCallback(async (filter, query) => {
+        const requestId = ++latestRequest.current;
         setIsLoading(true);
         setLoadError('');
         try {
-            const list = await browseServiceProviders({ category: category === 'All' ? undefined : category });
+            const params = {};
+            const search = query.trim();
+            if (search) params.search = search;
+            if (filter.category) params.category = filter.category;
+            if (filter.id === 'available') params.available = true;
+            if (filter.id === 'top_rated') params.sort = 'rating';
+
+            let list = await browseServiceProviders(params);
+
+            // Safety net in case the endpoint ignores `available` / `sort`.
+            if (filter.id === 'available') list = list.filter((provider) => provider.available);
+            if (filter.id === 'top_rated') list = [...list].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+
+            if (requestId !== latestRequest.current) return;
             setProviders(list);
         } catch (error) {
+            if (requestId !== latestRequest.current) return;
             setProviders([]);
             setLoadError(error.message || 'Could not load service providers.');
         } finally {
-            setIsLoading(false);
+            if (requestId === latestRequest.current) setIsLoading(false);
         }
     }, []);
 
-    // Categories once on mount; providers on mount and whenever the category changes.
+    // Category chips: once on mount (the row falls back to just the fixed chips).
     useEffect(() => {
         getCategories()
-            .then((list) => setCategories(['All', ...list.map((c) => c.label)]))
-            .catch(() => {}); // chips fall back to just 'All'
+            .then((list) => setCategories(list.map((c) => c.label)))
+            .catch(() => {});
     }, []);
 
+    // Providers: on mount and whenever the search text or selected chip changes.
+    // Typing waits briefly so the backend isn't hit on every keystroke.
     useEffect(() => {
-        loadProviders(selectedCategory);
-    }, [selectedCategory, loadProviders]);
+        const timer = setTimeout(
+            () => loadProviders(selectedFilter, searchQuery),
+            searchQuery.trim() ? SEARCH_DEBOUNCE_MS : 0,
+        );
+        return () => clearTimeout(timer);
+    }, [selectedFilter, searchQuery, loadProviders]);
 
-    const handleSelectCategory = (category) => {
-        setSelectedCategory(category);
-    };
-
-    // Tapping a provider starts a service request — that flow asks for the category,
-    // problem, photo and schedule, then recommends this provider's colleagues too.
-    const handleProviderPress = () => {
-        navigation.navigate(ROUTES.CREATE_SERVICE_REQUEST);
+    const handleProviderPress = (provider) => {
+        // `provider` is passed along so the details screen can show the basics instantly
+        // while it loads the full profile (reviews, AI summary, ...) from the backend.
+        navigation.navigate('ProviderDetails', { providerId: provider.id, provider });
     };
 
     const renderProviderCard = (provider) => (
         <TouchableOpacity
             key={provider.id}
             style={styles.providerCard}
-            onPress={() => handleProviderPress(provider.id)}
+            onPress={() => handleProviderPress(provider)}
             activeOpacity={0.85}
         >
-            <View style={styles.providerHeaderRow}>
-                <Image source={require('../assets/icon_profile_photo.png')} style={styles.providerPhoto} />
-                <View style={styles.providerNameWrap}>
-                    <Text style={styles.providerName}>{provider.name}</Text>
-                    <Text style={styles.providerSpecialty}>{provider.specialty}</Text>
+            <View style={styles.cardTopRow}>
+                <Text style={styles.providerName} numberOfLines={1}>{provider.name}</Text>
+
+                <View style={styles.badgeRow}>
+                    <View style={styles.verifiedBadge}>
+                        <View style={styles.verifiedIconWrap}>
+                            <Image source={ICON_ELLIPSE} style={styles.verifiedEllipse} />
+                            <Image source={ICON_CHECK} style={styles.verifiedCheck} />
+                        </View>
+                        <Text style={styles.verifiedText}>Verified</Text>
+                    </View>
+                    <View style={[styles.availabilityBadge, provider.available ? styles.availableBadge : styles.unavailableBadge]}>
+                        <Text style={styles.availabilityText}>{provider.available ? 'Available' : 'Unavailable'}</Text>
+                    </View>
                 </View>
             </View>
 
-            <View style={styles.badgeRow}>
-                <View style={styles.verifiedBadge}>
-                    <View style={styles.verifiedIconWrap}>
-                        <Image source={require('../assets/icon_ellipse.png')} style={styles.verifiedEllipse} />
-                        <Image source={require('../assets/icon_check.png')} style={styles.verifiedCheck} />
-                    </View>
-                    <Text style={styles.verifiedText}>Verified</Text>
-                </View>
-                {provider.available ? (
-                    <View style={styles.availableBadge}>
-                        <Text style={styles.availableText}>Available</Text>
-                    </View>
-                ) : (
-                    <View style={styles.unavailableBadge}>
-                        <Text style={styles.unavailableText}>Unavailable</Text>
-                    </View>
-                )}
+            <View style={styles.locationRow}>
+                <Image source={ICON_PIN} style={styles.pinIcon} />
+                <Text style={styles.locationText} numberOfLines={1}>{provider.locationName}</Text>
             </View>
 
-            <View style={styles.ratingRow}>
-                <Image source={require('../assets/icon_star.png')} style={styles.starIcon} />
-                <Text style={styles.ratingText}>{provider.rating ?? '—'}</Text>
-                <Text style={styles.ratingDetail}>{provider.reviews} reviews</Text>
-                {provider.experienceYears != null && (
-                    <Text style={styles.ratingDetail}>{provider.experienceYears} years experience</Text>
-                )}
-            </View>
+            <Text style={styles.reviewsText}>Reviews ({provider.rating ?? '—'})</Text>
 
-            <Text style={styles.detailLine}>
-                <Text style={styles.detailLabel}>Specialities: </Text>
-                {provider.specialities || provider.specialty}
-            </Text>
-            {!!provider.locationName && (
-                <Text style={styles.detailLine}>
-                    <Text style={styles.detailLabel}>Location: </Text>
-                    {provider.locationName}
-                </Text>
-            )}
-            {!!provider.availabilitySchedule && (
-                <Text style={styles.detailLine}>
-                    <Text style={styles.detailLabel}>Available: </Text>
-                    {provider.availabilitySchedule}
-                </Text>
-            )}
+            <Text style={styles.viewProfileText}>View Profile</Text>
         </TouchableOpacity>
     );
 
+    const renderBody = () => {
+        if (isLoading) return <ActivityIndicator color="#0255AF" style={styles.loader} />;
+        if (loadError) {
+            return (
+                <TouchableOpacity onPress={() => loadProviders(selectedFilter, searchQuery)}>
+                    <Text style={styles.emptyText}>Couldn't load providers. Tap to retry.{'\n'}{loadError}</Text>
+                </TouchableOpacity>
+            );
+        }
+        if (providers.length === 0) {
+            return (
+                <Text style={styles.emptyText}>
+                    {searchQuery.trim()
+                        ? `No service providers found for "${searchQuery.trim()}".`
+                        : 'No verified service providers found.'}
+                </Text>
+            );
+        }
+        return providers.map(renderProviderCard);
+    };
+
     return (
-        <SafeAreaView style={styles.safeArea}>
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+            <ScrollView
+                contentContainerStyle={styles.scrollContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+            >
                 <Text style={styles.headerTitle}>Find Service Providers</Text>
 
+                <View style={styles.searchWrap}>
+                    <TextInput
+                        style={styles.searchInput}
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        placeholder="Search services or service providers..."
+                        placeholderTextColor="rgba(0, 0, 0, 0.34)"
+                        returnKeyType="search"
+                        autoCorrect={false}
+                        autoCapitalize="none"
+                        clearButtonMode="while-editing"
+                    />
+                </View>
+
+                {/* Scrolls sideways when the chips don't fit the screen width */}
                 <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.categoryTabRow}
+                    keyboardShouldPersistTaps="handled"
+                    style={styles.chipScroll}
+                    contentContainerStyle={styles.chipRow}
                 >
-                    {categories.map((category) => {
-                        const isSelected = category === selectedCategory;
+                    {filterChips.map((chip) => {
+                        const isSelected = chip.id === selectedFilter.id;
                         return (
                             <TouchableOpacity
-                                key={category}
-                                style={[styles.categoryTab, isSelected && styles.categoryTabSelected]}
-                                onPress={() => handleSelectCategory(category)}
+                                key={chip.id}
+                                style={[styles.chip, isSelected && styles.chipSelected]}
+                                onPress={() => setSelectedFilter(chip)}
                             >
-                                <Text style={[styles.categoryTabText, isSelected && styles.categoryTabTextSelected]}>
-                                    {category}
-                                </Text>
+                                <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>{chip.label}</Text>
                             </TouchableOpacity>
                         );
                     })}
                 </ScrollView>
 
-                {isLoading ? (
-                    <ActivityIndicator color="#0255AF" style={{ marginTop: 24 }} />
-                ) : loadError ? (
-                    <TouchableOpacity onPress={() => loadProviders(selectedCategory)}>
-                        <Text style={styles.emptyText}>Couldn't load providers. Tap to retry.{'\n'}{loadError}</Text>
-                    </TouchableOpacity>
-                ) : providers.length === 0 ? (
-                    <Text style={styles.emptyText}>No verified service providers in this category yet.</Text>
-                ) : (
-                    providers.map(renderProviderCard)
-                )}
+                <View style={styles.list}>{renderBody()}</View>
             </ScrollView>
-
-            <CustomerNavBar activeTab="FindServiceProvider" />
         </SafeAreaView>
     );
 };
@@ -164,9 +209,68 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFFFF',
     },
     scrollContent: {
-        paddingHorizontal: 24,
-        paddingTop: 16,
+        paddingTop: 28,
         paddingBottom: 24,
+    },
+    headerTitle: {
+        fontSize: 24,
+        lineHeight: 28,
+        fontWeight: '700',
+        color: '#021E79',
+        paddingHorizontal: 24,
+        marginBottom: 10,
+    },
+    searchWrap: {
+        marginHorizontal: 40,
+        borderWidth: 1,
+        borderColor: 'rgba(31, 29, 29, 0.12)',
+        borderRadius: 8,
+    },
+    searchInput: {
+        height: 45,
+        backgroundColor: '#EAEAEA',
+        borderRadius: 30,
+        paddingHorizontal: 18,
+        fontSize: 14,
+        fontWeight: '500',
+        color: '#000000',
+    },
+    chipScroll: {
+        marginTop: 20,
+        flexGrow: 0,
+    },
+    chipRow: {
+        paddingHorizontal: 26,
+        paddingRight: 40,
+    },
+    chip: {
+        height: 32,
+        paddingHorizontal: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#FFFDFD',
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
+        borderRadius: 20,
+        marginRight: 8,
+    },
+    chipSelected: {
+        backgroundColor: '#021E79',
+    },
+    chipText: {
+        fontSize: 10,
+        fontWeight: '500',
+        color: '#414141',
+    },
+    chipTextSelected: {
+        color: '#FFFFFF',
+    },
+    list: {
+        marginTop: 34,
+        paddingHorizontal: 26,
+    },
+    loader: {
+        marginTop: 24,
     },
     emptyText: {
         fontSize: 13,
@@ -175,111 +279,59 @@ const styles = StyleSheet.create({
         marginTop: 24,
         lineHeight: 19,
     },
-    headerTitle: {
-        fontSize: 22,
-        fontWeight: '800',
-        color: '#1B2A8C',
-        marginBottom: 6,
-    },
-    locationRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 16,
-    },
-    locationIcon: {
-        width: 14,
-        height: 14,
-        resizeMode: 'contain',
-        marginRight: 4,
-    },
-    locationText: {
-        fontSize: 13,
-        color: '#666666',
-    },
-    categoryTabRow: {
-        paddingBottom: 4,
-        marginBottom: 16,
-    },
-    categoryTab: {
-        borderWidth: 1,
-        borderColor: '#DDDDDD',
-        borderRadius: 20,
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        marginRight: 10,
-        backgroundColor: '#FFFFFF',
-    },
-    categoryTabSelected: {
-        backgroundColor: '#0255AF',
-        borderColor: '#0255AF',
-    },
-    categoryTabText: {
-        fontSize: 13,
-        color: '#333333',
-        fontWeight: '600',
-    },
-    categoryTabTextSelected: {
-        color: '#FFFFFF',
-    },
     providerCard: {
+        backgroundColor: '#FFFFFF',
         borderWidth: 1,
-        borderColor: '#E0E0E0',
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 14,
+        borderColor: '#818080',
+        borderRadius: 20,
+        paddingTop: 9,
+        paddingBottom: 8,
+        paddingLeft: 11,
+        paddingRight: 6,
+        marginBottom: 13,
+        minHeight: 88,
     },
-    providerHeaderRow: {
+    cardTopRow: {
         flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 10,
-    },
-    providerPhoto: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        marginRight: 12,
-    },
-    providerNameWrap: {
-        flex: 1,
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
     },
     providerName: {
-        fontSize: 15,
+        flex: 1,
+        fontSize: 13,
+        lineHeight: 16,
         fontWeight: '700',
-        color: '#111111',
-    },
-    providerSpecialty: {
-        fontSize: 12,
-        color: '#666666',
-        marginTop: 2,
+        color: '#484040',
+        marginRight: 6,
     },
     badgeRow: {
         flexDirection: 'row',
-        marginBottom: 10,
     },
     verifiedBadge: {
+        width: 70,
+        height: 19,
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#D9E8FB',
-        borderRadius: 14,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        marginRight: 8,
-    },
-    verifiedIconWrap: {
-        width: 16,
-        height: 16,
+        backgroundColor: 'rgba(2, 85, 175, 0.46)',
+        borderRadius: 10,
+        paddingLeft: 2,
         marginRight: 4,
     },
+    verifiedIconWrap: {
+        width: 14,
+        height: 14,
+        marginRight: 6,
+    },
     verifiedEllipse: {
-        width: 16,
-        height: 16,
+        width: 14,
+        height: 14,
         resizeMode: 'contain',
         tintColor: '#0255AF',
         position: 'absolute',
     },
     verifiedCheck: {
-        width: 9,
-        height: 9,
+        width: 7,
+        height: 7,
         resizeMode: 'contain',
         tintColor: '#FFFFFF',
         position: 'absolute',
@@ -287,64 +339,60 @@ const styles = StyleSheet.create({
         left: 3.5,
     },
     verifiedText: {
-        fontSize: 12,
-        fontWeight: '600',
+        fontSize: 10,
+        lineHeight: 12,
         color: '#0255AF',
     },
-    availableBadge: {
-        backgroundColor: '#86FF8A',
-        borderRadius: 14,
-        paddingHorizontal: 12,
-        paddingVertical: 4,
+    availabilityBadge: {
+        width: 70,
+        height: 19,
+        borderRadius: 10,
+        alignItems: 'center',
         justifyContent: 'center',
     },
-    availableText: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#0B4D0E',
+    availableBadge: {
+        backgroundColor: '#2E7D32',
     },
     unavailableBadge: {
-        backgroundColor: '#F0F0F0',
-        borderRadius: 14,
-        paddingHorizontal: 12,
-        paddingVertical: 4,
-        justifyContent: 'center',
+        backgroundColor: '#C62828',
     },
-    unavailableText: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#888888',
+    availabilityText: {
+        fontSize: 10,
+        lineHeight: 12,
+        color: '#FFFFFF',
     },
-    ratingRow: {
+    locationRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 10,
+        marginTop: 3,
     },
-    starIcon: {
+    pinIcon: {
         width: 14,
         height: 14,
         resizeMode: 'contain',
+        opacity: 0.88,
         marginRight: 4,
     },
-    ratingText: {
-        fontSize: 13,
-        fontWeight: '700',
-        color: '#111111',
-        marginRight: 10,
+    locationText: {
+        flex: 1,
+        fontSize: 11,
+        lineHeight: 13,
+        color: '#484040',
     },
-    ratingDetail: {
-        fontSize: 12,
-        color: '#666666',
-        marginRight: 10,
+    reviewsText: {
+        fontSize: 11,
+        lineHeight: 13,
+        color: '#484040',
+        textDecorationLine: 'underline',
+        marginTop: 3,
     },
-    detailLine: {
-        fontSize: 12,
-        color: '#333333',
-        marginBottom: 3,
-    },
-    detailLabel: {
-        fontWeight: '700',
-        color: '#111111',
+    viewProfileText: {
+        fontSize: 9,
+        lineHeight: 11,
+        color: '#484040',
+        textAlign: 'center',
+        textDecorationLine: 'underline',
+        marginTop: 2,
     },
 });
 

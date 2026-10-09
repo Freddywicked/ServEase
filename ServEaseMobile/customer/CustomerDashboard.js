@@ -8,7 +8,6 @@ import { ROUTES } from '../navigation/routes';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
 import { getActiveRepair, getMyServiceRequests } from '../api/servicerequest_api';
 import { formatTimeAgo } from '../utils/formatters';
-import CustomerNavBar from '../components/CustomerNavBar';
 import NotificationsModal from '../components/NotificationsModal';
 
 const HISTORY_PREVIEW_LIMIT = 3; // how many recent history entries the dashboard card previews
@@ -96,7 +95,7 @@ const CustomerDashboard = ({ navigation, route }) => {
     );
 
     return (
-        <SafeAreaView style={styles.safeArea}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.headerRow}>
                     <View style={styles.headerTextWrap}>
@@ -144,17 +143,14 @@ const CustomerDashboard = ({ navigation, route }) => {
                 </View>
 
                 <Text style={styles.sectionLabel}>HISTORY</Text>
-                <View style={styles.historyCard}>
-                    {/* Right arrow -> full History screen (its list is fetched from the backend) */}
-                    <TouchableOpacity
-                        style={styles.arrowButton}
-                        onPress={() => navigation.navigate('History')}
-                        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                        accessibilityLabel="View full history"
-                    >
-                        <Text style={styles.arrowText}>→</Text>
-                    </TouchableOpacity>
-
+                {/* The whole card is tappable -> full History screen (its list is fetched from the backend) */}
+                <TouchableOpacity
+                    style={styles.historyCard}
+                    activeOpacity={0.85}
+                    onPress={() => navigation.navigate('History')}
+                    accessibilityRole="button"
+                    accessibilityLabel="View full history"
+                >
                     {isLoading ? (
                         <ActivityIndicator color="#0255AF" style={styles.historyLoader} />
                     ) : recentHistory.length > 0 ? (
@@ -172,10 +168,8 @@ const CustomerDashboard = ({ navigation, route }) => {
                             {renderCardMessage(loadFailed ? "Couldn't load. Tap to retry." : 'No history yet')}
                         </View>
                     )}
-                </View>
+                </TouchableOpacity>
             </ScrollView>
-
-            <CustomerNavBar activeTab={ROUTES.CUSTOMER_HOME} />
 
             <NotificationsModal visible={notificationsVisible} onClose={() => setNotificationsVisible(false)} />
         </SafeAreaView>
@@ -274,19 +268,9 @@ const styles = StyleSheet.create({
         borderRadius: 10,
         backgroundColor: '#FFFFFF',
         paddingHorizontal: 16,
-        paddingTop: 36,
+        paddingTop: 16,
         paddingBottom: 12,
         minHeight: 160,
-    },
-    arrowButton: {
-        position: 'absolute',
-        top: 8,
-        right: 12,
-        zIndex: 1,
-    },
-    arrowText: {
-        fontSize: 20,
-        color: '#1B2A5C',
     },
     historyLoader: {
         marginTop: 16,
