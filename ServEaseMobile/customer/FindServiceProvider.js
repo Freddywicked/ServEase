@@ -172,7 +172,14 @@ const FindServiceProvider = ({ navigation }) => {
                         autoCorrect={false}
                         autoCapitalize="none"
                         clearButtonMode="while-editing"
+                        // One line, fixed 14px: the bar is a fixed 45px tall, so letting the phone's
+                        // font-size setting scale the text made the placeholder wrap and get cut off.
+                        multiline={false}
+                        numberOfLines={1}
+                        allowFontScaling={false}
                     />
+                    {/* Figma's 1px outline (radius 8) drawn over the full input; it doesn't take touches. */}
+                    <View pointerEvents="none" style={styles.searchOutline} />
                 </View>
 
                 {/* Scrolls sideways when the chips don't fit the screen width */}
@@ -220,20 +227,29 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
         marginBottom: 10,
     },
+    // Figma "Input": 24px side margins, 45px tall, #EAEAEA, radius 30.
     searchWrap: {
-        marginHorizontal: 40,
-        borderWidth: 1,
-        borderColor: 'rgba(31, 29, 29, 0.12)',
-        borderRadius: 8,
+        marginHorizontal: 24,
+        height: 45,
     },
     searchInput: {
         height: 45,
         backgroundColor: '#EAEAEA',
         borderRadius: 30,
-        paddingHorizontal: 18,
+        paddingLeft: 20, // Figma text starts ~5.5% in
+        paddingRight: 12,
+        paddingVertical: 0,
         fontSize: 14,
         fontWeight: '500',
         color: '#000000',
+        textAlignVertical: 'center',
+        includeFontPadding: false,
+    },
+    searchOutline: {
+        ...StyleSheet.absoluteFillObject,
+        borderWidth: 1,
+        borderColor: 'rgba(31, 29, 29, 0.12)',
+        borderRadius: 8,
     },
     chipScroll: {
         marginTop: 20,
