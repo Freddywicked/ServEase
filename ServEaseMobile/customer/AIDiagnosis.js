@@ -3,34 +3,40 @@ import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet, Animated, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { ROUTES } from '../navigation/routes';
+import ProgressBar from '../components/ProgressBar';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
 import { diagnoseServiceRequest } from '../api/servicerequest_api';
 
 /* ============================================================================
- * AIDiagnosis (step 2 of 4 — runs the AI call)
+ * AIDiagnosis (step 2 of 4 — choice, then runs the AI call)
  * ----------------------------------------------------------------------------
- * Reads the draft collected in CreateServiceRequest from the shared store and
- * calls POST /service-requests/diagnose (the AI language-model endpoint, so
- * expect higher latency than plain CRUD — the API layer allows 30s).
+ * Three states on one screen, matching the Figma "Step 2" / "Step 2.1":
  *
- *   success          -> diagnosis saved to the draft (draft.aiDiagnosis), then
- *                       AIResult is shown. `replace` is used so Back from the
- *                       result goes to step 1, not to this loading screen.
- *                       A LOW-confidence result still goes to AIResult (shown with a
- *                       note) — it is a real answer, not a failure.
- *   failure / timeout -> no dead end: the customer can retry, or skip straight to
- *                       RecommendServiceProvider without a diagnosis.
+ *   'choice'  -> initial state. The customer picks:
+ *                  "Use AI Diagnosis"                  -> starts the AI call (-> 'loading')
+ *                  "Skip AI and Find Service Providers" -> RecommendServiceProvider,
+ *                                                          draft.aiDiagnosis stays null.
+ *   'loading' -> calls POST /service-requests/diagnose (AI language-model endpoint, so
+ *                expect higher latency than plain CRUD — the API layer allows 30s).
+ *                  success -> diagnosis saved to the draft (draft.aiDiagnosis), then
+ *                             AIResult is shown. `replace` is used so Back from the
+ *                             result goes to step 1, not to this loading screen.
+ *                             A LOW-confidence result still goes to AIResult (shown with
+ *                             a note) — it is a real answer, not a failure.
+ *                  failure / timeout -> 'failed'
+ *   'failed'  -> no dead end: the customer can retry, or skip straight to
+ *                RecommendServiceProvider without a diagnosis.
  *
  * No SERVICE_REQUEST row is created here; that happens on submit.
  * ========================================================================== */
 
-const TOTAL_STEPS = 4;
 const CURRENT_STEP = 2;
 
 const AIDiagnosis = ({ navigation }) => {
     const setDraft = useServiceRequestDraftStore((state) => state.setDraft);
-    const [status, setStatus] = useState('loading'); // 'loading' | 'failed'
+    const [status, setStatus] = useState('choice'); // 'choice' | 'loading' | 'failed'
     const [failureMessage, setFailureMessage] = useState('');
+    // 0 = the customer hasn't chosen "Use AI Diagnosis" yet. Each increment starts one AI run.
     const [attempt, setAttempt] = useState(0);
     const spinValue = useRef(new Animated.Value(0)).current;
 
@@ -52,13 +58,18 @@ const AIDiagnosis = ({ navigation }) => {
     }, [status, spinValue]);
 
     useEffect(() => {
+        // Nothing to run until the customer taps "Use AI Diagnosis".
+        if (attempt === 0) {
+            return undefined;
+        }
+
         let cancelled = false;
         const controller = new AbortController();
         setStatus('loading');
 
         const runDiagnosis = async () => {
             try {
-                // getState() so this effect only re-runs on "Try again", not on every draft change.
+                // getState() so this effect only re-runs on a new attempt, not on every draft change.
                 const draft = useServiceRequestDraftStore.getState();
                 const diagnosis = await diagnoseServiceRequest(draft, { signal: controller.signal });
                 if (cancelled) return;
@@ -98,10 +109,19 @@ const AIDiagnosis = ({ navigation }) => {
         navigation.goBack();
     };
 
-    const handleTryAgain = () => {
+    // Starts a run (first time from the choice screen, or again after a failure).
+    const handleUseAI = () => {
         setAttempt((count) => count + 1);
     };
 
+    // From the choice screen: navigate (not replace) so Back from the providers
+    // screen returns here, to the choice.
+    const handleSkipAI = () => {
+        setDraft({ aiDiagnosis: null });
+        navigation.navigate(ROUTES.RECOMMEND_SERVICE_PROVIDER);
+    };
+
+    // From the failed state: replace, so Back doesn't land on a dead error screen.
     const handleSkipToProviders = () => {
         // Draft keeps aiDiagnosis = null; the provider step works without it.
         navigation.replace(ROUTES.RECOMMEND_SERVICE_PROVIDER);
@@ -117,27 +137,27 @@ const AIDiagnosis = ({ navigation }) => {
                     </TouchableOpacity>
                 </View>
 
-                <View style={styles.progressBar}>
-                    {Array.from({ length: TOTAL_STEPS }).map((_, index) => (
-                        <Image
-                            key={index}
-                            source={
-                                index < CURRENT_STEP
-                                    ? require('../assets/icon_tab_colored.png')
-                                    : require('../assets/icon_tab.png')
-                            }
-                            style={styles.progressSegment}
-                            resizeMode="stretch"
-                        />
-                    ))}
-                </View>
+                <ProgressBar currentStep={CURRENT_STEP} />
 
                 <Text style={styles.questionTitle}>
                     To enhance your service request details, we offer AI Diagnosis.
                 </Text>
                 <Text style={styles.questionSubtitle}>Let AI analyze your problem before booking.</Text>
 
-                {status === 'loading' ? (
+                {status === 'choice' ? (
+                    <View style={styles.choiceSection}>
+                        <TouchableOpacity onPress={handleUseAI}>
+                            <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.actionButton}>
+                                <Text style={styles.actionButtonText}>Use AI Diagnosis</Text>
+                            </LinearGradient>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={handleSkipAI} style={styles.skipButton}>
+                            <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.actionButton}>
+                                <Text style={styles.actionButtonText}>Skip AI and Find Service Providers</Text>
+                            </LinearGradient>
+                        </TouchableOpacity>
+                    </View>
+                ) : status === 'loading' ? (
                     <View style={styles.loadingSection}>
                         <Animated.Image
                             source={require('../assets/icon_loading.png')}
@@ -152,14 +172,14 @@ const AIDiagnosis = ({ navigation }) => {
                         <Text style={styles.resultTitle}>AI diagnosis isn't available right now</Text>
                         <Text style={styles.loadingText}>{failureMessage}</Text>
                         <View style={[styles.actionRow, styles.failedActionRow]}>
-                            <TouchableOpacity style={styles.actionButtonHalf} onPress={handleTryAgain}>
+                            <TouchableOpacity style={styles.actionButtonHalf} onPress={handleUseAI}>
                                 <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.actionButton}>
-                                    <Text style={styles.actionButtonText}>Try again</Text>
+                                    <Text style={styles.actionButtonTextSmall}>Try again</Text>
                                 </LinearGradient>
                             </TouchableOpacity>
                             <TouchableOpacity style={styles.actionButtonHalf} onPress={handleSkipToProviders}>
                                 <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.actionButton}>
-                                    <Text style={styles.actionButtonText}>Find Service Providers</Text>
+                                    <Text style={styles.actionButtonTextSmall}>Find Service Providers</Text>
                                 </LinearGradient>
                             </TouchableOpacity>
                         </View>
@@ -176,57 +196,61 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFFFF',
     },
     scrollContent: {
-        paddingHorizontal: 24,
-        paddingTop: 16,
+        paddingHorizontal: 18,
+        paddingTop: 18,
         paddingBottom: 24,
     },
     headerRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 16,
+        marginBottom: 27,
     },
     headerTitle: {
         fontSize: 20,
-        fontWeight: '800',
-        color: '#1B2A8C',
+        fontWeight: '700',
+        lineHeight: 23,
+        color: '#021E79',
     },
     closeButton: {
+        width: 25,
+        height: 25,
+        backgroundColor: '#FFFFFF',
         borderWidth: 1,
-        borderColor: '#E0E0E0',
-        borderRadius: 8,
-        padding: 6,
+        borderColor: '#414141',
+        borderRadius: 5,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     closeIcon: {
-        width: 16,
-        height: 16,
+        width: 11,
+        height: 11,
         resizeMode: 'contain',
-    },
-    progressBar: {
-        flexDirection: 'row',
-        marginBottom: 24,
-    },
-    progressSegment: {
-        flex: 1,
-        height: 6,
-        marginRight: 6,
-        borderRadius: 3,
     },
     questionTitle: {
         fontSize: 16,
-        fontWeight: '700',
-        color: '#1B2A8C',
-        marginBottom: 6,
+        fontWeight: '600',
+        lineHeight: 19,
+        color: '#292727',
+        marginRight: 10,
+        marginBottom: 11,
     },
     questionSubtitle: {
-        fontSize: 13,
-        color: '#666666',
-        lineHeight: 18,
-        marginBottom: 24,
+        fontSize: 14,
+        lineHeight: 16,
+        color: '#414141',
+        marginLeft: 2,
+        marginBottom: 36,
+    },
+    choiceSection: {
+        marginHorizontal: 11,
+    },
+    skipButton: {
+        marginTop: 11,
     },
     loadingSection: {
         alignItems: 'center',
-        paddingVertical: 30,
+        paddingBottom: 30,
     },
     loadingIcon: {
         width: 48,
@@ -254,13 +278,26 @@ const styles = StyleSheet.create({
         marginHorizontal: 4,
     },
     actionButton: {
-        borderRadius: 12,
-        paddingVertical: 15,
+        height: 46,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(0, 0, 0, 0.3)',
+        paddingHorizontal: 8,
         alignItems: 'center',
         justifyContent: 'center',
     },
     actionButtonText: {
-        fontSize: 14,
+        fontFamily: 'Quicksand-Bold',
+        fontSize: 16,
+        lineHeight: 23,
+        color: '#FFFFFF',
+        fontWeight: '700',
+        textAlign: 'center',
+    },
+    actionButtonTextSmall: {
+        fontFamily: 'Quicksand-Bold',
+        fontSize: 13,
+        lineHeight: 18,
         color: '#FFFFFF',
         fontWeight: '700',
         textAlign: 'center',

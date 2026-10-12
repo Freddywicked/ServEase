@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import bellIcon from '../assets/icon_ringbell.png';
 import { openChat } from './MessagingWidget';
-// import { api } from '../api/client'; // BACKEND: use whichever request helper ../api/client exports
+import { getNotifications, markNotificationRead } from '../api/client';
 
 /* =====================================================================================
    NOTIFICATIONS — bell button + "Notifications" popup (customer and provider headers)
    -------------------------------------------------------------------------------------
    Used by CustomerSidebar (viewer="customer") and ServiceProviderSidebar (viewer="provider").
+   The bell is hidden by the sidebars while the user is on their own dashboard; the dashboard
+   shows the same notifications inside its "Notifications" box through `useNotifications`
+   (exported below), so loading and click-routing stay in this one file.
    Notifications are about EVERYTHING in the app (requests, quotations, messages, payments,
    reviews, provider applications, ...). Clicking one closes the popup, marks it read and
    opens the screen where that item lives. Track Requests is only one of those places.
@@ -60,10 +63,14 @@ import { openChat } from './MessagingWidget';
 const ROUTES_BY_VIEWER = {
   customer: {
     quotation_received: () => '/customer/requests?tab=approved',
+    schedule_proposal: () => '/customer/requests?tab=approved',
     schedule_proposed: () => '/customer/requests?tab=approved',
     request_accepted: () => '/customer/requests?tab=ongoing',
     provider_on_the_way: () => '/customer/requests?tab=ongoing',
+    progress_update: () => '/customer/requests?tab=ongoing',
+    payment_request: () => '/customer/requests?tab=ongoing',
     additional_payment_requested: () => '/customer/requests?tab=ongoing',
+    job_completed: () => '/customer/requests?tab=done',
     request_completed: () => '/customer/requests?tab=done',
     request_declined: () => '/customer/requests?tab=declined',
     payment_confirmed: () => '/customer/history?tab=transactions',
@@ -71,11 +78,15 @@ const ROUTES_BY_VIEWER = {
   },
   provider: {
     new_request: (n) => (n.requestId ? `/serviceprovider/requests/${n.requestId}` : '/serviceprovider/requests'),
+    quotation_accepted: () => '/serviceprovider/requests',
     quotation_approved: () => '/serviceprovider/requests',
     quotation_declined: () => '/serviceprovider/requests',
     schedule_accepted: () => '/serviceprovider/jobs',
     schedule_rejected: () => '/serviceprovider/jobs',
+    payment_approved: () => '/serviceprovider/jobs',
+    payment_rejected: () => '/serviceprovider/jobs',
     payment_received: () => '/serviceprovider/earnings',
+    rating_received: () => '/serviceprovider/dashboard',
     new_review: () => '/serviceprovider/dashboard',
   },
 };
@@ -88,9 +99,10 @@ const SHARED_ROUTES = {
 
 // Destinations that are not a page: return true when the notification was handled.
 const ACTIONS = {
+  // The conversation id IS the request reference (see MessagingWidget.jsx).
   new_message: (n) => {
-    if (!n.senderId) return false;
-    openChat({ id: n.senderId, name: n.senderName });
+    if (!n.requestId) return false;
+    openChat({ id: n.requestId, requestId: n.requestId });
     return true;
   },
 };
@@ -101,93 +113,19 @@ const getRoute = (notification, viewer) =>
   SHARED_ROUTES[notification.type]?.(notification) ||
   null;
 
-/* ------------------------------ HARD-CODED DATA ------------------------------ */
-
-const minutesAgo = (m) => new Date(Date.now() - m * 60000).toISOString();
-
-const MOCK_NOTIFICATIONS = {
-  customer: [
-    {
-      id: 'n-1',
-      type: 'quotation_received',
-      message: 'Alden Ricks sent a quotation.',
-      requestId: 'SR-0001',
-      read: false,
-      createdAt: minutesAgo(120),
-    },
-    {
-      id: 'n-2',
-      type: 'request_completed',
-      message: 'Your request #SR-0000 has been completed.',
-      requestId: 'SR-0000',
-      read: false,
-      createdAt: minutesAgo(125),
-    },
-    {
-      id: 'n-3',
-      type: 'new_message',
-      message: 'Jose Rodolfo sent you a message.',
-      senderId: 'prov-jose-rodolfo',
-      senderName: 'Jose Rodolfo',
-      read: false,
-      createdAt: minutesAgo(180),
-    },
-    {
-      id: 'n-4',
-      type: 'payment_confirmed',
-      message: 'Your payment of ₱170.00 was received.',
-      requestId: 'SR-0007',
-      read: true,
-      createdAt: minutesAgo(1500),
-    },
-  ],
-  provider: [
-    {
-      id: 'n-1',
-      type: 'new_request',
-      message: 'Nick Duran sent a new service request.',
-      requestId: 'SR-0000',
-      read: false,
-      createdAt: minutesAgo(120),
-    },
-    {
-      id: 'n-2',
-      type: 'new_message',
-      message: 'Nick Duran sent you a message.',
-      senderId: 'cust-nick-duran',
-      senderName: 'Nick Duran',
-      read: false,
-      createdAt: minutesAgo(125),
-    },
-    {
-      id: 'n-3',
-      type: 'payment_received',
-      message: 'You received a payment of ₱680.00.',
-      requestId: 'SR-0007',
-      read: true,
-      createdAt: minutesAgo(1500),
-    },
-    {
-      id: 'n-4',
-      type: 'new_review',
-      message: 'A customer rated you 5 stars.',
-      requestId: 'SR-0007',
-      read: true,
-      createdAt: minutesAgo(1600),
-    },
-  ],
-};
-
 /* ------------------------------ DATA LAYER (swap for the backend) ------------------------------ */
 
+// Live data: GET /api/notifications returns the logged-in user's notifications
+// (newest first); the same list serves both viewers — the `viewer` only decides
+// where a click navigates. `readAt` (ISO or null) becomes the local `read` flag.
 const notificationsService = {
-  async list(viewer) {
-    // TODO (BACKEND): const { data } = await api.get(`/${viewer}/notifications`); return data;
-    return MOCK_NOTIFICATIONS[viewer] ?? [];
+  async list() {
+    const data = await getNotifications();
+    return (data?.notifications ?? []).map((n) => ({ ...n, read: Boolean(n.readAt) }));
   },
 
   async markRead(id) {
-    // TODO (BACKEND): await api.post(`/notifications/${id}/read`);
+    await markNotificationRead(id);
     return id;
   },
 };
@@ -204,44 +142,27 @@ const timeAgo = (iso) => {
 
 /* ------------------------------ component ------------------------------ */
 
-export default function Notifications({ viewer = 'customer' }) {
+// Shared by the bell popup and the dashboard "Notifications" box.
+// Returns the list, a reload function, and openNotification(n) which marks the item read
+// and opens its destination (a page, or the chat popup).
+export function useNotifications(viewer = 'customer') {
   const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
-  const containerRef = useRef(null);
 
-  const loadNotifications = () =>
-    notificationsService
-      .list(viewer)
-      .then(setNotifications)
-      .catch((err) => console.error('Failed to load notifications', err));
-
-  // Load once, and again every time the popup is opened.
-  useEffect(() => {
-    loadNotifications();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer]);
+  const reload = useCallback(
+    () =>
+      notificationsService
+        .list(viewer)
+        .then(setNotifications)
+        .catch((err) => console.error('Failed to load notifications', err)),
+    [viewer]
+  );
 
   useEffect(() => {
-    if (!open) return undefined;
-    loadNotifications();
-    const onMouseDown = (e) => {
-      if (containerRef.current && !containerRef.current.contains(e.target)) setOpen(false);
-    };
-    const onKeyDown = (e) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onMouseDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onMouseDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+    reload();
+  }, [reload]);
 
-  const handleOpenNotification = (notification) => {
-    setOpen(false);
+  const openNotification = (notification) => {
     setNotifications((prev) =>
       prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n))
     );
@@ -256,6 +177,39 @@ export default function Notifications({ viewer = 'customer' }) {
     const route = getRoute(notification, viewer);
     if (route) navigate(route);
     else console.warn(`No destination for notification type "${notification.type}" (see Notifications.jsx)`);
+  };
+
+  return { notifications, reload, openNotification };
+}
+
+export { timeAgo };
+
+export default function Notifications({ viewer = 'customer' }) {
+  const [open, setOpen] = useState(false);
+  const { notifications, reload, openNotification } = useNotifications(viewer);
+  const containerRef = useRef(null);
+
+  // Reload every time the popup is opened; close on outside click / Escape.
+  useEffect(() => {
+    if (!open) return undefined;
+    reload();
+    const onMouseDown = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open, reload]);
+
+  const handleOpenNotification = (notification) => {
+    setOpen(false);
+    openNotification(notification);
   };
 
   return (

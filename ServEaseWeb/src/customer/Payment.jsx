@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
 import CustomerSidebar from '../components/CustomerSidebar';
 import gcashLogo from '../assets/gcash_logo.png';
 import qrphLogo from '../assets/qrph_logo.png';
 import cardLogo from '../assets/cc_logo.png';
-// import { api } from '../api/client'; // BACKEND: use whichever request helper ../api/client exports
+import { getPaymentDue, getPaymentStatus, payForRequest } from '../api/client';
 
 /* =====================================================================================
    PAYMENT SCREEN — shared by every payment process
@@ -18,29 +18,19 @@ import cardLogo from '../assets/cc_logo.png';
        state: { requestId: id, amount: 170, paymentType: 'initial' }, // 'initial' | 'additional' | 'final'
      });
    It can also be rendered with props: <Payment requestId amount paymentType onBack onContinue />.
-   Everything is hard-coded for now (DEFAULT_PAYMENT below is only a fallback).
 
-   BACKEND INTEGRATION (READY)
-   Proposed endpoint (rename to match ServEaseBackend):
-     POST /api/customer/requests/:requestId/payments
-     body:     { method: 'gcash' | 'qrph' | 'card', paymentType: 'initial' | 'additional' | 'final' }
-     response: { paymentId, amount, checkoutUrl }   // or a QR payload for 'qrph'
-
-   Replace the TODO lines inside handleContinue:
-     const { data } = await api.post(`/customer/requests/${requestId}/payments`, {
-       method: selectedMethod,
-       paymentType,
-     });
-     window.location.assign(data.checkoutUrl);       // redirect to the payment gateway page
-   The amount should come from the backend (GET /api/customer/requests/:requestId/payments/due)
-   instead of router state, so it cannot be changed from the browser.
+   BACKEND INTEGRATION (LIVE)
+     GET  /api/service-requests/:requestId/payment-due
+          -> { total, paid, due: { initial, additional, final } }
+          The displayed amount comes from the server, not from router state, so it
+          cannot be changed from the browser.
+     POST /api/service-requests/:requestId/payment   body: { amount, method, stage }
+          -> { payment, checkoutUrl? }
+          With PayMongo keys configured the browser is redirected to checkoutUrl;
+          without them (dev mode) the payment is recorded as paid immediately.
+     GET  /api/service-requests/:requestId/payment-status
+          Polled after the payment to confirm it before returning to My Requests.
    ===================================================================================== */
-
-const DEFAULT_PAYMENT = {
-  requestId: 'SR-0000',
-  amount: 170, // fallback only — normally passed in by the screen that starts the payment
-  paymentType: 'initial',
-};
 
 const PAYMENT_METHODS = [
   { id: 'gcash', label: 'Gcash', logo: gcashLogo, logoClass: 'h-[40px] w-[53px]' },
@@ -56,36 +46,82 @@ export default function Payment({ requestId, amount, paymentType, onBack, onCont
   const params = useParams();
   const { state } = useLocation();
 
-  const resolvedRequestId =
-    requestId ?? state?.requestId ?? params.requestId ?? DEFAULT_PAYMENT.requestId;
-  const resolvedAmount = amount ?? state?.amount ?? DEFAULT_PAYMENT.amount;
-  const resolvedType = paymentType ?? state?.paymentType ?? DEFAULT_PAYMENT.paymentType;
+  const resolvedRequestId = requestId ?? state?.requestId ?? params.requestId ?? null;
+  const resolvedType = paymentType ?? state?.paymentType ?? 'initial';
 
   const [selectedMethod, setSelectedMethod] = useState(null);
+  // The amount is read from the backend (payment-due); the router-state amount is
+  // only a preview until the server answers.
+  const [dueAmount, setDueAmount] = useState(amount ?? state?.amount ?? null);
+  const [error, setError] = useState('');
+  const [processing, setProcessing] = useState(false);
+
+  useEffect(() => {
+    if (!resolvedRequestId) return undefined;
+    let cancelled = false;
+    getPaymentDue(resolvedRequestId)
+      .then((data) => {
+        if (cancelled) return;
+        const serverAmount = data?.due?.[resolvedType];
+        if (Number.isFinite(serverAmount) && serverAmount > 0) setDueAmount(serverAmount);
+      })
+      .catch((err) => {
+        // Keep the router-state amount; only complain when there is no amount at all.
+        if (!cancelled && dueAmount == null) {
+          setError(err.message || 'Could not load the amount due.');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedRequestId, resolvedType]);
 
   const handleBack = () => (onBack ? onBack() : navigate(-1));
 
+  // Confirm the payment is recorded (dev mode pays instantly; PayMongo checkouts are
+  // confirmed server-side via the webhook / status check).
+  const waitForConfirmation = async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        const { payment } = await getPaymentStatus(resolvedRequestId);
+        if (payment?.status === 'paid') return true;
+      } catch {
+        // keep polling — a status hiccup must not strand the customer
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    return false;
+  };
+
   const handleContinue = async () => {
-    if (!selectedMethod) return;
+    if (!selectedMethod || processing) return;
 
     if (onContinue) {
       onContinue({ requestId: resolvedRequestId, method: selectedMethod, paymentType: resolvedType });
       return;
     }
 
-    // TODO (BACKEND): create the payment, then redirect to the gateway.
-    // const { data } = await api.post(`/customer/requests/${resolvedRequestId}/payments`, {
-    //   method: selectedMethod,
-    //   paymentType: resolvedType,
-    // });
-    // window.location.assign(data.checkoutUrl);
-    console.log('Continue to payment', {
-      requestId: resolvedRequestId,
-      method: selectedMethod,
-      paymentType: resolvedType,
-      amount: resolvedAmount,
-    });
-    navigate('/customer/requests');
+    setProcessing(true);
+    setError('');
+    try {
+      const result = await payForRequest(resolvedRequestId, {
+        amount: dueAmount,
+        method: selectedMethod,
+        stage: resolvedType,
+      });
+      if (result.checkoutUrl) {
+        // PayMongo checkout page; it returns to {backend}/api/payments/return afterwards.
+        window.location.assign(result.checkoutUrl);
+        return;
+      }
+      await waitForConfirmation();
+      navigate('/customer/requests');
+    } catch (err) {
+      setError(err.message || 'The payment could not be started. Please try again.');
+      setProcessing(false);
+    }
   };
 
   return (
@@ -111,8 +147,14 @@ export default function Payment({ requestId, amount, paymentType, onBack, onCont
 
         <div className="mt-[34px] flex max-w-[986px] flex-col items-center">
           <p className="m-0 font-[Inter] text-[20px] font-bold leading-[34px] text-[#414141]">
-            {formatPeso(resolvedAmount)}
+            {dueAmount != null ? formatPeso(dueAmount) : 'Loading…'}
           </p>
+
+          {error && (
+            <p role="alert" className="m-0 mt-3 font-[Inter] text-[13px] text-[#B91C1C]">
+              {error}
+            </p>
+          )}
 
           <h3 className="m-0 mt-[48px] font-[Inter] text-[16px] font-bold leading-[27px] text-[#18315B]">
             Select Payment Method
@@ -143,10 +185,10 @@ export default function Payment({ requestId, amount, paymentType, onBack, onCont
           <button
             type="button"
             onClick={handleContinue}
-            disabled={!selectedMethod}
+            disabled={!selectedMethod || processing || dueAmount == null}
             className="mt-[46px] h-8 w-24 cursor-pointer rounded-[10px] border border-[#B1A8A8] bg-[#FFFDFD] font-[Inter] text-[10px] font-bold leading-[17px] text-[#414141] hover:bg-[#F3F3F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0255AF] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[#FFFDFD]"
           >
-            Continue
+            {processing ? 'Processing…' : 'Continue'}
           </button>
         </div>
       </div>

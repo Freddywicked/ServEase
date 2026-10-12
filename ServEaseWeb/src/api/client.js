@@ -208,3 +208,148 @@ export const rejectServiceRequest = (requestId, { reason } = {}) =>
     method: 'POST',
     body: { reason },
   });
+
+// --- Customer: dashboard + Track Requests (backend: workflow_controllers.js) ---
+
+// The dashboard's "Active Repair" box -> { activeRepair } (activeRepair is null when none).
+export const getActiveRepair = () => request('/service-requests/active');
+
+// One call feeds the whole Track Requests screen: cards grouped by tab.
+// -> { sent: [...], approved: [...], ongoing: [...], declined: [...], done: [...] }
+// Card shapes (all carry requestId/requestNumber/providerId/providerName):
+//   cardType 'diagnosis' : probableCause, confidencePercent
+//   cardType 'quotation' : laborCost, partsCost, total, notes
+//   cardType 'schedule'  : proposalId, scheduledAt, reason
+//   cardType 'payment'   : paymentRequestId, paymentAmount, paymentReason
+//   cardType 'timeline'  : total, timeline: [{ label, timestamp, description, done }]
+//   cardType 'completed' : finalAmount, timeline
+//   cardType 'declined'  : reason
+export const getTrackingCards = () => request('/service-requests/tracking');
+
+// Answer a provider's proposed schedule. answer: 'accept' | 'reject' -> { ok, status }.
+export const answerScheduleProposal = (requestId, proposalId, answer) =>
+  request(
+    `/service-requests/${encodeURIComponent(requestId)}/schedule-proposals/${encodeURIComponent(proposalId)}/${answer}`,
+    { method: 'POST' }
+  );
+
+// Answer an additional-payment request. answer: 'approve' | 'reject' -> { ok, status }.
+export const answerPaymentRequest = (requestId, paymentRequestId, answer) =>
+  request(
+    `/service-requests/${encodeURIComponent(requestId)}/payment-requests/${encodeURIComponent(paymentRequestId)}/${answer}`,
+    { method: 'POST' }
+  );
+
+// Approve/decline a provider's quotation (MyRequestDetails.jsx) -> { ok, status }.
+export const respondToQuotation = (requestId, approve) =>
+  request(`/service-requests/${encodeURIComponent(requestId)}/quotation/respond`, {
+    method: 'POST',
+    body: { approve },
+  });
+
+// Server-computed amounts so the browser cannot tamper with them
+// -> { total, paid, due: { initial, additional, final } }.
+export const getPaymentDue = (requestId) =>
+  request(`/service-requests/${encodeURIComponent(requestId)}/payment-due`);
+
+// Start a payment. stage: 'initial' | 'additional' | 'final', method: 'gcash' | 'qrph' | 'card'.
+// -> { payment, checkoutUrl? } — with PayMongo keys configured, redirect the browser to
+// checkoutUrl; without them (dev mode) the payment is recorded as paid immediately.
+export const payForRequest = (requestId, { amount, method, stage }) =>
+  request(`/service-requests/${encodeURIComponent(requestId)}/payment`, {
+    method: 'POST',
+    body: { amount, method, stage },
+  });
+
+// Poll after returning from the PayMongo checkout page -> { payment: { status, ... } }.
+export const getPaymentStatus = (requestId) =>
+  request(`/service-requests/${encodeURIComponent(requestId)}/payment-status`);
+
+// Rate a completed request (Rating.jsx). 409 when already rated -> { rating }.
+export const rateRequest = (requestId, { rating, review }) =>
+  request(`/service-requests/${encodeURIComponent(requestId)}/rating`, {
+    method: 'POST',
+    body: { rating, review },
+  });
+
+// Customer History screen. type: 'all' | 'repair' | 'transactions' -> { items: [...] }.
+export const getCustomerHistory = (type = 'all') =>
+  request(`/service-requests/history?type=${encodeURIComponent(type)}`);
+
+// --- Notifications (bell + dashboard boxes) ---
+
+// -> { notifications: [{ id, type, message, requestId, readAt, createdAt }] }
+export const getNotifications = () => request('/notifications');
+
+export const markNotificationRead = (notificationId) =>
+  request(`/notifications/${encodeURIComponent(notificationId)}/read`, { method: 'POST' });
+
+// --- Browse service providers (Find Service Providers / provider profile) ---
+
+// -> { providers: [{ id, name, specialty, specialities, verified, available, rating,
+//      reviewCount, experienceYears, locationName, availabilitySchedule, photoUrl }] }
+export const browseServiceProviders = ({ search, category, available } = {}) => {
+  const params = new URLSearchParams();
+  if (search) params.set('search', search);
+  if (category) params.set('category', category);
+  if (available) params.set('available', 'true');
+  const qs = params.toString();
+  return request(`/service-providers${qs ? `?${qs}` : ''}`);
+};
+
+// One provider's full profile + masked reviews -> { provider: {...} }.
+export const getServiceProviderDetails = (providerId) =>
+  request(`/service-providers/${encodeURIComponent(providerId)}`);
+
+// --- Messaging (one conversation per service request; the id IS the request ref "SR-0007") ---
+
+// -> { conversations: [{ id, participantId, name, avatarUrl, lastMessage, hasUnread, jobTitle, isOnline }] }
+export const getConversations = () => request('/conversations');
+
+// Full history, oldest first; also marks the thread read for the viewer
+// -> { messages: [{ id, text, sender: 'customer' | 'provider', senderId, createdAt }] }.
+export const getConversationMessages = (conversationId) =>
+  request(`/conversations/${encodeURIComponent(conversationId)}/messages`);
+
+// -> { message: {...} }.
+export const sendConversationMessage = (conversationId, text) =>
+  request(`/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    method: 'POST',
+    body: { text },
+  });
+
+// --- Service provider: jobs + earnings (backend: providerwork_routes.js) ---
+
+// Active Jobs list -> { jobs: [{ id, requestNumber, customerName, createdAt, status,
+//   aiSuggestion, aiConfidence, stages, currentStepIndex, currentStepLabel,
+//   progressPaymentPaid, paidTotal }] }.
+export const getProviderJobs = () => request('/provider/jobs');
+
+// Push a status update (multipart when a photo is attached). stage must be one of the
+// job's `stages` (backend JOB_STAGES: Assessing / Repairing / Quality Check / Completed).
+export const updateProviderJobStatus = (jobId, { stage, notes, photo } = {}) => {
+  const body = new FormData();
+  body.append('stage', stage);
+  if (notes) body.append('notes', notes);
+  if (photo) body.append('photo', photo);
+  return request(`/provider/jobs/${encodeURIComponent(jobId)}/status`, {
+    method: 'PATCH',
+    body,
+  });
+};
+
+// Ask the customer for an additional-parts payment -> { paymentRequest }.
+export const notifyAdditionalParts = (jobId, { additionalCost, notes } = {}) =>
+  request(`/provider/jobs/${encodeURIComponent(jobId)}/additional-parts`, {
+    method: 'POST',
+    body: { additionalCost, notes },
+  });
+
+// Earnings screen -> { summary: { thisWeek, pendingPayment }, transactions: [{ id,
+//   requestNumber, customerName, date, amount }] }.
+export const getProviderEarnings = () => request('/provider/earnings');
+
+// Provider dashboard (stat cards, pending requests, notifications, active repair)
+// -> { stats: { activeJobs, jobsThisMonth, rating }, activeRepair: {...} | null,
+//      notifications: [{ id, message, createdAt }], pendingRequests: [{ id, requestNumber, customerName }] }.
+export const getProviderDashboard = () => request('/provider/dashboard');

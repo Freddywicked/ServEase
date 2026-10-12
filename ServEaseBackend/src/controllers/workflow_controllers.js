@@ -71,16 +71,28 @@ const pickProviderId = (row, recipients) =>
 // GET /api/notifications?limit -> { notifications: [{ id, type, message, requestId, readAt, createdAt }] }
 const listNotifications = asyncHandler(async (req, res) => {
   const rows = await Workflow.listNotifications(req.user.user_id, req.query.limit);
+  // request_id is stored as the requests table UUID; the apps route with the
+  // public "SR-0007" reference, so translate it here.
+  const requestIds = [...new Set(rows.map((n) => n.request_id).filter(Boolean))];
+  const requestRows = await Request.findByIds(requestIds);
+  const refByUuid = Object.fromEntries(requestRows.map((r) => [r.request_id, refOf(r)]));
   res.json({
     notifications: rows.map((n) => ({
       id: n.notification_id,
       type: n.type,
       message: n.message,
-      requestId: n.request_id || null,
+      requestId: n.request_id ? refByUuid[n.request_id] || null : null,
       readAt: n.read_at,
       createdAt: n.created_at,
     })),
   });
+});
+
+// POST /api/notifications/:id/read — the web bell/dashboard marks a notification
+// read when it is opened. 404s are fine to ignore: the row may have been pruned.
+const markNotificationRead = asyncHandler(async (req, res) => {
+  await Workflow.markNotificationRead(String(req.params.id || '').trim(), req.user.user_id);
+  res.json({ ok: true });
 });
 
 // ============================ CUSTOMER ============================
@@ -474,6 +486,115 @@ const getPaymentStatus = asyncHandler(async (req, res) => {
   });
 });
 
+// GET /api/service-requests/:requestId/payment-due
+// -> { total, paid, due: { initial, additional, final } }
+// The web Payment screen reads the amount from here instead of trusting router
+// state, so it cannot be changed from the browser. `initial` is the 20% fee due
+// after approving a quotation (matches the note on MyRequestDetails.jsx).
+const INITIAL_FEE_RATE = 0.2;
+const getPaymentDue = asyncHandler(async (req, res) => {
+  const row = await getOwnedRequest(req);
+  const [recipients, quotations, paymentRequests, payments] = await Promise.all([
+    Request.listRecipients(row.request_id),
+    Request.listQuotations(row.request_id),
+    Workflow.listPaymentRequests([row.request_id]),
+    Workflow.listPayments([row.request_id]),
+  ]);
+
+  const providerId = pickProviderId(row, recipients);
+  const quote = quotations.find((q) => q.provider_id === providerId) || quotations[0] || null;
+  const quoteTotal = quote ? Number(quote.labor_cost || 0) + Number(quote.parts_cost || 0) : 0;
+  const approvedExtras = paymentRequests
+    .filter((p) => p.status === 'approved')
+    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const paidFor = (stage) =>
+    payments
+      .filter((p) => p.status === 'paid' && p.stage === stage)
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+  const total = quoteTotal + approvedExtras;
+  const paid = payments
+    .filter((p) => p.status === 'paid')
+    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const round2 = (n) => Math.round(n * 100) / 100;
+
+  res.json({
+    total: round2(total),
+    paid: round2(paid),
+    due: {
+      initial: round2(Math.max(0, quoteTotal * INITIAL_FEE_RATE - paidFor('initial'))),
+      additional: round2(Math.max(0, approvedExtras - paidFor('additional'))),
+      // Whatever is still unpaid once the job is done (the initial fee and any
+      // additional payments already made count towards it).
+      final: round2(Math.max(0, total - paid)),
+    },
+  });
+});
+
+// GET /api/service-requests/history?type=all|repair|transactions -> { items: [...] }
+// The web History screen: finished/closed requests plus every paid payment.
+//   repair:      { id, type: 'repair', title, providerName, date, status }
+//   transaction: { id, type: 'transaction', title, providerName, date, status: 'Paid', amount }
+const getCustomerHistory = asyncHandler(async (req, res) => {
+  const type = String(req.query.type || 'all').toLowerCase();
+  const rows = await Request.listForCustomer(req.user.user_id);
+  const requestIds = rows.map((r) => r.request_id);
+
+  const [recipientLists, payments] = await Promise.all([
+    Promise.all(rows.map((r) => Request.listRecipients(r.request_id))),
+    Workflow.listPayments(requestIds),
+  ]);
+  const providerIds = [...new Set(recipientLists.flat().map((r) => r.provider_id).filter(Boolean))];
+  const users = await Request.findUsersByIds(providerIds);
+
+  const CLOSED_STATUSES = ['Completed', 'Declined', 'Rejected', 'Resolved', 'Cancelled'];
+  const STAGE_TITLES = {
+    initial: 'Initial fee',
+    additional: 'Additional payment',
+    final: 'Final payment',
+  };
+
+  const items = [];
+  rows.forEach((row, i) => {
+    const providerId = pickProviderId(row, recipientLists[i]);
+    const providerName = users[providerId]?.name || 'Service provider';
+
+    if (CLOSED_STATUSES.includes(row.request_status)) {
+      items.push({
+        id: refOf(row),
+        type: 'repair',
+        title: row.ai_diagnosis?.probableCause || row.category,
+        providerName,
+        date: row.created_at,
+        status: row.request_status,
+      });
+    }
+
+    payments
+      .filter((p) => p.request_id === row.request_id && p.status === 'paid')
+      .forEach((p) =>
+        items.push({
+          id: p.payment_id,
+          type: 'transaction',
+          title: `${STAGE_TITLES[p.stage] || 'Payment'} (Request #${refOf(row)})`,
+          providerName,
+          date: p.created_at,
+          status: 'Paid',
+          amount: Number(p.amount),
+        })
+      );
+  });
+
+  items.sort((a, b) => new Date(b.date) - new Date(a.date));
+  const filtered =
+    type === 'repair'
+      ? items.filter((i) => i.type === 'repair')
+      : type === 'transactions'
+        ? items.filter((i) => i.type === 'transaction')
+        : items;
+  res.json({ items: filtered });
+});
+
 // POST /api/payments/webhook — called by PayMongo, not by the apps. Verifies the
 // signature when PAYMONGO_WEBHOOK_SECRET is set.
 const paymongoWebhook = asyncHandler(async (req, res) => {
@@ -734,10 +855,15 @@ const toJobDto = (row, customer, updates, payments) => {
     status,
     statusLabel: status,
     aiSuggestion: row.ai_diagnosis?.status === 'done' ? row.ai_diagnosis.probableCause : null,
+    aiConfidence: row.ai_diagnosis?.status === 'done' ? row.ai_diagnosis.confidencePercent ?? null : null,
     stages: JOB_STAGES,
     currentStepIndex: Math.max(lastIndex, 0),
     currentStepLabel: lastIndex >= 0 ? JOB_STAGES[lastIndex] : 'Not started',
     progressPaymentPaid: (payments || []).length > 0,
+    // Sum of what the customer has actually paid so far (the web Active Jobs card shows it).
+    paidTotal: (payments || [])
+      .filter((p) => p.status === 'paid')
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0),
   };
 };
 
@@ -979,6 +1105,7 @@ const listConversations = asyncHandler(async (req, res) => {
     const unread = viewer === 'provider' ? latest && !latest.seen_by_provider : latest && !latest.seen_by_customer;
     conversations.push({
       id: refOf(row),
+      participantId: other.userId, // the web MessagingWidget matches openChat() calls by this
       name: other.name,
       avatarUrl: other.photoUrl,
       lastMessage: latest ? latest.body : '',
@@ -1268,7 +1395,10 @@ const getProviderDetails = asyncHandler(async (req, res) => {
 
 module.exports = {
   listNotifications,
+  markNotificationRead,
   getActiveRepair,
+  getCustomerHistory,
+  getPaymentDue,
   getTracking,
   answerScheduleProposal,
   answerPaymentRequest,

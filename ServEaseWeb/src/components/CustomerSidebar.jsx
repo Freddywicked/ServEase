@@ -7,14 +7,16 @@ import fullLogo from '../assets/servease_web_sidebar.png';
 import iconLogo from '../assets/servease_icon.png';
 import dashboardIconWhite from '../assets/icon_dashboard_white.png';
 import dashboardIconBlack from '../assets/icon_dashboard_black.png';
-import gearIconWhite from '../assets/icon_gear_white.png';
-import gearIconBlack from '../assets/icon_gear_black.png';
-import requestIconWhite from '../assets/icon_request_white.png';
-import requestIconBlack from '../assets/icon_request.png';
+import gearIconWhite from '../assets/icon_search_white.png';
+import gearIconBlack from '../assets/icon_search.png';
+import requestIconWhite from '../assets/icon_tools_white.png';
+import requestIconBlack from '../assets/icon_tools.png';
 import historyIconWhite from '../assets/icon_history_white.png';
 import historyIconBlack from '../assets/icon_history.png';
 import hamburgerIcon from '../assets/icon_hamburger.png';
 import dropdownIcon from '../assets/icon_dropdown.png';
+import formIcon from '../assets/icon_form.png';
+import switchAccountIcon from '../assets/icon_switch_account.png';
 import MessagingWidget from './MessagingWidget';
 import Notifications from './Notifications';
 
@@ -24,6 +26,18 @@ const AUTO_COLLAPSE_QUERY = '(max-width: 900px)';
 
 // Fallback shown when no logged-in customer data is available yet.
 const DEFAULT_INITIALS = 'CG';
+
+// Where "Apply as Service Provider" goes (the provider application screen).
+const APPLY_PROVIDER_PATH = '/serviceprovider/service-category';
+// Where "Switch Account" goes once the customer also has a service provider account.
+const PROVIDER_HOME_PATH = '/serviceprovider/dashboard';
+
+// Does this customer already have an (approved) service provider account?
+// TODO (BACKEND): adjust to the field the backend sends on the logged-in user. A pending or
+// rejected application counts as "no provider account yet", so "Apply as Service Provider"
+// stays visible for them.
+const hasProviderAccount = (user) =>
+  Boolean(user?.hasProviderAccount || user?.providerStatus === 'approved');
 
 // Screens of the "create service request" flow. Creating a request starts from the Dashboard,
 // so these routes highlight the Dashboard tab (not Track Requests). Add any other step routes
@@ -88,6 +102,8 @@ export default function CustomerSidebar({ children, initials }) {
   // Figma shows the first letter of the customer's name (e.g. "J" for Juan).
   const avatarInitials = initials || (firstName ? firstName[0].toUpperCase() : DEFAULT_INITIALS);
   const width = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH;
+  // The bell is hidden on the dashboard (notifications are shown inside its container).
+  const onDashboard = location.pathname.startsWith('/customer/dashboard');
 
   // Responsive: collapse the sidebar automatically on small screens, expand again on large ones.
   useEffect(() => {
@@ -120,6 +136,17 @@ export default function CustomerSidebar({ children, initials }) {
     navigate('/customer/profile');
   };
 
+  const handleApplyProvider = () => {
+    setMenuOpen(false);
+    navigate(APPLY_PROVIDER_PATH);
+  };
+
+  const handleSwitchAccount = () => {
+    setMenuOpen(false);
+    // TODO (BACKEND): tell the backend the active mode is now "provider" if it tracks that.
+    navigate(PROVIDER_HOME_PATH);
+  };
+
   const handleLogout = () => {
     setMenuOpen(false);
     logout(); // removes the saved login token
@@ -142,9 +169,9 @@ export default function CustomerSidebar({ children, initials }) {
           />
         </div>
 
-        {/* Upper right: notification bell, user avatar, name + role, dropdown */}
+        {/* Upper right: notification bell (hidden on the dashboard), user avatar, name + role, dropdown */}
         <div className="mr-4 flex flex-none items-center gap-4 sm:mr-[46px] sm:gap-[33px]">
-          <Notifications viewer="customer" />
+          {!onDashboard && <Notifications viewer="customer" />}
 
           <div ref={menuRef} className="relative">
             <button
@@ -188,6 +215,27 @@ export default function CustomerSidebar({ children, initials }) {
                     {user?.email}
                   </span>
                 </button>
+                {hasProviderAccount(user) ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={handleSwitchAccount}
+                    className="m-0 mb-4 flex w-full cursor-pointer items-center gap-3 border-none bg-transparent p-0 text-left text-[16px] font-normal leading-[19px] text-[#292727]"
+                  >
+                    <img src={switchAccountIcon} alt="" className="h-[22px] w-[22px] flex-none object-contain" />
+                    Switch Account
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={handleApplyProvider}
+                    className="m-0 mb-4 flex w-full cursor-pointer items-center gap-3 border-none bg-transparent p-0 text-left text-[16px] font-normal leading-[19px] text-[#292727]"
+                  >
+                    <img src={formIcon} alt="" className="h-[22px] w-[22px] flex-none object-contain" />
+                    Apply as Service Provider
+                  </button>
+                )}
                 <button
                   type="button"
                   role="menuitem"

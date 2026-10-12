@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { ROUTES } from '../navigation/routes';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
+import ProgressBar from '../components/ProgressBar';
 import { getRecommendedProviders, createServiceRequest } from '../api/servicerequest_api';
 
 /* ============================================================================
@@ -24,7 +25,6 @@ import { getRecommendedProviders, createServiceRequest } from '../api/servicereq
  *            pure confirmation screen.
  * ========================================================================== */
 
-const TOTAL_STEPS = 4;
 const CURRENT_STEP = 3;
 
 const formatLocation = (provider) =>
@@ -321,20 +321,7 @@ const RecommendServiceProvider = ({ navigation }) => {
                     </TouchableOpacity>
                 </View>
 
-                <View style={styles.progressBar}>
-                    {Array.from({ length: TOTAL_STEPS }).map((_, index) => (
-                        <Image
-                            key={index}
-                            source={
-                                index < CURRENT_STEP
-                                    ? require('../assets/icon_tab_colored.png')
-                                    : require('../assets/icon_tab.png')
-                            }
-                            style={styles.progressSegment}
-                            resizeMode="stretch"
-                        />
-                    ))}
-                </View>
+                <ProgressBar currentStep={CURRENT_STEP} />
 
                 <Text style={styles.questionTitle}>Recommended Service Providers</Text>
                 <Text style={styles.questionSubtitle}>
@@ -378,16 +365,6 @@ const styles = StyleSheet.create({
         width: 16,
         height: 16,
         resizeMode: 'contain',
-    },
-    progressBar: {
-        flexDirection: 'row',
-        marginBottom: 24,
-    },
-    progressSegment: {
-        flex: 1,
-        height: 6,
-        marginRight: 6,
-        borderRadius: 3,
     },
     questionTitle: {
         fontSize: 16,

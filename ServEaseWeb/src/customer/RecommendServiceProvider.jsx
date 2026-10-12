@@ -1,7 +1,13 @@
-import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Navigate, useNavigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
 import starIcon from '../assets/icon_star.png';
+import {
+  clearDraftRequestId,
+  getDraftRequestId,
+  getRecommendedProviders,
+  submitServiceRequest,
+} from '../api/client';
 
 // Step progress: four 85px x 9px segments with a 4px gap (Figma). This screen is step 3 of 4.
 function StepProgress({ activeStep, totalSteps = 4 }) {
@@ -27,77 +33,64 @@ function CheckBadgeIcon({ size = 22 }) {
   );
 }
 
-// ── HARD-CODED CONTENT: START ─────────────────────────────────────────────
-// Expected shape of each recommended provider once the backend is wired up (adjust to the real contract):
-//   {
-//     id: string | number,
-//     name: string,
-//     category: string,              // e.g. 'Phone Repair'
-//     avatarUrl: string | null,
-//     verified: boolean,
-//     available: boolean,
-//     rating: number,                // e.g. 4.8
-//     reviewCount: number,
-//     yearsExperience: number,
-//     specialities: string,
-//     location: string,              // may include distance computed server-side
-//     availability: string,          // e.g. 'Mon-Fri, 8AM-6PM'
-//   }
-const MOCK_PROVIDERS = [
-  { id: 1, name: 'Mark Rivera', category: 'Phone Repair', avatarUrl: null, verified: true, available: true, rating: 4.8, reviewCount: 95, yearsExperience: 5, specialities: 'IT and Phone Repair', location: 'Naga City · 2.5 km away', availability: 'Mon-Fri, 8AM-6PM' },
-  { id: 2, name: 'Jason Tatum', category: 'Phone Repair', avatarUrl: null, verified: true, available: true, rating: 4.8, reviewCount: 95, yearsExperience: 5, specialities: 'IT and Phone Repair', location: 'Naga City · 2.5 km away', availability: 'Mon-Fri, 8AM-6PM' },
-  { id: 3, name: 'Sylvia Lee', category: 'Phone Repair', avatarUrl: null, verified: true, available: true, rating: 4.8, reviewCount: 95, yearsExperience: 5, specialities: 'IT and Phone Repair', location: 'Naga City · 2.5 km away', availability: 'Mon-Fri, 8AM-6PM' },
-  { id: 4, name: 'John Doe', category: 'Phone Repair', avatarUrl: null, verified: true, available: true, rating: 4.8, reviewCount: 95, yearsExperience: 5, specialities: 'IT and Phone Repair', location: 'Naga City · 2.5 km away', availability: 'Mon-Fri, 8AM-6PM' },
-];
-// ── HARD-CODED CONTENT: END ───────────────────────────────────────────────
+// Live data: GET /api/service-requests/:requestId/providers — verified providers,
+// those matching the draft request's category first (matchesCategory). Mapped here
+// onto the shape the cards below render.
+const toProviderCard = (p) => ({
+  id: p.id, // the provider's user id — this is what submitServiceRequest expects
+  name: p.name,
+  category: (p.specializations || [])[0] || 'Service provider',
+  // photoUrl is a private storage path unless the server signed it (starts with http)
+  avatarUrl: typeof p.photoUrl === 'string' && p.photoUrl.startsWith('http') ? p.photoUrl : null,
+  verified: true, // the endpoint only returns verified providers
+  available: true,
+  rating: p.rating ?? 'New',
+  reviewCount: p.reviewCount ?? 0,
+  yearsExperience: p.experience ?? 0,
+  specialities: (p.specializations || []).join(', '),
+  location: p.distanceKm != null ? `${Number(p.distanceKm).toFixed(1)} km away` : '',
+  availability: p.offersHomeServices ? 'Offers home services' : '',
+  matchesCategory: Boolean(p.matchesCategory),
+});
 
 export default function RecommendServiceProvider() {
   const navigate = useNavigate();
 
-  // TODO (backend-ready): this screen is reached after "Find Service Providers" in AIResult.jsx.
-  // Carry the request context from there via route state, e.g. in AIResult:
-  //   // navigate('/customer/recommended-providers', { state: { requestId, category, diagnosis } });
-  // and read it here:
-  //   // const { state } = useLocation();   // import { useLocation } from 'react-router-dom'
-  //   // const { requestId, category, diagnosis } = state ?? {};
-  //
-  // TODO (backend-ready): replace MOCK_PROVIDERS with providers fetched from the database,
-  // matched by the service category the user selected, the user's location, and rating
-  // (highest to lowest), e.g.:
-  //
-  //   // const [providers, setProviders] = useState([]);
-  //   // const [status, setStatus] = useState('loading'); // 'loading' | 'done' | 'error'
-  //   //
-  //   // useEffect(() => {
-  //   //   let cancelled = false;
-  //   //   async function loadRecommended() {
-  //   //     try {
-  //   //       const result = await api.getRecommendedProviders({
-  //   //         requestId,
-  //   //         category,                 // category selected in the service request
-  //   //         location: userLocation,   // user's saved address or coordinates
-  //   //         sortBy: 'rating',
-  //   //         order: 'desc',
-  //   //       });
-  //   //       if (!cancelled) { setProviders(result); setStatus('done'); }
-  //   //     } catch (err) {
-  //   //       if (!cancelled) setStatus('error');
-  //   //     }
-  //   //   }
-  //   //   loadRecommended();
-  //   //   return () => { cancelled = true; };
-  //   // }, [requestId, category]);
+  // The draft request created in step 1 (CreateServiceRequest.jsx saved its id).
+  // Opened directly (no draft), this screen makes no sense — start over.
+  const requestId = getDraftRequestId();
 
-  // Sorted by rating, highest to lowest. Remove once the server returns them already sorted.
-  const providers = useMemo(
-    () => [...MOCK_PROVIDERS].sort((a, b) => b.rating - a.rating),
-    []
-  );
+  const [providers, setProviders] = useState([]);
+  const [status, setStatus] = useState('loading'); // 'loading' | 'done' | 'error'
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
-  // In the design the two top matches carry the teal highlighted border. They start selected;
-  // clicking a card toggles it.
-  const [selectedIds, setSelectedIds] = useState(() => new Set(providers.slice(0, 2).map((p) => p.id)));
+  useEffect(() => {
+    if (!requestId) return undefined;
+    let cancelled = false;
+    setStatus('loading');
+    getRecommendedProviders(requestId)
+      .then((data) => {
+        if (cancelled) return;
+        const list = (data?.providers ?? []).map(toProviderCard);
+        setProviders(list);
+        // In the design the top matches start selected (the backend already sorts
+        // category matches first, so the first two are the best fit).
+        setSelectedIds(new Set(list.slice(0, 2).map((p) => p.id)));
+        setStatus('done');
+      })
+      .catch(() => {
+        if (!cancelled) setStatus('error');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [requestId]);
 
+  if (!requestId) return <Navigate to="/customer/requests/new" replace />;
+
+  // Clicking a card toggles it; the selected ids are submitted with the request.
   const toggleProvider = (id) => {
     setSelectedIds((current) => {
       const next = new Set(current);
@@ -107,17 +100,24 @@ export default function RecommendServiceProvider() {
     });
   };
 
-  const handleSubmit = () => {
-    // TODO (backend-ready): attach the selected provider(s) to the request and submit it, e.g.
-    // await api.submitServiceRequest({ requestId, providerIds: [...selectedIds], diagnosis });
-    // Route: confirmation screen (SubmitServiceRequest.jsx) — adjust if the route name differs.
-    navigate('/customer/request-submitted');
+  // Sends the draft request to the chosen providers (POST /:id/submit); it then
+  // shows up in their Incoming Service Requests list.
+  const handleSubmit = async () => {
+    if (submitting || selectedIds.size === 0) return;
+    setSubmitting(true);
+    setSubmitError('');
+    try {
+      await submitServiceRequest(requestId, [...selectedIds]);
+      clearDraftRequestId();
+      navigate('/customer/requests/new/request-submitted');
+    } catch (err) {
+      setSubmitError(err.message || 'Could not submit the request. Please try again.');
+      setSubmitting(false);
+    }
   };
 
+  // Browse the full provider list instead of the recommended shortlist.
   const handleFindAnother = () => {
-    // Route: Find Service Providers list (FindServiceProvider.jsx) — adjust if the route name differs.
-    // TODO (backend-ready): carry request context along, e.g.
-    // navigate('/customer/providers', { state: { requestId, category, diagnosis } });
     navigate('/customer/providers');
   };
 
@@ -135,6 +135,22 @@ export default function RecommendServiceProvider() {
         <p className="m-0 mt-4 max-w-[520px] font-[SF_Pro,system-ui,sans-serif] text-[20px] leading-[24px] text-[#484040]">
           Matched by specialization, customer satisfaction sentiments, ratings and distance from you.
         </p>
+
+        {status === 'loading' && (
+          <p className="m-0 mt-10 font-[Roboto] text-[14px] text-[#817C7C]">
+            Finding recommended service providers…
+          </p>
+        )}
+        {status === 'error' && (
+          <p role="alert" className="m-0 mt-10 font-[Roboto] text-[14px] text-[#B91C1C]">
+            Could not load recommended providers. Please try again.
+          </p>
+        )}
+        {status === 'done' && providers.length === 0 && (
+          <p className="m-0 mt-10 font-[Roboto] text-[14px] text-[#817C7C]">
+            No verified service providers available yet — try again later.
+          </p>
+        )}
 
         <div className="mt-[41px] overflow-x-auto">
           <div className="grid max-w-[927px] grid-cols-1 gap-x-[31px] gap-y-[21px] xl:grid-cols-2">
@@ -210,13 +226,18 @@ export default function RecommendServiceProvider() {
         </div>
 
         <div className="mt-12 flex max-w-[927px] flex-col items-center lg:mt-[49px]">
+          {submitError && (
+            <p role="alert" className="m-0 mb-3 text-center font-[Roboto] text-[13px] text-[#B91C1C]">
+              {submitError}
+            </p>
+          )}
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={selectedIds.size === 0}
+            disabled={selectedIds.size === 0 || submitting}
             className="box-border flex h-[46px] w-full max-w-[348px] cursor-pointer items-center justify-center rounded-lg border border-black/30 bg-gradient-to-r from-[#0255AF] to-[#04A5A5] font-[Quicksand] text-[16px] font-bold leading-[23px] text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Submit Service Request
+            {submitting ? 'Submitting…' : 'Submit Service Request'}
           </button>
           <button
             type="button"

@@ -4,11 +4,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const NAVY = '#18315B';
 
+// Figma: the Requests icon is 24 x 23 (the other tab icons use the default 20 x 20).
+const REQUEST_ICON_SIZE = { width: 24, height: 23 };
+
 // Earnings is NOT a tab: it is reached from the Earnings container on the dashboard.
 // Each tab carries an active (white, inside a navy circle) and an inactive (colored) icon.
 const TAB_ITEMS = [
     { key: 'ServiceProviderDashboard', label: 'Home', activeIcon: require('../assets/icon_home_white.png'), inactiveIcon: require('../assets/icon_home_colored.png') },
-    { key: 'IncomingServiceRequest', label: 'Requests', activeIcon: require('../assets/icon_request_white.png'), inactiveIcon: require('../assets/icon_request_colored.png') },
+    { key: 'IncomingServiceRequest', label: 'Requests', activeIcon: require('../assets/icon_request_white.png'), inactiveIcon: require('../assets/icon_request_colored.png'), iconStyle: REQUEST_ICON_SIZE },
     { key: 'Jobs', label: 'Jobs', activeIcon: require('../assets/icon_tools_white.png'), inactiveIcon: require('../assets/icon_tools_colored.png') },
     { key: 'MessageServiceProvider', label: 'Chat', activeIcon: require('../assets/icon_chatbubble_white.png'), inactiveIcon: require('../assets/icon_chatbubble_colored.png') },
     { key: 'ServiceProviderProfile', label: 'Profile', activeIcon: require('../assets/icon_profile_white.png'), inactiveIcon: require('../assets/icon_profile_colored.png') },
@@ -76,7 +79,7 @@ const ServiceProviderNavBar = ({ navigationRef, routeName }) => {
                             accessibilityState={{ selected: isActive }}
                         >
                             <View style={[styles.iconWrap, isActive && styles.iconWrapActive]}>
-                                <Image source={tab.inactiveIcon} style={[styles.icon, isActive && styles.iconActive]} />
+                                <Image source={tab.inactiveIcon} style={[styles.icon, tab.iconStyle, isActive && styles.iconActive]} />
                             </View>
                             <Text style={styles.label}>{tab.label}</Text>
                         </TouchableOpacity>

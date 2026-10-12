@@ -1,28 +1,24 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
+import { browseServiceProviders } from '../api/client';
 
-// ── HARD-CODED CONTENT: START ─────────────────────────────────────────────
 // Filter chips shown under the search bar. 'Available' and 'Top rated' are quick filters;
-// the rest are service categories.
-const FILTER_CHIPS = ['Available', 'Top rated', 'Automotive', 'IT and Phone', 'Home Repair'];
+// the rest are service categories. Each chip maps to query params for
+// GET /api/service-providers (the server does the searching/filtering/sorting).
+const FILTER_CHIPS = ['Available', 'Top rated', 'Automotive', 'IT Devices', 'Phone', 'Home Repair'];
 
-// Expected shape of each provider once the backend is wired up (adjust to the real contract):
-//   {
-//     id: string | number,
-//     name: string,
-//     address: string,
-//     rating: number,            // average rating, e.g. 4.1
-//     category: string,          // must match a category chip label
-//     verified: boolean,
-//     available: boolean,
-//   }
-const MOCK_PROVIDERS = [
-  { id: 1, name: 'Sylvia Lee', address: 'Panganiban Drive, Naga City', rating: 4.1, category: 'Automotive', verified: true, available: true },
-  { id: 2, name: 'Mickey Mouse', address: 'Panganiban Drive, Naga City', rating: 4.1, category: 'Automotive', verified: true, available: true },
-  { id: 3, name: 'Coco Mangusin', address: 'Panganiban Drive, Naga City', rating: 4.1, category: 'Automotive', verified: true, available: true },
-];
-// ── HARD-CODED CONTENT: END ───────────────────────────────────────────────
+// Chip label -> backend query. Category keywords match specialization names on the
+// server; 'Top rated' needs no param (the list arrives sorted by rating, highest first).
+const CHIP_TO_QUERY = {
+  Available: { available: true },
+  'Top rated': {},
+  Automotive: { category: 'Automotive Services' },
+  'IT Devices': { category: 'IT-related Device Repair' },
+  Phone: { category: 'Phone Repair' },
+  'Home Repair': { category: 'Home Repair Services' },
+};
+
 
 function PinIcon() {
   return (
@@ -48,44 +44,43 @@ export default function FindServiceProvider() {
   const [search, setSearch] = useState('');
   const [activeChip, setActiveChip] = useState('Automotive');
 
-  // TODO (backend-ready): replace MOCK_PROVIDERS with data fetched from the database, e.g.
-  //
-  //   // const [providers, setProviders] = useState([]);
-  //   // const [status, setStatus] = useState('loading'); // 'loading' | 'done' | 'error'
-  //   //
-  //   // useEffect(() => {
-  //   //   let cancelled = false;
-  //   //   async function loadProviders() {
-  //   //     try {
-  //   //       setStatus('loading');
-  //   //       // Let the server do the searching/filtering (debounce `search` before calling):
-  //   //       const result = await api.getServiceProviders({
-  //   //         search,
-  //   //         filter: activeChip,         // 'Available' | 'Top rated' | category name
-  //   //       });
-  //   //       if (!cancelled) { setProviders(result); setStatus('done'); }
-  //   //     } catch (err) {
-  //   //       if (!cancelled) setStatus('error');
-  //   //     }
-  //   //   }
-  //   //   loadProviders();
-  //   //   return () => { cancelled = true; };
-  //   // }, [search, activeChip]);
-  //
-  // Optional: if this screen was reached from RecommendServiceProvider.jsx ("Find another
-  // Service Provider") read the request context from route state so it can be passed on to the
-  // details screen / service request:
-  //   // const { state } = useLocation();  // const { requestId, category, diagnosis } = state ?? {};
+  // Live provider list from the backend. The server does the search + chip filtering;
+  // typing is debounced so every keystroke does not fire a request.
+  const [providers, setProviders] = useState([]);
+  const [status, setStatus] = useState('loading'); // 'loading' | 'done' | 'error'
 
-  // Client-side filtering for the hard-coded data. Remove once the server filters/searches.
-  const providers = useMemo(() => {
-    let list = MOCK_PROVIDERS.filter((p) =>
-      p.name.toLowerCase().includes(search.trim().toLowerCase())
-    );
-    if (activeChip === 'Available') list = list.filter((p) => p.available);
-    else if (activeChip === 'Top rated') list = [...list].sort((a, b) => b.rating - a.rating);
-    else if (activeChip) list = list.filter((p) => p.category === activeChip);
-    return list;
+  useEffect(() => {
+    let cancelled = false;
+    setStatus('loading');
+    const timer = setTimeout(() => {
+      browseServiceProviders({
+        search: search.trim(),
+        ...(CHIP_TO_QUERY[activeChip] || {}),
+      })
+        .then((data) => {
+          if (cancelled) return;
+          // Map the server shape onto the card fields below.
+          setProviders(
+            (data?.providers ?? []).map((p) => ({
+              id: p.id,
+              name: p.name,
+              address: p.locationName || '',
+              rating: p.rating ?? 'New',
+              category: p.specialty,
+              verified: Boolean(p.verified),
+              available: Boolean(p.available),
+            }))
+          );
+          setStatus('done');
+        })
+        .catch(() => {
+          if (!cancelled) setStatus('error');
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [search, activeChip]);
 
   const handleChipClick = (chip) => {
@@ -180,7 +175,17 @@ export default function FindServiceProvider() {
             </div>
           ))}
 
-          {providers.length === 0 && (
+          {status === 'loading' && (
+            <p className="m-0 py-10 text-center font-[Roboto] text-[14px] text-[#817C7C]">
+              Searching service providers…
+            </p>
+          )}
+          {status === 'error' && (
+            <p role="alert" className="m-0 py-10 text-center font-[Roboto] text-[14px] text-[#B91C1C]">
+              Could not load service providers. Please try again.
+            </p>
+          )}
+          {status === 'done' && providers.length === 0 && (
             <p className="m-0 py-10 text-center font-[Roboto] text-[14px] text-[#817C7C]">
               No service providers found.
             </p>

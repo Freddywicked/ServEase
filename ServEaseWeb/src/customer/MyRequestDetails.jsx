@@ -2,49 +2,40 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft, X } from 'lucide-react';
 import CustomerSidebar from '../components/CustomerSidebar';
-// import { api } from '../api/client'; // BACKEND: use whichever request helper ../api/client exports
+import { getServiceRequest, respondToQuotation } from '../api/client';
 
 /* =====================================================================================
-   BACKEND INTEGRATION (READY) — My Requests > quotation details (customer)
+   MY REQUESTS > quotation details (customer) — live data
    Route: /customer/requests/:requestId
    -------------------------------------------------------------------------------------
-   Everything is hard-coded (MOCK_REQUEST below). Replace it with the API response and
-   swap the TODO lines inside the handlers.
-
-   1) Load the quotation
-      GET /api/customer/requests/:requestId
-      -> { id, providerName, quotation: { reason, items: [{ label, amount }], total } }
-         (same shape as MOCK_REQUEST)
-
-      const { requestId } = useParams();
-      const [request, setRequest] = useState(null);
-      useEffect(() => {
-        let cancelled = false;
-        api.get(`/customer/requests/${requestId}`)
-          .then((res) => { if (!cancelled) setRequest(res.data); })
-          .catch((err) => console.error('Failed to load request', err));
-        return () => { cancelled = true; };
-      }, [requestId]);
-
-   2) Approve
-      POST /api/customer/requests/:requestId/quotation/approve
-      -> { amountDue }   // the 20% initial fee, passed to the Payment screen
-
-   3) Decline
-      POST /api/customer/requests/:requestId/quotation/decline    body: { reason }
+   Load:  GET /api/service-requests/:requestId -> { request }
+          request.providers[] carries each recipient; the one with status 'quoted'
+          holds quote: { labor, parts, notes } (see toCustomerDto in the backend).
+   Answer: POST /api/service-requests/:requestId/quotation/respond  body: { approve }
+          approve -> request booked with that provider, then the 20% initial fee is
+          paid on the Payment screen (the exact amount is re-computed server-side).
    ===================================================================================== */
+
 
 const INITIAL_FEE_RATE = 0.2; // initial fee = 20% of the quotation total
 
-// HARD-CODED DATA — replace with the API response.
-const MOCK_REQUEST = {
-  id: 'SR-0001',
-  providerName: 'Micco Dominic',
-  quotation: {
-    reason: 'This sentence states the reason to justify the labor.',
-    items: [{ label: 'Labor', amount: 850 }],
-    total: 850,
-  },
+// The request DTO (toCustomerDto) carries providers: [{ userId, name, status, quote }].
+// The quotation being reviewed belongs to the provider whose status is 'quoted'.
+const toQuotationView = (request) => {
+  const quoted = (request.providers || []).find((p) => p.status === 'quoted' && p.quote);
+  if (!quoted) return null;
+  const { labor, parts, notes } = quoted.quote;
+  return {
+    providerName: quoted.name,
+    quotation: {
+      reason: notes || '',
+      items: [
+        { label: 'Labor', amount: labor },
+        ...(Number(parts) > 0 ? [{ label: 'Parts/Items', amount: parts }] : []),
+      ],
+      total: Number(labor || 0) + Number(parts || 0),
+    },
+  };
 };
 
 const formatAmount = (n) =>
@@ -173,22 +164,47 @@ export default function MyRequestDetails() {
   const navigate = useNavigate();
   const { requestId } = useParams();
 
-  // BACKEND: replace with the fetched request (see block at the top).
-  const request = { ...MOCK_REQUEST, id: requestId || MOCK_REQUEST.id };
-  const { quotation } = request;
-
+  // null = still loading; the view model is { id, providerName, quotation }.
+  const [request, setRequest] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [modal, setModal] = useState(null); // null | 'approve' | 'decline'
   const [rejectReason, setRejectReason] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getServiceRequest(requestId)
+      .then((data) => {
+        if (cancelled) return;
+        const view = toQuotationView(data.request);
+        setRequest(view ? { id: data.request.id, ...view } : { id: data.request.id });
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError(err.message || 'Could not load this request.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [requestId]);
 
   const handleBack = () => navigate('/customer/requests');
 
   const handleApprove = async () => {
-    // TODO: const { data } = await api.post(`/customer/requests/${request.id}/quotation/approve`);
-    setModal('approve');
+    setBusy(true);
+    setActionError('');
+    try {
+      await respondToQuotation(request.id, true);
+      setModal('approve');
+    } catch (err) {
+      setActionError(err.message || 'Could not approve the quotation. Please try again.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleProceedToPayment = () => {
-    const initialFee = quotation.total * INITIAL_FEE_RATE; // BACKEND: use data.amountDue
+    const initialFee = Math.round(request.quotation.total * INITIAL_FEE_RATE * 100) / 100;
     setModal(null);
     navigate(`/customer/requests/${request.id}/payment`, {
       state: { requestId: request.id, amount: initialFee, paymentType: 'initial' },
@@ -201,11 +217,45 @@ export default function MyRequestDetails() {
   };
 
   const handleConfirmDecline = async () => {
-    // TODO: await api.post(`/customer/requests/${request.id}/quotation/decline`, { reason: rejectReason });
-    console.log('Quotation declined', request.id, rejectReason);
-    setModal(null);
-    navigate('/customer/requests');
+    setBusy(true);
+    setActionError('');
+    try {
+      await respondToQuotation(request.id, false);
+      setModal(null);
+      navigate('/customer/requests?tab=declined');
+    } catch (err) {
+      setActionError(err.message || 'Could not decline the quotation. Please try again.');
+      setModal(null);
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const renderBody = () => {
+    if (loadError) {
+      return (
+        <p role="alert" className="m-0 mt-8 font-[Inter] text-[15px] text-[#B91C1C]">
+          {loadError}
+        </p>
+      );
+    }
+    if (!request) {
+      return (
+        <p className="m-0 mt-8 font-[Inter] text-[15px] text-[#7C7979]">Loading quotation…</p>
+      );
+    }
+    if (!request.quotation) {
+      return (
+        <p className="m-0 mt-8 font-[Inter] text-[15px] text-[#7C7979]">
+          There is no open quotation for this request.
+        </p>
+      );
+    }
+    return null;
+  };
+
+  const body = renderBody();
+  const quotation = request?.quotation;
 
   return (
     <CustomerSidebar>
@@ -225,9 +275,17 @@ export default function MyRequestDetails() {
               <ChevronLeft size={32} strokeWidth={2.5} color="#000" />
             </button>
             <h2 className="m-0 font-[Inter] text-[20px] font-bold leading-[34px] text-[#292727]">
-              Request #{request.id}
+              Request #{request?.id ?? requestId}
             </h2>
           </div>
+
+          {actionError && (
+            <p role="alert" className="m-0 mt-3 font-[Inter] text-[13px] text-[#B91C1C]">
+              {actionError}
+            </p>
+          )}
+
+          {body ?? (
 
           <div className="mt-2 pl-[2px]">
             <p className="m-0 font-[Inter] text-[15px] leading-[22px] text-[#484040]">
@@ -259,10 +317,11 @@ export default function MyRequestDetails() {
             </p>
 
             <div className="mt-5 flex justify-end gap-3">
-              <OutlineButton onClick={handleApprove}>Approve</OutlineButton>
-              <OutlineButton onClick={handleOpenDecline}>Decline</OutlineButton>
+              <OutlineButton onClick={busy ? undefined : handleApprove}>Approve</OutlineButton>
+              <OutlineButton onClick={busy ? undefined : handleOpenDecline}>Decline</OutlineButton>
             </div>
           </div>
+          )}
         </div>
       </div>
 

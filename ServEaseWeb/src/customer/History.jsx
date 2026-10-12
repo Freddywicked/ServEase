@@ -1,34 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar';
-// import { api } from '../api/client'; // BACKEND: use whichever request helper ../api/client exports
+import { getCustomerHistory } from '../api/client';
 
 /* =====================================================================================
-   HISTORY (customer)
+   HISTORY (customer) — live data
    Route: /customer/history
    -------------------------------------------------------------------------------------
-   The Figma only shows the title and the three filter buttons (All, Repair, Transactions),
-   so the list under them is a simple placeholder built from the same card style as My
-   Requests. Everything is hard-coded (MOCK_HISTORY below).
-
-   BACKEND INTEGRATION (READY)
-   Proposed endpoint (rename to match ServEaseBackend):
-     GET /api/customer/history?type=all|repair|transactions
-     -> [{ id, type: 'repair' | 'transaction', title, providerName, date, status, amount? }]
-        (same shape as MOCK_HISTORY)
-        - repair:       finished or declined service requests
-        - transaction:  payments (initial fee, additional payment, final payment) with amount
-
-   Replace the mock data with:
-     const [items, setItems] = useState([]);
-     useEffect(() => {
-       let cancelled = false;
-       api.get('/customer/history', { params: { type: activeTab } })
-         .then((res) => { if (!cancelled) setItems(res.data); })
-         .catch((err) => console.error('Failed to load history', err));
-       return () => { cancelled = true; };
-     }, [activeTab]);
-   and remove the client-side filter below (the backend filters by `type`).
+   GET /api/service-requests/history?type=all|repair|transactions
+   -> { items: [{ id, type: 'repair' | 'transaction', title, providerName, date, status, amount? }] }
+      - repair:       closed service requests (completed / declined / resolved / ...)
+      - transaction:  paid payments (initial fee, additional payment, final payment)
+   The backend filters by `type`; the tab buttons only switch the query param.
    ===================================================================================== */
 
 const TABS = [
@@ -37,41 +20,12 @@ const TABS = [
   { key: 'transactions', label: 'Transactions', widthClass: 'w-[242px]' },
 ];
 
-// HARD-CODED DATA — replace with the API response.
-const MOCK_HISTORY = [
-  {
-    id: 'SR-0007',
-    type: 'repair',
-    title: 'Liquid damage to charging circuit',
-    providerName: 'Mark Rivera',
-    date: '2026-06-20',
-    status: 'Completed',
-  },
-  {
-    id: 'TX-0002',
-    type: 'transaction',
-    title: 'Final payment (Request #SR-0007)',
-    providerName: 'Mark Rivera',
-    date: '2026-06-20',
-    status: 'Paid',
-    amount: 680,
-  },
-  {
-    id: 'TX-0001',
-    type: 'transaction',
-    title: 'Initial fee (Request #SR-0007)',
-    providerName: 'Mark Rivera',
-    date: '2026-06-14',
-    status: 'Paid',
-    amount: 170,
-  },
-];
 
-// "2026-06-27" -> "Jun 27, 2026"
+// ISO timestamp (or date-only string) -> "Jun 27, 2026"
 const formatDate = (iso) => {
-  const [y, m, d] = String(iso).split('-').map(Number);
-  if (!y || !m || !d) return '';
-  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -81,11 +35,7 @@ const formatDate = (iso) => {
 const formatPeso = (n) =>
   `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const TAB_FILTERS = {
-  all: () => true,
-  repair: (item) => item.type === 'repair',
-  transactions: (item) => item.type === 'transaction',
-};
+
 
 export default function History() {
   // Notifications link here with ?tab=all | repair | transactions.
@@ -97,13 +47,31 @@ export default function History() {
     if (isValidTab(tabFromUrl)) setActiveTab(tabFromUrl);
   }, [tabFromUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // BACKEND: turn into useState([]) and fill it with the API response.
-  const [items] = useState(MOCK_HISTORY);
+  // Fetched from the backend; the server filters by the active tab (?type=).
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const visibleItems = useMemo(
-    () => items.filter(TAB_FILTERS[activeTab]),
-    [items, activeTab]
-  );
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    getCustomerHistory(activeTab)
+      .then((data) => {
+        if (!cancelled) setItems(data?.items ?? []);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message || 'Could not load your history.');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
+
+  const visibleItems = items;
 
   return (
     <CustomerSidebar>
@@ -127,7 +95,7 @@ export default function History() {
                   aria-pressed={active}
                   onClick={() => setActiveTab(tab.key)}
                   className={`box-border h-[32px] ${tab.widthClass} max-w-full cursor-pointer rounded-[20px] border border-[#B1A8A8] text-center font-[Quicksand] text-[13px] font-medium leading-[170%] ${
-                    active ? 'bg-[#577FBB] text-[#FFFAFA]' : 'bg-[#FFFDFD] text-[#414141] hover:bg-[#F3F3F3]'
+                    active ? 'bg-[#021E79] text-[#FFFAFA]' : 'bg-[#FFFDFD] text-[#414141] hover:bg-[#F3F3F3]'
                   }`}
                 >
                   {tab.label}
@@ -136,8 +104,18 @@ export default function History() {
             })}
           </div>
 
+          {error && (
+            <p role="alert" className="m-0 mt-4 font-[Roboto] text-[13px] text-[#B91C1C]">
+              {error}
+            </p>
+          )}
+
           <div className="mt-[34px] flex max-w-[752px] flex-col gap-4">
-            {visibleItems.length === 0 ? (
+            {loading ? (
+              <p className="m-0 font-[Roboto] text-[14px] font-medium text-[#817C7C]">
+                Loading history…
+              </p>
+            ) : visibleItems.length === 0 ? (
               <p className="m-0 font-[Roboto] text-[14px] font-medium text-[#817C7C]">
                 No history yet
               </p>

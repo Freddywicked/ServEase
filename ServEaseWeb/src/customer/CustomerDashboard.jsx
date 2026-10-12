@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
 import { useAuth } from '../context/auth_context';
+import { timeAgo, useNotifications } from '../components/Notifications.jsx';
+import { getActiveRepair } from '../api/client';
 
 const SECTION_LABEL =
   'm-0 mb-3 mt-5 font-[Lato] text-[16px] font-bold uppercase leading-[19px] text-black/50';
@@ -34,13 +36,31 @@ function EmptyBox({ sizeClass, message, children }) {
 export default function CustomerDashboard() {
   const { user, loading } = useAuth();
 
-  // TODO: fill these from the backend once the endpoints exist.
-  const [notifications, setNotifications] = useState([]); // [{ id, message }]
+  // Notifications come from the same source as the header bell (see components/Notifications.jsx).
+  // The bell is hidden on this screen, so they are listed inside the box below instead.
+  const { notifications, openNotification } = useNotifications('customer');
+
+  // The newest request still in play (Pending / Approved / In Progress), from
+  // GET /api/service-requests/active — null when there is none.
   const [activeRepairs, setActiveRepairs] = useState([]); // [{ id, title, status, provider }]
 
   useEffect(() => {
-    // TODO: fetch notifications and active repairs for user.id, then call
-    // setNotifications(...) and setActiveRepairs(...)
+    if (!user) return undefined;
+    let cancelled = false;
+    getActiveRepair()
+      .then((data) => {
+        if (cancelled) return;
+        const r = data?.activeRepair;
+        setActiveRepairs(
+          r
+            ? [{ id: r.requestId, title: r.category, status: r.statusLabel, provider: r.providerName }]
+            : []
+        );
+      })
+      .catch((err) => console.error('Failed to load the active repair', err));
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
   // Wait while the saved login is being restored, then require a logged-in user.
@@ -68,23 +88,34 @@ export default function CustomerDashboard() {
         </Link>
 
         <h2 className={SECTION_LABEL}>Notifications</h2>
-        <EmptyBox sizeClass="min-h-[120px] sm:h-[156px]" message="No Notifications">
+        <EmptyBox sizeClass="h-[340px]" message="No Notifications">
           {notifications.length > 0 &&
             notifications.map((n) => (
-              <p
+              <button
                 key={n.id}
-                className="m-0 border-b border-black/10 py-2 font-[Roboto] text-[14px] text-[#292727] last:border-b-0"
+                type="button"
+                onClick={() => openNotification(n)}
+                className="block w-full shrink-0 cursor-pointer border-0 border-b border-solid border-black/10 bg-transparent px-0 py-2 text-left last:border-b-0 hover:bg-[#F6FAFF]"
               >
-                {n.message}
-              </p>
+                <span
+                  className={`block font-[Roboto] text-[14px] leading-[18px] text-[#292727] ${
+                    n.read ? 'font-normal' : 'font-bold'
+                  }`}
+                >
+                  {n.message}
+                </span>
+                <span className="block font-[Roboto] text-[11px] leading-[14px] text-[#817C7C]">
+                  {timeAgo(n.createdAt)}
+                </span>
+              </button>
             ))}
         </EmptyBox>
 
         <h2 className={SECTION_LABEL}>Active Repair</h2>
-        <EmptyBox sizeClass="min-h-[180px] sm:h-[273px]" message="No Active Repair">
+        <EmptyBox sizeClass="h-[460px]" message="No Active Repair">
           {activeRepairs.length > 0 &&
             activeRepairs.map((r) => (
-              <div key={r.id} className="border-b border-black/10 py-3 last:border-b-0">
+              <div key={r.id} className="shrink-0 border-b border-black/10 py-3 last:border-b-0">
                 <p className="m-0 font-[Quicksand] text-[16px] font-bold text-black">{r.title}</p>
                 <p className="m-0 font-[Roboto] text-[14px] text-[#817C7C]">
                   {[r.provider, r.status].filter(Boolean).join(' - ')}

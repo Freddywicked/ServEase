@@ -2,7 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { Navigate } from 'react-router-dom';
 import ServiceProviderSidebar from '../components/ServiceProviderSidebar.jsx';
-import { getProviderAvailability, me, setProviderAvailability } from '../api/client';
+import {
+  getProviderAvailability,
+  getProviderDashboard,
+  me,
+  setProviderAvailability,
+} from '../api/client';
 import { useAuth } from '../context/auth_context';
 
 // Shown under the welcome heading, based on the provider application's status in the backend.
@@ -316,11 +321,38 @@ export default function ServiceProviderDashboard() {
   const [loadError, setLoadError] = useState('');
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
-  // TODO: fill these from the backend once the endpoints exist.
+  // GET /api/provider/dashboard — stat cards, pending requests, notifications, active repair.
   const [stats, setStats] = useState(null); // { activeJobs, thisMonth, rating }
   const [pendingRequests, setPendingRequests] = useState([]); // [{ id, title }]
   const [notifications, setNotifications] = useState([]); // [{ id, message }]
   const [activeRepairs, setActiveRepairs] = useState([]); // [{ id, title, status, customer }]
+
+  useEffect(() => {
+    if (!user) return undefined;
+    let cancelled = false;
+    getProviderDashboard()
+      .then((data) => {
+        if (cancelled) return;
+        setStats({
+          activeJobs: data?.stats?.activeJobs ?? 0,
+          thisMonth: data?.stats?.jobsThisMonth ?? 0,
+          rating: data?.stats?.rating ?? 0,
+        });
+        setPendingRequests(
+          (data?.pendingRequests ?? []).map((r) => ({ id: r.id, title: `Request #${r.requestNumber} — ${r.customerName}` }))
+        );
+        setNotifications(data?.notifications ?? []);
+        setActiveRepairs(
+          data?.activeRepair
+            ? [{ id: data.activeRepair.requestId, title: data.activeRepair.statusLabel, customer: data.activeRepair.customerName }]
+            : []
+        );
+      })
+      .catch((err) => console.error('Failed to load the provider dashboard', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   // Load this account's provider application from the backend.
   useEffect(() => {

@@ -11,16 +11,20 @@ import requestIconWhite from '../assets/icon_request_white.png';
 import requestIconBlack from '../assets/icon_request.png';
 import toolsIconWhite from '../assets/icon_tools_white.png';
 import toolsIconBlack from '../assets/icon_tools.png';
-import historyIconWhite from '../assets/icon_history_white.png';
-import historyIconBlack from '../assets/icon_history.png';
+import historyIconWhite from '../assets/icon_dollar_white.png';
+import historyIconBlack from '../assets/icon_dollar.png';
 import hamburgerIcon from '../assets/icon_hamburger.png';
 import dropdownIcon from '../assets/icon_dropdown.png';
+import switchAccountIcon from '../assets/icon_switch_account.png';
 import MessagingWidget from './MessagingWidget';
 import Notifications from './Notifications';
 
 const EXPANDED_WIDTH = 229;
 const COLLAPSED_WIDTH = 84;
 const AUTO_COLLAPSE_QUERY = '(max-width: 900px)';
+
+// Switch Account takes the provider back to their customer side.
+const CUSTOMER_HOME_PATH = '/customer/dashboard';
 
 // "Mark Frederick Cerillo" -> "MC"
 const getInitials = (name = '') => {
@@ -71,6 +75,8 @@ export default function ServiceProviderSidebar({ children, initials }) {
   const shownInitials = initials || getInitials(user?.name);
   const firstName = user?.name?.trim().split(/\s+/)[0] || '';
   const width = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH;
+  // The bell is hidden on the dashboard (notifications are shown inside its container).
+  const onDashboard = location.pathname.startsWith('/serviceprovider/dashboard');
 
   // Responsive: collapse the sidebar automatically on small screens, expand again on large ones.
   useEffect(() => {
@@ -97,6 +103,12 @@ export default function ServiceProviderSidebar({ children, initials }) {
     };
   }, [menuOpen]);
 
+  const handleSwitchAccount = () => {
+    setMenuOpen(false);
+    // TODO (BACKEND): tell the backend the active mode is now "customer" if it tracks that.
+    navigate(CUSTOMER_HOME_PATH);
+  };
+
   const handleLogout = () => {
     setMenuOpen(false);
     logout(); // removes the saved login token
@@ -119,9 +131,9 @@ export default function ServiceProviderSidebar({ children, initials }) {
           />
         </div>
 
-        {/* Upper right: notification bell, user avatar, name + role, dropdown */}
+        {/* Upper right: notification bell (hidden on the dashboard), user avatar, name + role, dropdown */}
         <div className="mr-4 flex flex-none items-center gap-4 sm:mr-[46px] sm:gap-[33px]">
-          <Notifications viewer="provider" />
+          {!onDashboard && <Notifications viewer="provider" />}
 
           <div ref={menuRef} className="relative">
             <button
@@ -159,6 +171,15 @@ export default function ServiceProviderSidebar({ children, initials }) {
                 <p className="m-0 mb-4 truncate text-[16px] leading-[24px] text-[#5B5959]">
                   {user?.email}
                 </p>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={handleSwitchAccount}
+                  className="m-0 mb-4 flex w-full cursor-pointer items-center gap-3 border-none bg-transparent p-0 text-left text-[16px] font-normal leading-[19px] text-[#292727]"
+                >
+                  <img src={switchAccountIcon} alt="" className="h-[22px] w-[22px] flex-none object-contain" />
+                  Switch Account
+                </button>
                 <button
                   type="button"
                   role="menuitem"

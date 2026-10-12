@@ -1,32 +1,13 @@
-import { useMemo } from 'react';
+import { useEffect, useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import ServiceProviderSidebar from '../components/ServiceProviderSidebar.jsx';
+import { useAuth } from '../context/auth_context';
+import { getProviderEarnings } from '../api/client';
 
-// ── HARD-CODED CONTENT: START ─────────────────────────────────────────────
-// Expected shape of the earnings summary once the backend is wired up (adjust to the real contract):
-//   {
-//     thisWeekTotal: number,          // pesos earned this week
-//     pendingPaymentTotal: number,    // pesos still to be paid out / collected
-//   }
-const MOCK_SUMMARY = {
-  thisWeekTotal: 8150,
-  pendingPaymentTotal: 1300,
-};
-
-// Expected shape of each recent transaction (adjust to the real contract):
-//   {
-//     id: string | number,
-//     requestNumber: string,          // e.g. 'SR-0000'
-//     customerName: string,
-//     dateLabel: string,              // formatted from an ISO date, e.g. 'Jun 27'
-//     amount: number,                 // pesos
-//     status: 'Paid' | 'Pending',
-//   }
-const MOCK_TRANSACTIONS = [
-  { id: 1, requestNumber: 'SR-0000', customerName: 'Nikki Pie', dateLabel: 'Jun 27', amount: 500, status: 'Paid' },
-  { id: 2, requestNumber: 'SR-0000', customerName: 'Nikki Pie', dateLabel: 'Jun 25', amount: 650, status: 'Paid' },
-  { id: 3, requestNumber: 'SR-0000', customerName: 'Nikki Pie', dateLabel: 'Jun 24', amount: 1300, status: 'Pending' },
-];
-// ── HARD-CODED CONTENT: END ───────────────────────────────────────────────
+// Live data: GET /api/provider/earnings -> { summary: { thisWeek, pendingPayment },
+// transactions: [{ id, requestNumber, customerName, date, amount }] }.
+// "This week" and "Pending Payment" are computed server-side; the transactions list
+// contains the payments already received (all 'Paid'), newest first.
 
 const formatPeso = (value) =>
   new Intl.NumberFormat('en-PH', {
@@ -35,42 +16,54 @@ const formatPeso = (value) =>
     maximumFractionDigits: 0,
   }).format(value);
 
+const formatDateLabel = (iso) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
 export default function Earnings() {
-  // TODO (backend-ready): this tab is for the logged-in service provider. Guard the route the
-  // same way as the dashboard (useAuth: redirect to /login when there is no provider user),
-  // then replace the mock data with the provider's earnings from the database, e.g.
-  //
-  //   // const [summary, setSummary] = useState({ thisWeekTotal: 0, pendingPaymentTotal: 0 });
-  //   // const [transactions, setTransactions] = useState([]);
-  //   // const [status, setStatus] = useState('loading'); // 'loading' | 'done' | 'error'
-  //   //
-  //   // useEffect(() => {
-  //   //   let cancelled = false;
-  //   //   async function loadEarnings() {
-  //   //     try {
-  //   //       setStatus('loading');
-  //   //       const [summaryResult, transactionsResult] = await Promise.all([
-  //   //         api.getProviderEarningsSummary(),              // GET /provider/earnings/summary
-  //   //         api.getProviderTransactions({ limit: 10 }),    // GET /provider/earnings/transactions
-  //   //       ]);
-  //   //       if (!cancelled) {
-  //   //         setSummary(summaryResult);
-  //   //         setTransactions(transactionsResult);
-  //   //         setStatus('done');
-  //   //       }
-  //   //     } catch (err) {
-  //   //       if (!cancelled) setStatus('error');
-  //   //     }
-  //   //   }
-  //   //   loadEarnings();
-  //   //   return () => { cancelled = true; };
-  //   // }, []);
-  //
-  // "This week" should be computed server-side (week start/end in the provider's timezone), and
-  // "Pending Payment" is the sum of payments the customer has not completed yet. Optionally
-  // link each transaction to its job / request details page.
-  const summary = MOCK_SUMMARY;
-  const transactions = useMemo(() => MOCK_TRANSACTIONS, []);
+  const { user, loading: authLoading } = useAuth();
+
+  const [summary, setSummary] = useState({ thisWeekTotal: 0, pendingPaymentTotal: 0 });
+  const [transactions, setTransactions] = useState([]);
+  const [status, setStatus] = useState('loading'); // 'loading' | 'done' | 'error'
+
+  useEffect(() => {
+    if (!user) return undefined;
+    let cancelled = false;
+    setStatus('loading');
+    getProviderEarnings()
+      .then((data) => {
+        if (cancelled) return;
+        setSummary({
+          thisWeekTotal: data?.summary?.thisWeek ?? 0,
+          pendingPaymentTotal: data?.summary?.pendingPayment ?? 0,
+        });
+        setTransactions(
+          (data?.transactions ?? []).map((t) => ({
+            id: t.id,
+            requestNumber: t.requestNumber,
+            customerName: t.customerName,
+            dateLabel: formatDateLabel(t.date),
+            amount: t.amount,
+            status: 'Paid', // the endpoint only lists payments already received
+          }))
+        );
+        setStatus('done');
+      })
+      .catch((err) => {
+        console.error('Failed to load earnings', err);
+        if (!cancelled) setStatus('error');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  // Wait while the saved login is being restored, then require a logged-in provider.
+  if (authLoading) return null;
+  if (!user) return <Navigate to="/login" replace />;
 
   const summaryCards = [
     { label: 'This week', value: summary.thisWeekTotal, widthClass: 'w-[242px]' },
@@ -129,7 +122,17 @@ export default function Earnings() {
             </div>
           ))}
 
-          {transactions.length === 0 && (
+          {status === 'loading' && (
+            <p className="m-0 py-6 text-center font-[Roboto] text-[14px] text-[#817C7C]">
+              Loading earnings…
+            </p>
+          )}
+          {status === 'error' && (
+            <p role="alert" className="m-0 py-6 text-center font-[Roboto] text-[14px] text-[#B91C1C]">
+              Could not load your earnings. Please try again.
+            </p>
+          )}
+          {status === 'done' && transactions.length === 0 && (
             <p className="m-0 py-6 text-center font-[Roboto] text-[14px] text-[#817C7C]">No transactions yet.</p>
           )}
         </div>

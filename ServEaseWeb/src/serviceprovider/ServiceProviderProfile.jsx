@@ -361,19 +361,36 @@ export default function ServiceProviderProfile() {
     };
   }, [provider]);
 
+  // The feedback summary (rating, review count, masked reviews, AI insights) is the
+  // same data ServiceProviderDetails.jsx shows customers, fetched for this provider's
+  // own id. Only verified providers have reviews/ratings, so this is skipped otherwise.
   useEffect(() => {
-    // TODO (backend-ready): fetch this provider's feedback summary and recent reviews, then
-    // call setFeedback(...) with the shape described above, e.g.
-    //
-    //   // let cancelled = false;
-    //   // api.getProviderFeedback()                  // GET /api/provider/feedback
-    //   //   .then((result) => { if (!cancelled) setFeedback(result); })
-    //   //   .catch(() => {});
-    //   // return () => { cancelled = true; };
-    //
-    // The AI Summary Insights tags should be generated server-side from the reviews, and
-    // reviewer names should be masked server-side.
-  }, [user]);
+    if (!provider || provider.verification_status !== 'verified') return undefined;
+    let cancelled = false;
+    api
+      .getServiceProviderDetails(user.user_id)
+      .then((data) => {
+        if (cancelled) return;
+        const p = data.provider;
+        setFeedback({
+          positiveFeedbackPercent: p.positiveFeedbackPercent ?? null,
+          rating: p.rating ?? 0,
+          reviewCount: p.reviewCount ?? 0,
+          insights: p.aiSummaryTags || [],
+          reviews: (p.reviews || []).map((r, i) => ({
+            id: r.id ?? i,
+            reviewerName: r.reviewerName || 'Customer',
+            rating: Number(r.rating) || 0,
+            serviceAvailed: r.serviceAvailed || 'Service',
+            comment: r.comment ?? r.review ?? '',
+          })),
+        });
+      })
+      .catch(() => {}); // no reviews yet / not found — the placeholder stays
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, user]);
 
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;

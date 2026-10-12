@@ -3,6 +3,7 @@ import { View, Image, Text, TouchableOpacity, ScrollView, ActivityIndicator, Ale
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { ROUTES } from '../navigation/routes';
+import ProgressBar from '../components/ProgressBar';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
 import { createServiceRequest } from '../api/servicerequest_api';
 
@@ -24,7 +25,6 @@ import { createServiceRequest } from '../api/servicerequest_api';
  * SERVICE_REQUEST.ai_diagnosis column (or split it out later if providers need to query it).
  * ========================================================================== */
 
-const TOTAL_STEPS = 4;
 const CURRENT_STEP = 2;
 
 const AIResult = ({ navigation }) => {
@@ -80,20 +80,7 @@ const AIResult = ({ navigation }) => {
                     </TouchableOpacity>
                 </View>
 
-                <View style={styles.progressBar}>
-                    {Array.from({ length: TOTAL_STEPS }).map((_, index) => (
-                        <Image
-                            key={index}
-                            source={
-                                index < CURRENT_STEP
-                                    ? require('../assets/icon_tab_colored.png')
-                                    : require('../assets/icon_tab.png')
-                            }
-                            style={styles.progressSegment}
-                            resizeMode="stretch"
-                        />
-                    ))}
-                </View>
+                <ProgressBar currentStep={CURRENT_STEP} />
 
                 <Text style={styles.questionTitle}>
                     To enhance your service request details, we offer AI Diagnosis.
@@ -167,52 +154,50 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFFFF',
     },
     scrollContent: {
-        paddingHorizontal: 24,
-        paddingTop: 16,
+        paddingHorizontal: 18,
+        paddingTop: 18,
         paddingBottom: 24,
     },
     headerRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 16,
+        marginBottom: 27,
     },
     headerTitle: {
         fontSize: 20,
-        fontWeight: '800',
-        color: '#1B2A8C',
+        fontWeight: '700',
+        lineHeight: 23,
+        color: '#021E79',
     },
     closeButton: {
+        width: 25,
+        height: 25,
+        backgroundColor: '#FFFFFF',
         borderWidth: 1,
-        borderColor: '#E0E0E0',
-        borderRadius: 8,
-        padding: 6,
+        borderColor: '#414141',
+        borderRadius: 5,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     closeIcon: {
-        width: 16,
-        height: 16,
+        width: 11,
+        height: 11,
         resizeMode: 'contain',
-    },
-    progressBar: {
-        flexDirection: 'row',
-        marginBottom: 24,
-    },
-    progressSegment: {
-        flex: 1,
-        height: 6,
-        marginRight: 6,
-        borderRadius: 3,
     },
     questionTitle: {
         fontSize: 16,
-        fontWeight: '700',
-        color: '#1B2A8C',
-        marginBottom: 6,
+        fontWeight: '600',
+        lineHeight: 19,
+        color: '#292727',
+        marginRight: 10,
+        marginBottom: 11,
     },
     questionSubtitle: {
-        fontSize: 13,
-        color: '#666666',
-        lineHeight: 18,
+        fontSize: 14,
+        lineHeight: 16,
+        color: '#414141',
+        marginLeft: 2,
         marginBottom: 24,
     },
     resultTitle: {

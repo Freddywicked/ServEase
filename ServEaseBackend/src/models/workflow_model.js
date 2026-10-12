@@ -43,6 +43,17 @@ const listNotifications = async (userId, limit = 20) =>
       .limit(Math.min(Number(limit) || 20, 100))
   );
 
+// Marks one notification read. Scoped to the owner so one user cannot touch
+// another's rows. Best-effort: a failure must not break the app.
+const markNotificationRead = async (notificationId, userId) => {
+  const { error } = await supabase
+    .from('notifications')
+    .update({ read_at: new Date().toISOString() })
+    .eq('notification_id', notificationId)
+    .eq('user_id', userId);
+  if (error) console.error('[notifications] mark read failed:', error.message);
+};
+
 // ---------- schedule_proposals ----------
 const addScheduleProposal = async (row) =>
   unwrap(await supabase.from('schedule_proposals').insert(row).select().single());
@@ -205,6 +216,7 @@ module.exports = {
   addNotification,
   notify,
   listNotifications,
+  markNotificationRead,
   upsertDeviceToken,
   deleteDeviceToken,
   listDeviceTokens,

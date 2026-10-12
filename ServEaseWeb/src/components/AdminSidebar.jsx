@@ -7,8 +7,8 @@ import fullLogo from '../assets/servease_web_sidebar.png';
 import iconLogo from '../assets/servease_icon.png';
 import dashboardIconWhite from '../assets/icon_dashboard_white.png';
 import dashboardIconBlack from '../assets/icon_dashboard_black.png';
-import userIconWhite from '../assets/icon_gear_white.png';
-import userIconBlack from '../assets/icon_gear_black.png';
+import userIconWhite from '../assets/icon_users_white.png';
+import userIconBlack from '../assets/icon_users.png';
 import hamburgerIcon from '../assets/icon_hamburger.png';
 import bellIcon from '../assets/icon_ringbell.png';
 import dropdownIcon from '../assets/icon_dropdown.png';
@@ -178,16 +178,18 @@ export default function AdminSidebar({ children, initials }) {
           />
         </div>
 
-        {/* Upper right: notification bell, user avatar, name + role, dropdown */}
+        {/* Upper right: notification bell (hidden on the dashboard), user avatar, name + role, dropdown */}
         <div className="mr-4 flex flex-none items-center gap-4 sm:mr-[46px] sm:gap-[33px]">
-          <button
-            type="button"
-            onClick={handleNotificationsClick}
-            aria-label="Notifications"
-            className="flex cursor-pointer items-center justify-center border-none bg-transparent p-0"
-          >
-            <img src={bellIcon} alt="" className="h-[27px] w-[27px]" />
-          </button>
+          {!dashboardActive && (
+            <button
+              type="button"
+              onClick={handleNotificationsClick}
+              aria-label="Notifications"
+              className="flex cursor-pointer items-center justify-center border-none bg-transparent p-0"
+            >
+              <img src={bellIcon} alt="" className="h-[27px] w-[27px]" />
+            </button>
+          )}
 
           <div ref={menuRef} className="relative">
             <button

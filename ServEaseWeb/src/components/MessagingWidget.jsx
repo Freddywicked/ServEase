@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { MessageSquare, Minus, X } from 'lucide-react';
 import writeIcon from '../assets/icon_write.png';
 import ellipseIcon from '../assets/icon_ellipse.png';
-// import { api } from '../api/client'; // BACKEND: use whichever request helper ../api/client exports
+import {
+  getConversations,
+  getConversationMessages,
+  sendConversationMessage,
+} from '../api/client';
 
 /* =====================================================================================
    MESSAGING WIDGET — floating chat for every customer and service provider screen
@@ -48,7 +52,7 @@ import ellipseIcon from '../assets/icon_ellipse.png';
    other when they share a service request.
    ===================================================================================== */
 
-const POLL_INTERVAL_MS = 0; // BACKEND: set to e.g. 10000 to poll instead of using sockets
+const POLL_INTERVAL_MS = 10000; // refresh the inbox every 10 s (no sockets yet)
 const MAX_UNREAD_BADGES = 3;
 export const OPEN_CHAT_EVENT = 'servease:open-chat';
 
@@ -56,101 +60,79 @@ export const OPEN_CHAT_EVENT = 'servease:open-chat';
 export const openChat = (participant) =>
   window.dispatchEvent(new CustomEvent(OPEN_CHAT_EVENT, { detail: participant }));
 
-/* ------------------------------ HARD-CODED DATA ------------------------------ */
-
-const minutesAgo = (m) => new Date(Date.now() - m * 60000).toISOString();
-
-const MOCK_CONVERSATIONS = {
-  // Service provider's point of view: the other people are customers.
-  provider: [
-    {
-      id: 'c-1',
-      participant: { id: 'cust-nick-duran', name: 'Nick Duran', online: true },
-      unreadCount: 1,
-      messages: [
-        {
-          id: 'm-1',
-          fromMe: true,
-          text: 'Hi! Matatagalan pa to since sa Manila pa kukuning yung screen.',
-          sentAt: minutesAgo(120),
-        },
-        { id: 'm-2', fromMe: false, text: 'Hi.', sentAt: minutesAgo(55) },
-      ],
-    },
-    {
-      id: 'c-2',
-      participant: { id: 'cust-mika-si', name: 'Mika Si', online: false },
-      unreadCount: 0,
-      messages: [{ id: 'm-3', fromMe: true, text: 'Hello', sentAt: minutesAgo(55) }],
-    },
-    {
-      id: 'c-3',
-      participant: { id: 'cust-jon-reyes', name: 'Jon Reyes', online: false },
-      unreadCount: 0,
-      messages: [{ id: 'm-4', fromMe: true, text: 'Hello', sentAt: minutesAgo(56) }],
-    },
-  ],
-  // Customer's point of view: the other people are service providers.
-  customer: [
-    {
-      id: 'c-1',
-      participant: { id: 'prov-jose-rodolfo', name: 'Jose Rodolfo', online: true },
-      unreadCount: 1,
-      messages: [
-        { id: 'm-1', fromMe: true, text: 'Hello, kumusta po yung repair?', sentAt: minutesAgo(120) },
-        {
-          id: 'm-2',
-          fromMe: false,
-          text: 'Hi! Matatagalan pa to since sa Manila pa kukuning yung screen.',
-          sentAt: minutesAgo(55),
-        },
-      ],
-    },
-    {
-      id: 'c-2',
-      participant: { id: 'prov-micco-dominic', name: 'Micco Dominic', online: false },
-      unreadCount: 0,
-      messages: [{ id: 'm-3', fromMe: true, text: 'Hello', sentAt: minutesAgo(55) }],
-    },
-    {
-      id: 'c-3',
-      participant: { id: 'prov-mark-rivera', name: 'Mark Rivera', online: false },
-      unreadCount: 0,
-      messages: [{ id: 'm-4', fromMe: true, text: 'Hello', sentAt: minutesAgo(56) }],
-    },
-  ],
-};
-
 /* ------------------------------ DATA LAYER (swap for the backend) ------------------------------ */
 
+/* ------------------------------ DATA LAYER (live backend) ------------------------------ */
+
+// The backend keeps ONE conversation per service request; the conversation id is
+// the request reference ("SR-0007"). GET /api/conversations returns the list for
+// the logged-in user (works for both customers and providers), and
+// GET /api/conversations/:id/messages marks the thread read for the viewer.
+const toConversation = (c) => ({
+  id: c.id,
+  participant: { id: c.participantId, name: c.name, online: Boolean(c.isOnline) },
+  unreadCount: c.hasUnread ? 1 : 0,
+  // Preview line for the list; the full history loads when the chat is opened.
+  // The list endpoint sends no timestamp, so sentAt stays null (the UI hides it).
+  messages: c.lastMessage
+    ? [{ id: `${c.id}-last`, fromMe: false, text: c.lastMessage, sentAt: null }]
+    : [],
+});
+
+// Set by the widget on every render so messagesService can compute `fromMe`:
+// the backend labels each message sender 'customer' | 'provider'.
+let activeViewer = 'customer';
+const toMessage = (m) => ({
+  id: m.id,
+  fromMe: m.sender === activeViewer,
+  text: m.text,
+  sentAt: m.createdAt,
+});
+
 const messagesService = {
-  async listConversations(viewer) {
-    // TODO (BACKEND): const { data } = await api.get('/messages/conversations'); return data;
-    return MOCK_CONVERSATIONS[viewer] ?? [];
+  async listConversations() {
+    const data = await getConversations();
+    return (data?.conversations ?? []).map(toConversation);
+  },
+
+  // Full history (oldest first); also marks the thread read server-side.
+  async getMessages(conversationId) {
+    const data = await getConversationMessages(conversationId);
+    return (data?.messages ?? []).map(toMessage);
   },
 
   async sendMessage(conversationId, text) {
-    // TODO (BACKEND):
-    // const { data } = await api.post(`/messages/conversations/${conversationId}/messages`, { text });
-    // return data;
-    return { id: `m-${Date.now()}`, fromMe: true, text, sentAt: new Date().toISOString() };
+    const data = await sendConversationMessage(conversationId, text);
+    return { ...toMessage(data.message), fromMe: true };
   },
 
-  async markRead(conversationId) {
-    // TODO (BACKEND): await api.post(`/messages/conversations/${conversationId}/read`);
-    return conversationId;
-  },
-
+  // A chat can only exist between a customer and a provider who share a service
+  // request, so there is no "create conversation" call: `participant` carries the
+  // requestId (from a request card / notification) and/or the other person's user
+  // id, and we match it against the conversations the backend already returns.
   async startConversation(participant) {
-    // TODO (BACKEND):
-    // const { data } = await api.post('/messages/conversations', { participantId: participant.id });
-    // return data;
-    return {
-      id: `c-${participant.id}`,
-      participant: { id: participant.id, name: participant.name, online: false },
-      unreadCount: 0,
-      messages: [],
-    };
+    const list = await messagesService.listConversations();
+    const found = list.find(
+      (c) =>
+        (participant.requestId && c.id === participant.requestId) ||
+        (participant.id && c.participant.id === participant.id)
+    );
+    if (found) return found;
+    // The request is shared but has no messages yet — open an empty thread;
+    // sending the first message works because the id is the request reference.
+    if (participant.requestId) {
+      return {
+        id: participant.requestId,
+        participant: {
+          id: participant.id || null,
+          name: participant.name || 'Conversation',
+          online: false,
+        },
+        unreadCount: 0,
+        messages: [],
+      };
+    }
+    return null; // no shared request with this person — nothing to open
   },
 };
 
@@ -199,6 +181,7 @@ function Avatar({ name, sizeClass, textClass, dot = false }) {
 /* ------------------------------ widget ------------------------------ */
 
 export default function MessagingWidget({ viewer = 'customer' }) {
+  activeViewer = viewer; // the service layer uses this to compute message.fromMe
   const [conversations, setConversations] = useState([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [activeChatId, setActiveChatId] = useState(null);
@@ -248,18 +231,37 @@ export default function MessagingWidget({ viewer = 'customer' }) {
     setConversations((prev) =>
       prev.map((c) => (c.id === conversationId ? { ...c, unreadCount: 0 } : c))
     );
-    messagesService.markRead(conversationId).catch((err) => console.error('markRead failed', err));
+    // Load the full history; this also marks the thread read on the server.
+    messagesService
+      .getMessages(conversationId)
+      .then((messages) =>
+        setConversations((prev) =>
+          prev.map((c) => (c.id === conversationId ? { ...c, messages } : c))
+        )
+      )
+      .catch((err) => console.error('Failed to load messages', err));
   };
 
   // Let any screen open a chat, e.g. the "Message" button on a request.
   useEffect(() => {
     const onOpenChat = async (event) => {
       const participant = event.detail;
-      if (!participant?.id) return;
-      let conversation = conversationsRef.current.find((c) => c.participant.id === participant.id);
+      if (!participant?.id && !participant?.requestId) return;
+      let conversation = conversationsRef.current.find(
+        (c) =>
+          (participant.requestId && c.id === participant.requestId) ||
+          (participant.id && c.participant.id === participant.id)
+      );
       if (!conversation) {
         conversation = await messagesService.startConversation(participant);
-        setConversations((prev) => [...prev, conversation]);
+        if (!conversation) {
+          // No shared service request with this person — open the inbox instead.
+          setPanelOpen(true);
+          return;
+        }
+        setConversations((prev) =>
+          prev.some((c) => c.id === conversation.id) ? prev : [...prev, conversation]
+        );
       }
       openConversation(conversation.id);
     };
@@ -393,7 +395,8 @@ export default function MessagingWidget({ viewer = 'customer' }) {
                           }`}
                         >
                           {last.fromMe ? 'You: ' : ''}
-                          {last.text} | {relativeTime(last.sentAt)}
+                          {last.text}
+                          {last.sentAt ? ` | ${relativeTime(last.sentAt)}` : ''}
                         </span>
                       )}
                     </span>

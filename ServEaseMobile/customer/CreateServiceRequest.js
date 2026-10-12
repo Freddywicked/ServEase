@@ -5,6 +5,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { ROUTES } from '../navigation/routes';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
+import ProgressBar from '../components/ProgressBar';
 import {
     getCategories,
     getAppointmentTimeSlots,
@@ -34,7 +35,6 @@ import { getCurrentCoordinates } from '../utils/deviceLocation';
  * submission timestamp and from the appointment confirmed later in RequestDetails.js.
  * ========================================================================== */
 
-const TOTAL_STEPS = 4;
 const CURRENT_STEP = 1;
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -325,20 +325,7 @@ const CreateServiceRequest = ({ navigation }) => {
                     </TouchableOpacity>
                 </View>
 
-                <View style={styles.progressBar}>
-                    {Array.from({ length: TOTAL_STEPS }).map((_, index) => (
-                        <Image
-                            key={index}
-                            source={
-                                index < CURRENT_STEP
-                                    ? require('../assets/icon_tab_colored.png')
-                                    : require('../assets/icon_tab.png')
-                            }
-                            style={styles.progressSegment}
-                            resizeMode="stretch"
-                        />
-                    ))}
-                </View>
+                <ProgressBar currentStep={CURRENT_STEP} />
 
                 <Text style={styles.questionTitle}>What needs fixing?</Text>
                 <Text style={styles.questionSubtitle}>
@@ -574,16 +561,6 @@ const styles = StyleSheet.create({
         width: 16,
         height: 16,
         resizeMode: 'contain',
-    },
-    progressBar: {
-        flexDirection: 'row',
-        marginBottom: 24,
-    },
-    progressSegment: {
-        flex: 1,
-        height: 6,
-        marginRight: 6,
-        borderRadius: 3,
     },
     questionTitle: {
         fontSize: 16,

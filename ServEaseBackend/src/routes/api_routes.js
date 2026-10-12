@@ -42,6 +42,7 @@ router.use('/provider', require('./providerwork_routes'));
 // Notifications + customer<->provider chat (workflow_controllers.js; tables from
 // migrations/002_core_workflow_tables.sql).
 router.get('/notifications', authenticate, workflow.listNotifications);
+router.post('/notifications/:id/read', authenticate, workflow.markNotificationRead);
 router.get('/conversations', authenticate, workflow.listConversations);
 router.get('/conversations/:id/messages', authenticate, workflow.listMessages);
 router.post('/conversations/:id/messages', authenticate, workflow.sendMessage);

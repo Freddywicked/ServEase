@@ -1,8 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import { X } from 'lucide-react';
 import ServiceProviderSidebar from '../components/ServiceProviderSidebar.jsx';
+import { useAuth } from '../context/auth_context';
+import {
+  getProviderJobs,
+  notifyAdditionalParts,
+  updateProviderJobStatus,
+} from '../api/client';
 
-// ── HARD-CODED CONTENT: START ─────────────────────────────────────────────
 // Filter chips under the search bar. `value` is matched against job.statusGroup.
 const FILTERS = [
   { label: 'All', value: 'all' },
@@ -11,10 +17,37 @@ const FILTERS = [
   { label: 'Done', value: 'done' },
 ];
 
-// The repair stages shown in the 4-segment progress bar and in the "Current stage" dropdown.
-// TODO (backend-ready): load the allowed stages from the backend (GET /job-stages) so the
-// list stays in sync with the server's status flow.
-const STAGES = ['Diagnosing', 'Repairing', 'Quality Check', 'Completed'];
+// Fallback stage list for the progress bar / "Current stage" dropdown. Each job DTO
+// carries the authoritative list (`stages`) from the backend's JOB_STAGES, so the UI
+// always stays in sync with the server's status flow.
+const STAGES = ['Assessing', 'Repairing', 'Quality Check', 'Completed'];
+
+// Maps the backend job DTO (GET /api/provider/jobs) onto the shape the cards render.
+const STATUS_LABEL = { Active: 'In Progress', Pending: 'Pending', Done: 'Done' };
+const STATUS_GROUP = { Active: 'active', Pending: 'pending', Done: 'done' };
+
+const formatDateLabel = (iso) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+const toJobCard = (j) => ({
+  id: j.id,
+  requestNumber: j.requestNumber,
+  customerName: j.customerName,
+  dateLabel: formatDateLabel(j.createdAt),
+  status: STATUS_LABEL[j.status] || j.statusLabel || j.status,
+  statusGroup: STATUS_GROUP[j.status] || 'active',
+  aiSuggestion: j.aiSuggestion
+    ? { problem: j.aiSuggestion, confidencePercent: j.aiConfidence ?? 0 }
+    : null,
+  stages: Array.isArray(j.stages) && j.stages.length ? j.stages : STAGES,
+  // 'Not started' = no progress update pushed yet (nothing highlighted in the bar).
+  currentStage: j.currentStepLabel === 'Not started' ? null : j.currentStepLabel,
+  // paidTotal = what the customer has actually paid so far (from the payments table).
+  progressPayment: j.paidTotal > 0 ? { amount: j.paidTotal, paid: true } : null,
+});
 
 // Badge shown at the top-right of each job card.
 const STATUS_STYLES = {
@@ -23,32 +56,7 @@ const STATUS_STYLES = {
   Done: 'bg-[#0255AF]',
 };
 
-// Expected shape of each job once the backend is wired up (adjust to the real contract):
-//   {
-//     id: string | number,
-//     requestNumber: string,               // e.g. 'SR-0000'
-//     customerName: string,
-//     date: string,                        // ISO date; formatted for display (e.g. 'Jun 27')
-//     status: 'In Progress' | 'Pending' | 'Done',
-//     statusGroup: 'active' | 'pending' | 'done',
-//     aiSuggestion: { problem: string, confidencePercent: number } | null,
-//     currentStage: string,                // one of STAGES
-//     progressPayment: { amount: number, paid: boolean } | null,
-//   }
-const MOCK_JOBS = [
-  {
-    id: 1,
-    requestNumber: 'SR-0000',
-    customerName: 'Nikki Pie',
-    dateLabel: 'Jun 27',
-    status: 'In Progress',
-    statusGroup: 'active',
-    aiSuggestion: { problem: 'LCD', confidencePercent: 96 },
-    currentStage: 'Repairing',
-    progressPayment: { amount: 500, paid: true },
-  },
-];
-// ── HARD-CODED CONTENT: END ───────────────────────────────────────────────
+
 
 const POPPINS = 'font-[Poppins,Quicksand,sans-serif]';
 const FIELD =
@@ -113,23 +121,26 @@ function ModalShell({ title, titleTopClass, onClose, children }) {
 }
 
 function UpdateStatusModal({ job, onClose, onSubmitted }) {
-  const [stage, setStage] = useState(job.currentStage);
+  const [stage, setStage] = useState(job.currentStage || job.stages[0]);
   const [notes, setNotes] = useState('');
   const [image, setImage] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
+  // PATCH /api/provider/jobs/:id/status (multipart when a photo is attached).
+  // The backend records the progress update and notifies the customer.
   const handlePushUpdate = async () => {
-    // TODO (backend-ready): push the status update for this job, e.g.
-    //
-    //   // const formData = new FormData();
-    //   // formData.append('stage', stage);
-    //   // formData.append('notes', notes);
-    //   // if (image) formData.append('image', image);        // optional progress photo
-    //   // const updated = await api.updateJobStatus(job.id, formData);   // PATCH /jobs/:id/status
-    //   // onSubmitted(updated);                              // refresh the card from the server response
-    //
-    // The server should also notify the customer (in-app + push/email) about the new stage.
-    onSubmitted({ ...job, currentStage: stage });
-    onClose();
+    if (saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      await updateProviderJobStatus(job.id, { stage, notes, photo: image });
+      onSubmitted();
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Could not push the update. Please try again.');
+      setSaving(false);
+    }
   };
 
   return (
@@ -140,7 +151,7 @@ function UpdateStatusModal({ job, onClose, onSubmitted }) {
         onChange={(e) => setStage(e.target.value)}
         className={`${FIELD} mt-[11px] h-[41px] w-[132px] cursor-pointer bg-white px-2 text-[13px]`}
       >
-        {STAGES.map((s) => (
+        {job.stages.map((s) => (
           <option key={s} value={s}>
             {s}
           </option>
@@ -170,9 +181,15 @@ function UpdateStatusModal({ job, onClose, onSubmitted }) {
         />
       </label>
 
+      {error && (
+        <p role="alert" className="m-0 mt-3 text-[12px] text-[#B91C1C]">
+          {error}
+        </p>
+      )}
+
       <div className="mb-[34px] mt-6 flex justify-end">
-        <button type="button" onClick={handlePushUpdate} className={MODAL_BUTTON}>
-          Push Update
+        <button type="button" onClick={handlePushUpdate} disabled={saving} className={MODAL_BUTTON}>
+          {saving ? 'Sending…' : 'Push Update'}
         </button>
       </div>
     </ModalShell>
@@ -182,17 +199,27 @@ function UpdateStatusModal({ job, onClose, onSubmitted }) {
 function NotifyPartsModal({ job, onClose }) {
   const [cost, setCost] = useState('');
   const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
+  // POST /api/provider/jobs/:id/additional-parts — the backend creates a payment
+  // request and notifies the customer, who approves/declines it in Track Requests.
   const handleSend = async () => {
-    // TODO (backend-ready): send the additional-parts request to the customer, e.g.
-    //
-    //   // await api.notifyAdditionalParts(job.id, {
-    //   //   additionalCost: Number(cost),     // in pesos
-    //   //   notes,
-    //   // });                                // POST /jobs/:id/additional-parts
-    //
-    // The server should notify the customer so they can approve or decline the extra cost.
-    onClose();
+    const additionalCost = Number(cost);
+    if (saving) return;
+    if (!Number.isFinite(additionalCost) || additionalCost <= 0) {
+      setError('Enter a valid cost first.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await notifyAdditionalParts(job.id, { additionalCost, notes });
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Could not send the request. Please try again.');
+      setSaving(false);
+    }
   };
 
   return (
@@ -216,9 +243,15 @@ function NotifyPartsModal({ job, onClose }) {
         className={`${FIELD} mt-[16px] block h-[95px] resize-none p-3 text-[13px] ${POPPINS}`}
       />
 
+      {error && (
+        <p role="alert" className="m-0 mt-3 text-[12px] text-[#B91C1C]">
+          {error}
+        </p>
+      )}
+
       <div className="mb-[47px] mt-[53px] flex justify-end">
-        <button type="button" onClick={handleSend} className={MODAL_BUTTON}>
-          Send Request
+        <button type="button" onClick={handleSend} disabled={saving} className={MODAL_BUTTON}>
+          {saving ? 'Sending…' : 'Send Request'}
         </button>
       </div>
     </ModalShell>
@@ -226,37 +259,30 @@ function NotifyPartsModal({ job, onClose }) {
 }
 
 export default function ActiveJobs() {
+  const { user, loading: authLoading } = useAuth();
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
-  const [jobs, setJobs] = useState(MOCK_JOBS);
+  const [jobs, setJobs] = useState([]);
+  const [status, setStatus] = useState('loading'); // 'loading' | 'done' | 'error'
   const [modal, setModal] = useState(null); // null | { type: 'update' | 'notify', jobId }
 
-  // TODO (backend-ready): this tab is for the logged-in service provider. Guard the route the
-  // same way as the dashboard (useAuth: redirect to /login when there is no provider user),
-  // then replace MOCK_JOBS with the provider's jobs from the database, e.g.
-  //
-  //   // const [jobs, setJobs] = useState([]);
-  //   // const [status, setStatus] = useState('loading'); // 'loading' | 'done' | 'error'
-  //   //
-  //   // useEffect(() => {
-  //   //   let cancelled = false;
-  //   //   async function loadJobs() {
-  //   //     try {
-  //   //       setStatus('loading');
-  //   //       // Let the server do the searching/filtering (debounce `search` before calling):
-  //   //       const result = await api.getProviderJobs({ search, status: activeFilter }); // GET /provider/jobs
-  //   //       if (!cancelled) { setJobs(result); setStatus('done'); }
-  //   //     } catch (err) {
-  //   //       if (!cancelled) setStatus('error');
-  //   //     }
-  //   //   }
-  //   //   loadJobs();
-  //   //   return () => { cancelled = true; };
-  //   // }, [search, activeFilter]);
-  //
-  // Optional: keep the cards fresh (customer payments, approvals) with polling or a websocket.
+  // GET /api/provider/jobs — the provider's accepted/quoted jobs with progress and payments.
+  const loadJobs = useCallback(async () => {
+    setStatus('loading');
+    try {
+      const data = await getProviderJobs();
+      setJobs((data?.jobs ?? []).map(toJobCard));
+      setStatus('done');
+    } catch (err) {
+      console.error('Failed to load jobs', err);
+      setStatus('error');
+    }
+  }, []);
 
-  // Client-side search + filter for the hard-coded data. Remove once the server filters/searches.
+  useEffect(() => {
+    if (user) loadJobs();
+  }, [user, loadJobs]);
+
   const visibleJobs = useMemo(() => {
     const q = search.trim().toLowerCase();
     return jobs.filter((job) => {
@@ -271,9 +297,14 @@ export default function ActiveJobs() {
   const activeJob = modal ? jobs.find((j) => j.id === modal.jobId) : null;
   const closeModal = () => setModal(null);
 
-  const handleJobUpdated = (updated) => {
-    setJobs((current) => current.map((j) => (j.id === updated.id ? updated : j)));
+  // After a status update, reload from the server so the card shows the truth.
+  const handleJobUpdated = () => {
+    loadJobs();
   };
+
+  // Wait while the saved login is being restored, then require a logged-in provider.
+  if (authLoading) return null;
+  if (!user) return <Navigate to="/login" replace />;
 
   return (
     <ServiceProviderSidebar>
@@ -306,8 +337,18 @@ export default function ActiveJobs() {
         </div>
 
         <div className="mt-[19px] flex max-w-[1082px] flex-col gap-4 overflow-x-auto">
+          {status === 'loading' && (
+            <p className="m-0 py-10 text-center font-[Roboto] text-[14px] text-[#817C7C]">
+              Loading your jobs…
+            </p>
+          )}
+          {status === 'error' && (
+            <p role="alert" className="m-0 py-10 text-center font-[Roboto] text-[14px] text-[#B91C1C]">
+              Could not load your jobs. Please try again.
+            </p>
+          )}
           {visibleJobs.map((job) => {
-            const stageIndex = STAGES.indexOf(job.currentStage);
+            const stageIndex = job.currentStage ? job.stages.indexOf(job.currentStage) : -1;
             return (
               <div
                 key={job.id}
@@ -339,7 +380,7 @@ export default function ActiveJobs() {
                 <div className="absolute left-[17px] right-[45px] top-[107px] border-t border-black/40" />
 
                 <div className="absolute left-[20px] top-[123px] flex gap-[18px]">
-                  {STAGES.map((stage, i) => (
+                  {job.stages.map((stage, i) => (
                     <div
                       key={stage}
                       className={`h-2 w-[117px] rounded-[10px] ${
@@ -350,7 +391,7 @@ export default function ActiveJobs() {
                 </div>
 
                 <p className="absolute left-[19px] top-[141px] m-0 text-[9px] font-bold leading-[15px]">
-                  Current Step: {job.currentStage}
+                  Current Step: {job.currentStage || 'Not started'}
                 </p>
                 {job.progressPayment && (
                   <p className="absolute left-[19px] top-[159px] m-0 text-[9px] leading-[15px]">
@@ -379,7 +420,7 @@ export default function ActiveJobs() {
             );
           })}
 
-          {visibleJobs.length === 0 && (
+          {status === 'done' && visibleJobs.length === 0 && (
             <p className="m-0 py-10 text-center font-[Roboto] text-[14px] text-[#817C7C]">No jobs found.</p>
           )}
         </div>

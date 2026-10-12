@@ -1,43 +1,27 @@
 import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar';
 import starFilled from '../assets/icon_star.png';
 import starEmpty from '../assets/icon_star_grey.png';
-// import { api } from '../api/client'; // BACKEND: use whichever request helper ../api/client exports
+import { rateRequest } from '../api/client';
 
 /* =====================================================================================
    RATE AND REVIEW (customer)
    Route: /customer/requests/:requestId/review
    -------------------------------------------------------------------------------------
-   Everything is hard-coded for now. The only data this screen sends is the star rating
+   The only data this screen sends is the star rating
    and the review text. The service provider is NOT sent from the browser: the backend
    finds it from the request, so a customer can only rate the provider they actually used.
 
-   BACKEND INTEGRATION (READY)
-   Proposed endpoint (rename to match ServEaseBackend):
-     POST /api/customer/requests/:requestId/review
-     body:     { rating: 1-5, review: string }
-     response: { reviewId, providerRating: { average, totalReviews } }
-
-   What the backend should do when it receives the review:
-     1. Check that the request belongs to the logged-in customer and is finished
-        (status "done"), and that it has not been reviewed yet (otherwise return 409).
-     2. Save the review: { requestId, customerId, providerId, rating, review, createdAt }.
-     3. Update the service provider's rating summary: averageRating and totalReviews.
-        This is what appears on the service provider's profile, so store the summary on the
-        provider (or compute it from the reviews) and return it from the profile endpoint.
-     4. Make the review readable on the provider's profile:
-        GET /api/providers/:providerId/reviews  -> [{ rating, review, customerName, createdAt }]
-
-   Replace the TODO lines inside handleSend:
-     await api.post(`/customer/requests/${displayId}/review`, { rating, review });
-
-   Optional: on a 409 response, show the error message instead of the form.
+   BACKEND INTEGRATION (LIVE)
+     POST /api/service-requests/:requestId/rating   body: { rating: 1-5, review: string }
+     -> 201 { rating } | 409 when the request is not completed yet or already rated.
+     The provider's profile stats (average, review count, masked review list) are
+     computed from the ratings table by GET /api/service-providers/:id.
    ===================================================================================== */
 
 const MAX_STARS = 5;
 const MAX_REVIEW_LENGTH = 500;
-const FALLBACK_REQUEST_ID = 'SR-0000'; // used only when the route has no :requestId
 
 // Empty = icon_star_grey.png, selected = icon_star.png. Use a high-resolution version of the
 // icons (about 118 x 118 px) if they look soft at 59 x 59.
@@ -55,12 +39,15 @@ function Star({ filled }) {
 export default function Rating() {
   const navigate = useNavigate();
   const { requestId } = useParams();
-  const displayId = requestId || FALLBACK_REQUEST_ID;
 
   const [rating, setRating] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
   const [review, setReview] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  // The screen only makes sense for a real request — without one, go back to the list.
+  if (!requestId) return <Navigate to="/customer/requests" replace />;
 
   const shownRating = hoverRating || rating;
   const canSend = rating > 0 && !submitting;
@@ -68,11 +55,13 @@ export default function Rating() {
   const handleSend = async () => {
     if (!canSend) return;
     setSubmitting(true);
+    setError('');
     try {
-      // TODO (BACKEND): await api.post(`/customer/requests/${displayId}/review`, { rating, review });
-      console.log('Review sent', { requestId: displayId, rating, review });
-      navigate('/customer/requests');
-    } finally {
+      await rateRequest(requestId, { rating, review });
+      navigate('/customer/requests?tab=done');
+    } catch (err) {
+      // 409: not completed yet, or already rated — show the server's reason.
+      setError(err.message || 'Could not send your review. Please try again.');
       setSubmitting(false);
     }
   };
@@ -85,8 +74,14 @@ export default function Rating() {
         </h1>
 
         <h2 className="m-0 mt-[25px] font-[Inter] text-[20px] font-bold leading-[34px] text-[#292727]">
-          Request #{displayId}
+          Request #{requestId}
         </h2>
+
+        {error && (
+          <p role="alert" className="m-0 mt-3 font-[Inter] text-[13px] text-[#B91C1C]">
+            {error}
+          </p>
+        )}
 
         <div className="mt-[48px] w-full max-w-[642px] lg:ml-[128px]">
           <p className="m-0 pl-1 font-[Roboto] text-[14px] font-semibold leading-[16px] text-[#292727]">

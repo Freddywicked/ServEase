@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { ROUTES } from '../navigation/routes';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
+import ProgressBar from '../components/ProgressBar';
 
 /* ============================================================================
  * SubmitServiceRequest (step 4 of 4 — confirmation)
@@ -14,7 +15,6 @@ import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
  * Done / the close button clear the draft and return to the dashboard.
  * ========================================================================== */
 
-const TOTAL_STEPS = 4;
 const CURRENT_STEP = 4;
 
 const SubmitServiceRequest = ({ navigation }) => {
@@ -59,20 +59,7 @@ const SubmitServiceRequest = ({ navigation }) => {
                     </TouchableOpacity>
                 </View>
 
-                <View style={styles.progressBar}>
-                    {Array.from({ length: TOTAL_STEPS }).map((_, index) => (
-                        <Image
-                            key={index}
-                            source={
-                                index < CURRENT_STEP
-                                    ? require('../assets/icon_tab_colored.png')
-                                    : require('../assets/icon_tab.png')
-                            }
-                            style={styles.progressSegment}
-                            resizeMode="stretch"
-                        />
-                    ))}
-                </View>
+                <ProgressBar currentStep={CURRENT_STEP} />
 
                 <View style={styles.successIconWrap}>
                     <Image source={require('../assets/icon_bigellipse.png')} style={styles.successEllipse} />
@@ -131,16 +118,6 @@ const styles = StyleSheet.create({
         width: 16,
         height: 16,
         resizeMode: 'contain',
-    },
-    progressBar: {
-        flexDirection: 'row',
-        marginBottom: 24,
-    },
-    progressSegment: {
-        flex: 1,
-        height: 6,
-        marginRight: 6,
-        borderRadius: 3,
     },
     successIconWrap: {
         width: 100,

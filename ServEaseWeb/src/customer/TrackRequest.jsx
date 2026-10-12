@@ -1,52 +1,29 @@
-import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import CustomerSidebar from '../components/CustomerSidebar';
 import { openChat } from '../components/MessagingWidget';
-// import { api } from '../api/client'; // BACKEND: use whichever request helper ../api/client exports
+import {
+  answerPaymentRequest,
+  answerScheduleProposal,
+  getTrackingCards,
+} from '../api/client';
 
 /* =====================================================================================
-   BACKEND INTEGRATION (READY) — My Requests / Track Requests (customer)
+   MY REQUESTS / TRACK REQUESTS (customer) — live data
    -------------------------------------------------------------------------------------
-   Everything on this screen is hard-coded (MOCK_REQUESTS below). When the backend is
-   ready, replace the mock data + the handler bodies with the calls below. The UI does not
-   need to change as long as each request keeps the shape used in MOCK_REQUESTS.
+   One call (GET /api/service-requests/tracking) returns the cards grouped by tab:
+   { sent, approved, ongoing, declined, done }. mapCard() below turns each backend
+   card (cardType: diagnosis | quotation | schedule | payment | timeline | completed |
+   declined) into the shape the card components render.
 
-   Proposed endpoints (rename to match ServEaseBackend):
-
-   1) List requests (tab + search)
-      GET  /api/customer/requests?status=sent|approved|ongoing|declined|done&q=<text>
-      -> [{ id, status, kind, providerName, ... }]   (same shape as MOCK_REQUESTS)
-
-      useEffect(() => {
-        const controller = new AbortController();
-        (async () => {
-          try {
-            const res = await api.get('/customer/requests', {
-              params: { status: activeTab, q: search },
-              signal: controller.signal,
-            });
-            setRequests(res.data);              // <- turn `requests` into useState([]) + setRequests
-          } catch (err) {
-            if (err.name !== 'CanceledError') console.error('Failed to load requests', err);
-          }
-        })();
-        return () => controller.abort();
-      }, [activeTab, search]);                   // debounce `search` (~300ms) before calling
-
-   2) Quotation (opened in MyRequestDetails.jsx at /customer/requests/:requestId)
-      Approve / decline calls live in MyRequestDetails.jsx.
-
-   3) New schedule proposed by the provider
-      POST /api/customer/requests/:id/schedule/accept
-      POST /api/customer/requests/:id/schedule/reject
-
-   4) Additional payment requested by the provider (On-going tab)
-      POST /api/customer/requests/:id/additional-payment/approve   -> { amountDue }
-      POST /api/customer/requests/:id/additional-payment/decline
-
-   5) Final payment (Done tab) is started from the Payment screen (see Payment.jsx).
+   Actions:
+     schedule proposal     -> POST /api/service-requests/:id/schedule-proposals/:pid/accept|reject
+     additional payment    -> POST /api/service-requests/:id/payment-requests/:pid/approve|reject
+     quotation review      -> MyRequestDetails.jsx (/customer/requests/:requestId)
+     final payment         -> Payment.jsx (/customer/requests/:requestId/payment)
    ===================================================================================== */
+
 
 const TABS = [
   { key: 'sent', label: 'Sent' },
@@ -64,91 +41,109 @@ const TIMELINE_LABELS = [
 ];
 const PLACEHOLDER_TIME = 'MM/DD/YY 00:00 AM';
 
-// HARD-CODED DATA — replace with the API response (see block above).
-const MOCK_REQUESTS = [
-  {
-    id: 'SR-0000',
-    status: 'sent',
-    kind: 'summary',
-    providerId: 'prov-mark-rivera', // BACKEND: the provider's user id
-    providerName: 'Mark Rivera',
-    probableCause: 'Liquid damage to charging circuit',
-    confidence: 82,
-  },
-  {
-    id: 'SR-0001',
-    status: 'approved',
-    kind: 'quotation',
-    providerId: 'prov-micco-dominic', // BACKEND: the provider's user id
-    providerName: 'Micco Dominic',
-    badge: 'New Quotation',
-    quotation: {
-      reason: 'This sentence states the reason to justify the labor.',
-      items: [{ label: 'Labor', amount: 850 }],
-      total: 850,
-    },
-  },
-  {
-    id: 'SR-0002',
-    status: 'approved',
-    kind: 'schedule',
-    providerId: 'prov-micco-dominic', // BACKEND: the provider's user id
-    providerName: 'Micco Dominic',
-    badge: 'New Schedule',
-    schedule: {
-      dateTime: 'MM/DD/YY 10:00AM',
-      reason: 'Lorem ipsum dolor. Lorem ipsum dolor.',
-    },
-  },
-  {
-    id: 'SR-0003',
-    status: 'ongoing',
-    kind: 'additional_payment',
-    providerId: 'prov-jose-rodolfo', // BACKEND: the provider's user id
-    providerName: 'Jose Rodolfo',
-    badge: 'In progress',
-    additionalPayment: {
-      amount: 3000,
-      note: "Provider's reason for the extra charge is stated in this sentence.",
-    },
-  },
-  {
-    id: 'SR-0004',
-    status: 'ongoing',
-    kind: 'progress',
-    providerId: 'prov-jose-rodolfo', // BACKEND: the provider's user id
-    providerName: 'Jose Rodolfo',
-    badge: 'In progress',
-    timeline: ['done', 'done', 'current', 'pending'].map((state, i) => ({
-      label: TIMELINE_LABELS[i],
-      time: PLACEHOLDER_TIME,
-      state,
-    })),
-  },
-  {
-    id: 'SR-0005',
-    status: 'declined',
-    kind: 'summary',
-    providerId: 'prov-mark-rivera', // BACKEND: the provider's user id
-    providerName: 'Mark Rivera',
-    probableCause: 'Liquid damage to charging circuit',
-    confidence: 82,
-  },
-  {
-    id: 'SR-0006',
-    status: 'done',
-    kind: 'progress',
-    providerId: 'prov-jose-rodolfo', // BACKEND: the provider's user id
-    providerName: 'Jose Rodolfo',
-    badge: 'Completed',
-    finalPayment: 680, // remaining 80% of the 850.00 quotation
-    timeline: ['done', 'done', 'done', 'completed'].map((state, i) => ({
-      label: TIMELINE_LABELS[i],
-      time: PLACEHOLDER_TIME,
-      state,
-    })),
-  },
-];
+// ISO timestamp -> "06/27/26 10:00 AM" (falls back to the placeholder when empty).
+const formatDateTime = (iso) => {
+  if (!iso) return PLACEHOLDER_TIME;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return PLACEHOLDER_TIME;
+  const date = d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
+  const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  return `${date} ${time}`;
+};
+
+// The backend timeline is a list of { label, timestamp, description, done } using the
+// provider's job stages; the design shows its own four labels, matched by position.
+// 'current' = the first step not done yet; a finished job's last step is 'completed'.
+const mapTimeline = (steps, isComplete) => {
+  const firstPending = steps.findIndex((s) => !s.done);
+  return steps.map((s, i) => ({
+    label: TIMELINE_LABELS[i] || s.label,
+    time: s.timestamp ? formatDateTime(s.timestamp) : PLACEHOLDER_TIME,
+    state: s.done
+      ? isComplete && i === steps.length - 1
+        ? 'completed'
+        : 'done'
+      : i === firstPending
+        ? 'current'
+        : 'pending',
+  }));
+};
+
+// Turns one backend tracking card (see getTrackingCards in api/client.js) into the
+// shape the card components below render. `tab` is the group the card came from.
+const mapCard = (tab) => (card) => {
+  const base = {
+    cardId: card.id, // unique per card (a request can have several cards)
+    id: card.requestNumber || card.requestId,
+    status: tab,
+    providerId: card.providerId,
+    providerName: card.providerName,
+  };
+  switch (card.cardType) {
+    case 'quotation':
+      return {
+        ...base,
+        kind: 'quotation',
+        badge: card.statusLabel || 'New Quotation',
+        quotation: {
+          reason: card.notes || '',
+          items: [
+            { label: 'Labor', amount: card.laborCost },
+            ...(Number(card.partsCost) > 0 ? [{ label: 'Parts/Items', amount: card.partsCost }] : []),
+          ],
+          total: card.total,
+        },
+      };
+    case 'schedule':
+      return {
+        ...base,
+        kind: 'schedule',
+        badge: card.statusLabel || 'New Schedule',
+        schedule: {
+          proposalId: card.proposalId,
+          dateTime: formatDateTime(card.scheduledAt),
+          reason: card.reason || '',
+        },
+      };
+    case 'payment':
+      return {
+        ...base,
+        kind: 'additional_payment',
+        badge: card.statusLabel || 'In progress',
+        additionalPayment: {
+          paymentRequestId: card.paymentRequestId,
+          amount: card.paymentAmount,
+          note: card.paymentReason || '',
+        },
+      };
+    case 'timeline':
+      return {
+        ...base,
+        kind: 'progress',
+        badge: card.statusLabel || 'In progress',
+        finalPayment: card.total,
+        timeline: mapTimeline(card.timeline || [], false),
+      };
+    case 'completed':
+      return {
+        ...base,
+        kind: 'progress',
+        badge: 'Completed',
+        finalPayment: card.finalAmount,
+        timeline: mapTimeline(card.timeline || [], true),
+      };
+    case 'declined':
+      return { ...base, kind: 'summary', declinedReason: card.reason || null };
+    case 'diagnosis':
+    default:
+      return {
+        ...base,
+        kind: 'summary',
+        probableCause: card.probableCause || null,
+        confidence: card.confidencePercent ?? 0,
+      };
+  }
+};
 
 const formatAmount = (n) =>
   n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -258,26 +253,39 @@ function SummaryCard({ request, onFindProvider }) {
       <p className="m-0 mt-[6px] font-[Inter] text-[14px] leading-[17px] text-[#484040]">
         sent to <strong>{request.providerName}</strong>
       </p>
-      <p className="m-0 mt-[11px] font-[Inter] text-[13px] leading-[16px] text-[#484040]">
-        Probable Cause
-      </p>
-      <p className="m-0 mt-[2px] font-[Inter] text-[16px] font-bold leading-[19px] text-[#484040]">
-        {request.probableCause}
-      </p>
-      <div className="mt-[9px] flex items-center gap-[14px]">
-        <div className="h-[10px] max-w-[742px] flex-1 overflow-hidden rounded-[10px] bg-[#D9D9D9]">
-          <div
-            className="h-full rounded-[10px] bg-[#0255AF]"
-            style={{ width: `${request.confidence}%` }}
-          />
-        </div>
-        <span className="w-[34px] font-[Inter] text-[10px] leading-[12px] text-[#484040]">
-          {request.confidence}%
-        </span>
-      </div>
-      <p className="m-0 mt-[6px] font-[Inter] text-[13px] leading-[16px] text-[#484040]">
-        Confidence based on similar reported cases
-      </p>
+      {request.declinedReason !== undefined && request.status === 'declined' ? (
+        <>
+          <p className="m-0 mt-[11px] font-[Inter] text-[13px] leading-[16px] text-[#484040]">
+            Declined by the service provider
+          </p>
+          <p className="m-0 mt-[2px] font-[Inter] text-[14px] leading-[17px] text-[#484040]">
+            {request.declinedReason || 'No reason given.'}
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="m-0 mt-[11px] font-[Inter] text-[13px] leading-[16px] text-[#484040]">
+            Probable Cause
+          </p>
+          <p className="m-0 mt-[2px] font-[Inter] text-[16px] font-bold leading-[19px] text-[#484040]">
+            {request.probableCause || 'Waiting for the provider to review the request'}
+          </p>
+          <div className="mt-[9px] flex items-center gap-[14px]">
+            <div className="h-[10px] max-w-[742px] flex-1 overflow-hidden rounded-[10px] bg-[#D9D9D9]">
+              <div
+                className="h-full rounded-[10px] bg-[#0255AF]"
+                style={{ width: `${request.confidence}%` }}
+              />
+            </div>
+            <span className="w-[34px] font-[Inter] text-[10px] leading-[12px] text-[#484040]">
+              {request.confidence}%
+            </span>
+          </div>
+          <p className="m-0 mt-[6px] font-[Inter] text-[13px] leading-[16px] text-[#484040]">
+            Confidence based on similar reported cases
+          </p>
+        </>
+      )}
       {request.status === 'declined' && (
         <div className="mt-3 flex justify-end">
           <SmallButton onClick={onFindProvider}>Find Service Provider</SmallButton>
@@ -418,20 +426,53 @@ function ProgressCard({ request, onPayFinal, onMessage }) {
 export default function TrackRequest() {
   const navigate = useNavigate();
 
-  // BACKEND: turn into useState([]) and fill it with the API response.
-  const [requests] = useState(MOCK_REQUESTS);
-  const [activeTab, setActiveTab] = useState('sent');
+  // Notifications deep-link here with ?tab=sent|approved|ongoing|declined|done.
+  const [searchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get('tab');
+  const isValidTab = (key) => TABS.some((tab) => tab.key === key);
+  const [activeTab, setActiveTab] = useState(isValidTab(tabFromUrl) ? tabFromUrl : 'sent');
+  useEffect(() => {
+    if (isValidTab(tabFromUrl)) setActiveTab(tabFromUrl);
+  }, [tabFromUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [search, setSearch] = useState('');
+  const [cardsByTab, setCardsByTab] = useState({
+    sent: [],
+    approved: [],
+    ongoing: [],
+    declined: [],
+    done: [],
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  // GET /api/service-requests/tracking — one call fills every tab.
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      const groups = await getTrackingCards();
+      const mapped = {};
+      TABS.forEach(({ key }) => {
+        mapped[key] = (groups?.[key] ?? []).map(mapCard(key));
+      });
+      setCardsByTab(mapped);
+    } catch (err) {
+      setError(err.message || 'Could not load your requests. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const visibleRequests = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return requests.filter(
-      (r) =>
-        r.status === activeTab &&
-        // BACKEND: search should be done server-side (?q=). This is only for the mock data.
-        (!q || JSON.stringify(r).toLowerCase().includes(q))
-    );
-  }, [requests, activeTab, search]);
+    const list = cardsByTab[activeTab] ?? [];
+    if (!q) return list;
+    return list.filter((r) => JSON.stringify(r).toLowerCase().includes(q));
+  }, [cardsByTab, activeTab, search]);
 
   const goToPayment = (request, amount, paymentType) => {
     navigate(`/customer/requests/${request.id}/payment`, {
@@ -439,26 +480,40 @@ export default function TrackRequest() {
     });
   };
 
-  /* ----- handlers (BACKEND: replace the TODO lines with the calls in the block at the top) ----- */
+  /* ----- handlers: answer the provider, then reload the cards from the server ----- */
 
   const handleScheduleResponse = async (request, accepted) => {
-    // TODO: await api.post(`/customer/requests/${request.id}/schedule/${accepted ? 'accept' : 'reject'}`);
-    console.log(`Schedule ${accepted ? 'accepted' : 'rejected'}`, request.id);
+    setError('');
+    try {
+      await answerScheduleProposal(request.id, request.schedule.proposalId, accepted ? 'accept' : 'reject');
+      await load();
+    } catch (err) {
+      setError(err.message || 'Could not send your answer. Please try again.');
+    }
   };
 
   const handleAdditionalPayment = async (request, approved) => {
-    if (approved) {
-      // TODO: const { data } = await api.post(`/customer/requests/${request.id}/additional-payment/approve`);
-      goToPayment(request, request.additionalPayment.amount, 'additional'); // BACKEND: use data.amountDue
-    } else {
-      // TODO: await api.post(`/customer/requests/${request.id}/additional-payment/decline`);
-      console.log('Additional payment declined', request.id);
+    setError('');
+    try {
+      await answerPaymentRequest(
+        request.id,
+        request.additionalPayment.paymentRequestId,
+        approved ? 'approve' : 'reject'
+      );
+      if (approved) {
+        // The Payment screen re-computes the exact amount due from the backend.
+        goToPayment(request, request.additionalPayment.amount, 'additional');
+      } else {
+        await load();
+      }
+    } catch (err) {
+      setError(err.message || 'Could not send your answer. Please try again.');
     }
   };
 
   const handleMessage = (request) => {
-    // Opens the chat popup (bottom-right) with this request's provider.
-    openChat({ id: request.providerId, name: request.providerName });
+    // Opens the chat popup (bottom-right) on this request's conversation.
+    openChat({ id: request.providerId, name: request.providerName, requestId: request.id });
   };
 
   const renderCard = (request) => {
@@ -535,13 +590,23 @@ export default function TrackRequest() {
           })}
         </div>
 
+        {error && (
+          <p role="alert" className="m-0 mt-4 font-[Inter] text-[13px] text-[#B91C1C]">
+            {error}
+          </p>
+        )}
+
         <div className="mt-[34px] flex flex-col gap-5">
-          {visibleRequests.length === 0 ? (
+          {loading ? (
+            <p className="m-0 font-[Inter] text-[14px] text-[#7C7979]">Loading your requests…</p>
+          ) : visibleRequests.length === 0 ? (
             <p className="m-0 font-[Inter] text-[14px] text-[#7C7979]">
               No requests to show here yet.
             </p>
           ) : (
-            visibleRequests.map((request) => <div key={request.id}>{renderCard(request)}</div>)
+            visibleRequests.map((request) => (
+              <div key={request.cardId}>{renderCard(request)}</div>
+            ))
           )}
         </div>
       </div>

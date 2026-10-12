@@ -18,9 +18,13 @@ import MyRequestDetails from './customer/MyRequestDetails'
 import Payment from './customer/Payment'
 import Rating from './customer/Rating'
 import History from './customer/History'
+import FindServiceProvider from './customer/FindServiceProvider'
+import ServiceProviderDetails from './customer/ServiceProviderDetails'
 import ServiceProviderDashboard from './serviceprovider/ServiceProviderDashboard'
 import IncomingServiceRequest from './serviceprovider/IncomingServiceRequest'
 import ServiceRequestDetails from './serviceprovider/ServiceRequestDetails'
+import ActiveJobs from './serviceprovider/ActiveJobs'
+import Earnings from './serviceprovider/Earnings'
 
 function App() {
   return (
@@ -56,7 +60,8 @@ function App() {
         <Route path="/customer/requests/:requestId/payment" element={<Payment />} />
         <Route path="/customer/requests/:requestId/review" element={<Rating />} />
         <Route path="/customer/history" element={<History />} />
-        {/* TODO: add more customer routes here as they're built, e.g. /customer/providers */}
+        <Route path="/customer/providers" element={<FindServiceProvider />} />
+        <Route path="/customer/providers/:providerId" element={<ServiceProviderDetails />} />
 
         {/* Service Provider */}
         <Route path="/serviceprovider/service-category" element={<ServiceCategory />} />
@@ -64,7 +69,8 @@ function App() {
         <Route path="/serviceprovider/dashboard" element={<ServiceProviderDashboard />} />
         <Route path="/serviceprovider/requests" element={<IncomingServiceRequest />} />
         <Route path="/serviceprovider/requests/:requestId" element={<ServiceRequestDetails />} />
-        {/* TODO: import and add more service provider routes here as they're built, e.g. /serviceprovider/jobs, /serviceprovider/messages, /serviceprovider/earnings */}
+        <Route path="/serviceprovider/jobs" element={<ActiveJobs />} />
+        <Route path="/serviceprovider/earnings" element={<Earnings />} />
       </Routes>
     </BrowserRouter>
     

@@ -49,6 +49,8 @@ customer.get('/', authenticate, controller.listMine);
 // otherwise be parsed as a request id (and 400 on parseRequestId).
 customer.get('/active', authenticate, workflow.getActiveRepair);
 customer.get('/tracking', authenticate, workflow.getTracking);
+// Customer History screen (web): closed requests + paid payments.
+customer.get('/history', authenticate, workflow.getCustomerHistory);
 // Mobile create-request flow: the photo and the AI diagnosis happen BEFORE the request
 // row exists (it is created on submit), so these take no :requestId.
 customer.post('/photos', authenticate, uploadPhoto, controller.uploadPhoto);
@@ -67,6 +69,9 @@ customer.post('/:requestId/payment-requests/:paymentRequestId/reject', authentic
 customer.post('/:requestId/quotation/respond', authenticate, workflow.respondToQuotation);
 customer.post('/:requestId/payment', authenticate, workflow.payForRequest);
 customer.get('/:requestId/payment-status', authenticate, workflow.getPaymentStatus);
+// Server-computed amounts per payment stage — the web Payment screen shows these
+// instead of trusting values passed through router state.
+customer.get('/:requestId/payment-due', authenticate, workflow.getPaymentDue);
 customer.post('/:requestId/rating', authenticate, workflow.rateRequest);
 
 // ----- service provider: mounted at /api/providers/requests AND /api/provider/service-requests -----
