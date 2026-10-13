@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Image, Text, TouchableOpacity, ScrollView, Modal, StyleSheet, Alert, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { payForServiceRequest, getPaymentStatus } from '../api/servicerequest_api';
+import { payForServiceRequest, getPaymentStatus, getPaymentDue } from '../api/servicerequest_api';
 
 // How often / how long the screen re-checks the payment after the customer comes
 // back from the PayMongo checkout page.
@@ -19,9 +19,12 @@ const PAYMENT_METHODS = [
 const Payment = ({ navigation, route }) => {
     const requestId = route?.params?.requestId;
     const requestNumber = route?.params?.requestNumber || requestId || '';
-    // 'initial' (20% deposit, right after the quotation/appointment is approved)
-    // or 'final' (remaining balance, once the job is marked Done).
+    // 'initial' (20% deposit, right after the quotation/appointment is approved),
+    // 'additional' (extra cost the provider requested mid-job, approved from Track) or
+    // 'final' (remaining balance, once the job is marked Done).
     const paymentStage = route?.params?.paymentStage || 'initial';
+    // Only for 'additional': which payment request is being paid.
+    const paymentRequestId = route?.params?.paymentRequestId;
     const amount = route?.params?.amount ?? 0;
 
     const [selectedMethod, setSelectedMethod] = useState(null);
@@ -32,9 +35,33 @@ const Payment = ({ navigation, route }) => {
     const [waitingForCheckout, setWaitingForCheckout] = useState(false);
     const pollTimerRef = useRef(null);
 
+    // The amount is read from the backend (payment-due); the route-param amount is
+    // only a preview until the server answers. This is what makes the deductions
+    // reflect: the server's 'final' is the remaining balance (total minus the 20%
+    // initial fee and any additional payments already paid), while 'initial' is the
+    // 20% fee and 'additional' the approved extra not yet paid.
+    const [dueAmount, setDueAmount] = useState(amount);
+
     useEffect(() => () => clearInterval(pollTimerRef.current), []);
 
-    const formattedAmount = `₱${Number(amount).toLocaleString('en-PH', {
+    useEffect(() => {
+        if (!requestId) return undefined;
+        let cancelled = false;
+        getPaymentDue(requestId)
+            .then((data) => {
+                if (cancelled) return;
+                const serverAmount = data?.due?.[paymentStage];
+                if (Number.isFinite(serverAmount) && serverAmount > 0) setDueAmount(serverAmount);
+            })
+            .catch(() => {
+                // Keep the route-param amount — a flaky connection must not block paying.
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [requestId, paymentStage]);
+
+    const formattedAmount = `₱${Number(dueAmount).toLocaleString('en-PH', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
     })}`;
@@ -55,7 +82,7 @@ const Payment = ({ navigation, route }) => {
         const startedAt = Date.now();
         pollTimerRef.current = setInterval(async () => {
             try {
-                const payment = await getPaymentStatus(requestId);
+                const payment = await getPaymentStatus(requestId, { stage: paymentStage, paymentRequestId });
                 if (payment?.status === 'paid') {
                     clearInterval(pollTimerRef.current);
                     setWaitingForCheckout(false);
@@ -78,7 +105,7 @@ const Payment = ({ navigation, route }) => {
 
     const handleContinue = async () => {
         if (!selectedMethod || isPaying) return;
-        if (!requestId || !(amount > 0)) {
+        if (!requestId || !(dueAmount > 0)) {
             Alert.alert('Missing payment details', 'Go back to Track and open the request again.');
             return;
         }
@@ -86,7 +113,7 @@ const Payment = ({ navigation, route }) => {
         // Local flag — the state variable would be stale inside this closure.
         let openedCheckout = false;
         try {
-            const result = await payForServiceRequest(requestId, { amount, method: selectedMethod, stage: paymentStage });
+            const result = await payForServiceRequest(requestId, { amount: dueAmount, method: selectedMethod, stage: paymentStage, paymentRequestId });
             if (result?.checkoutUrl) {
                 openedCheckout = true;
                 setWaitingForCheckout(true);
@@ -111,6 +138,7 @@ const Payment = ({ navigation, route }) => {
         // TODO: download/share the actual receipt once the backend generates one
     };
 
+    // 'final' continues to the review; every other payment just goes back ("Go back").
     const handlePrimaryCta = () => {
         setShowProcessedModal(false);
         if (paymentStage === 'final') {
@@ -174,7 +202,11 @@ const Payment = ({ navigation, route }) => {
                             </TouchableOpacity>
                         </View>
 
-                        <Text style={styles.modalSubtitle}>The money was sent to the service provider.</Text>
+                        <Text style={styles.modalSubtitle}>
+                            {paymentStage === 'additional'
+                                ? 'The payment for additional parts has been processed.'
+                                : 'The money was sent to the service provider.'}
+                        </Text>
 
                         <TouchableOpacity style={styles.receiptBox} onPress={handleDownloadReceipt} activeOpacity={0.85}>
                             <Image source={require('../assets/icon_download.png')} style={styles.downloadIcon} />
@@ -182,7 +214,7 @@ const Payment = ({ navigation, route }) => {
 
                         <TouchableOpacity style={styles.primaryCtaButton} onPress={handlePrimaryCta}>
                             <Text style={styles.primaryCtaText}>
-                                {paymentStage === 'final' ? 'Rate and Review' : 'Go to Dashboard'}
+                                {paymentStage === 'final' ? 'Rate and Review' : 'Go back'}
                             </Text>
                         </TouchableOpacity>
                     </View>

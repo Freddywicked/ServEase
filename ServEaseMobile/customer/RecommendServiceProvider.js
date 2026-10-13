@@ -15,7 +15,12 @@ import { getRecommendedProviders, createServiceRequest } from '../api/servicereq
  *   Loads    GET /service-providers/recommended using the draft (category,
  *            latitude/longitude, preferred date/time). Matching and sorting by
  *            specialization, ratings/sentiment, distance and availability is done
- *            server-side. "Find another" re-calls it with `exclude` = ids already shown.
+ *            server-side; the category match is a HARD filter, not a ranking boost.
+ *            This screen re-checks it, so a provider from another category (e.g. a
+ *            home-repair provider on an automotive request) is never shown.
+ *            "Find another" re-calls it with `exclude` = ids already shown and still
+ *            returns only matched providers; once every match has been seen it starts
+ *            again from the best match instead of falling back to other categories.
  *
  *   Request  POST /service-requests with the full draft (category, description, photo URL,
  *   Quotation  lat/long, preferred date/time, ai_diagnosis) + the chosen providerId. The
@@ -36,6 +41,35 @@ const formatLocation = (provider) =>
     ]
         .filter(Boolean)
         .join(' · ');
+
+const normalizeKey = (value) => String(value ?? '').trim().toLowerCase();
+
+// Which category keys a provider serves. Reads whichever field the endpoint returns;
+// `null` means the endpoint sent no category information at all.
+const getProviderCategoryKeys = (provider) => {
+    const raw = provider.categoryKeys ?? provider.categories ?? provider.categoryKey ?? provider.category;
+    if (raw === undefined || raw === null) return null;
+    return []
+        .concat(raw)
+        .map((entry) =>
+            normalizeKey(entry && typeof entry === 'object' ? entry.key ?? entry.categoryKey ?? entry.name : entry),
+        )
+        .filter(Boolean);
+};
+
+let warnedMissingCategory = false;
+const matchesRequestCategory = (provider, categoryKey) => {
+    const keys = getProviderCategoryKeys(provider);
+    if (keys === null) {
+        // Can't verify, so trust the server's filter — but make the gap visible while developing.
+        if (__DEV__ && !warnedMissingCategory) {
+            warnedMissingCategory = true;
+            console.warn('[RecommendServiceProvider] providers have no category field (categoryKeys); client-side category check skipped.');
+        }
+        return true;
+    }
+    return keys.includes(normalizeKey(categoryKey));
+};
 
 const RecommendServiceProvider = ({ navigation }) => {
     const setDraft = useServiceRequestDraftStore((state) => state.setDraft);
@@ -74,37 +108,54 @@ const RecommendServiceProvider = ({ navigation }) => {
         return () => spinAnimation.stop();
     }, [isLoading, spinValue]);
 
+    // Asks the server for ranked providers and keeps only those that match the request's
+    // category. Every returned id is remembered (matched or not) so "Find another" never
+    // fetches the same provider twice.
+    const fetchMatchedProviders = useCallback(async (exclude) => {
+        const draft = useServiceRequestDraftStore.getState();
+        const list = await getRecommendedProviders({
+            categoryKey: draft.categoryKey,
+            latitude: draft.location?.latitude,
+            longitude: draft.location?.longitude,
+            preferredDate: draft.preferredDate,
+            preferredTime: draft.preferredTime,
+            exclude,
+        });
+        list.forEach((provider) => seenProviderIdsRef.current.add(provider.id));
+        return list.filter((provider) => matchesRequestCategory(provider, draft.categoryKey));
+    }, []);
+
     // `findAnother` = true re-queries excluding every provider already shown, instead of
-    // looping back to the same result set.
+    // looping back to the same result set. Either way the list only ever holds matched providers.
     const loadProviders = useCallback(async ({ findAnother = false } = {}) => {
         setIsLoading(true);
         setLoadError('');
         setNotice('');
         try {
-            const draft = useServiceRequestDraftStore.getState();
-            const list = await getRecommendedProviders({
-                categoryKey: draft.categoryKey,
-                latitude: draft.location?.latitude,
-                longitude: draft.location?.longitude,
-                preferredDate: draft.preferredDate,
-                preferredTime: draft.preferredTime,
-                exclude: findAnother ? Array.from(seenProviderIdsRef.current) : [],
-            });
+            if (!findAnother) seenProviderIdsRef.current.clear();
+            let matches = await fetchMatchedProviders(findAnother ? Array.from(seenProviderIdsRef.current) : []);
+            let restarted = false;
+
+            if (findAnother && matches.length === 0) {
+                // Every matching provider has been shown: start over from the best match
+                // (never widen to other categories).
+                seenProviderIdsRef.current.clear();
+                matches = await fetchMatchedProviders([]);
+                restarted = matches.length > 0;
+            }
             if (!isMountedRef.current) return;
 
-            if (findAnother && list.length === 0) {
-                setNotice('No other service providers are available right now.');
-                return;
+            setProviders(matches);
+            setSelectedProviderId(matches.length > 0 ? matches[0].id : null);
+            if (restarted) {
+                setNotice("You've seen every matching service provider — showing the best matches again.");
             }
-            list.forEach((provider) => seenProviderIdsRef.current.add(provider.id));
-            setProviders(list);
-            setSelectedProviderId(list.length > 0 ? list[0].id : null);
         } catch (error) {
             if (isMountedRef.current) setLoadError(error.message);
         } finally {
             if (isMountedRef.current) setIsLoading(false);
         }
-    }, []);
+    }, [fetchMatchedProviders]);
 
     useEffect(() => {
         loadProviders();
@@ -137,7 +188,11 @@ const RecommendServiceProvider = ({ navigation }) => {
             const created = await createServiceRequest(useServiceRequestDraftStore.getState(), {
                 providerId: selectedProviderId,
             });
-            setDraft({ submittedRequestId: created.requestId });
+            setDraft({
+                submittedRequestId: created.requestId,
+                // Per-customer reference such as "SR-0001", generated by the backend.
+                submittedReferenceCode: created.referenceCode ?? null,
+            });
 
             // ---------------------------------------------------------------------
             // PROVIDER COMMUNICATION (comment block — nothing to call from the app here)
@@ -274,7 +329,7 @@ const RecommendServiceProvider = ({ navigation }) => {
             return (
                 <View style={styles.reloadingSection}>
                     <Text style={styles.reloadingText}>
-                        No service providers are available for this request yet.
+                        No matching service providers are available for this request yet.
                     </Text>
                     <TouchableOpacity onPress={() => loadProviders()} style={styles.findAnotherWrap}>
                         <Text style={styles.findAnotherText}>Search again</Text>

@@ -8,8 +8,8 @@ import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
 import ProgressBar from '../components/ProgressBar';
 import {
     getCategories,
-    getAppointmentTimeSlots,
     uploadServiceRequestPhoto,
+    uploadServiceRequestVideo,
     reverseGeocode,
 } from '../api/servicerequest_api';
 import { getCurrentCoordinates } from '../utils/deviceLocation';
@@ -26,9 +26,15 @@ import { getCurrentCoordinates } from '../utils/deviceLocation';
  *
  * Backend data used here:
  *   GET  /categories                  -> category buttons
- *   GET  /appointment-time-slots      -> preferred-time pills
- *   POST /service-requests/photos     -> uploads the chosen photo, returns its URL
+ *   POST /service-requests/photos     -> uploads each chosen photo, returns its storage path
+ *   POST /service-requests/videos     -> uploads the chosen video, returns its storage path
  *   GET  /location/reverse-geocode    -> address + map thumbnail for the coordinates
+ *
+ * Media: up to MAX_PHOTOS photos and MAX_VIDEOS video. They live in draft.mediaItems
+ * ([{ id, type: 'photo'|'video', uri, path, duration, status }]); the first uploaded photo is
+ * also mirrored to draft.photoUri / draft.photoPath so existing consumers keep working.
+ *
+ * Preferred-time pills are built locally (hourly, 9:00 AM - 4:00 PM).
  *
  * Preferred Appointment is the customer's stated preference
  * (SERVICE_REQUEST.preferred_date / preferred_time). It is distinct from the
@@ -39,6 +45,31 @@ const CURRENT_STEP = 1;
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+const MAX_PHOTOS = 4;
+const MAX_VIDEOS = 1;
+const MAX_MEDIA = MAX_PHOTOS + MAX_VIDEOS;
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024; // keep in step with the server's video limit
+
+// Preferred-appointment slots: hourly from 9:00 AM to 4:00 PM. Working hours end at 5:00 PM,
+// so the last slot starts at 4:00 PM. Keep in step with TIME_SLOTS in ServiceProviderDashboard.js.
+const APPOINTMENT_START_HOUR = 9;
+const APPOINTMENT_END_HOUR = 16;
+const formatSlotLabel = (hour24) => `${hour24 % 12 === 0 ? 12 : hour24 % 12}:00 ${hour24 >= 12 ? 'PM' : 'AM'}`;
+const APPOINTMENT_TIME_SLOTS = Array.from(
+    { length: APPOINTMENT_END_HOUR - APPOINTMENT_START_HOUR + 1 },
+    (_, index) => {
+        const hour = APPOINTMENT_START_HOUR + index;
+        return { value: `${String(hour).padStart(2, '0')}:00`, label: formatSlotLabel(hour), hour };
+    },
+);
+
+// 75 -> "1:15"
+const formatDuration = (seconds) => {
+    if (!seconds) return '';
+    const total = Math.round(seconds);
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+};
 
 // Pads the leading cells with `null` so day 1 lands under the correct weekday
 // column. Worth extracting into one shared `CalendarPicker` along with
@@ -71,10 +102,8 @@ const CreateServiceRequest = ({ navigation }) => {
     const setDraft = useServiceRequestDraftStore((state) => state.setDraft);
 
     const [categories, setCategories] = useState([]);
-    const [timeSlots, setTimeSlots] = useState([]);
     const [optionsStatus, setOptionsStatus] = useState('loading'); // 'loading' | 'ready' | 'error'
     const [optionsError, setOptionsError] = useState(''); // why loading failed (shown under the retry hint)
-    const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
     const [isLocating, setIsLocating] = useState(false);
 
     // Preferred appointment picker.
@@ -90,7 +119,11 @@ const CreateServiceRequest = ({ navigation }) => {
     const [draftAppointmentTime, setDraftAppointmentTime] = useState(null);
 
     const confirmedDate = parseIsoDate(draft.preferredDate);
-    const confirmedTimeLabel = timeSlots.find((slot) => slot.value === draft.preferredTime)?.label ?? draft.preferredTime;
+    const confirmedTimeLabel = APPOINTMENT_TIME_SLOTS.find((slot) => slot.value === draft.preferredTime)?.label ?? draft.preferredTime;
+    const mediaItems = draft.mediaItems ?? [];
+    const photoCount = mediaItems.filter((item) => item.type === 'photo').length;
+    const videoCount = mediaItems.filter((item) => item.type === 'video').length;
+    const isUploadingMedia = mediaItems.some((item) => item.status === 'uploading');
     const appointmentCalendarDays = getCalendarDays(viewedAppointmentYear, viewedAppointmentMonth);
     const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
 
@@ -98,9 +131,7 @@ const CreateServiceRequest = ({ navigation }) => {
         setOptionsStatus('loading');
         setOptionsError('');
         try {
-            const [categoryList, slotList] = await Promise.all([getCategories(), getAppointmentTimeSlots()]);
-            setCategories(categoryList);
-            setTimeSlots(slotList);
+            setCategories(await getCategories());
             setOptionsStatus('ready');
         } catch (error) {
             // Kept on screen (not just the console) so connection problems can be
@@ -122,11 +153,41 @@ const CreateServiceRequest = ({ navigation }) => {
         setDraft({ categoryKey });
     };
 
-    const handleUploadImage = async () => {
-        if (isUploadingPhoto) return;
+    // --- Media (photos + video) -------------------------------------------------------------
+    // Always read/write through the store so overlapping uploads never clobber each other.
+    const getMediaItems = () => useServiceRequestDraftStore.getState().mediaItems ?? [];
+
+    const commitMedia = (items) => {
+        const firstPhoto = items.find((item) => item.type === 'photo');
+        setDraft({
+            mediaItems: items,
+            photoUri: firstPhoto?.uri ?? null,
+            photoPath: firstPhoto?.path ?? null,
+        });
+    };
+
+    const patchMedia = (id, changes) =>
+        commitMedia(getMediaItems().map((item) => (item.id === id ? { ...item, ...changes } : item)));
+
+    const handleRemoveMedia = (id) => {
+        commitMedia(getMediaItems().filter((item) => item.id !== id));
+    };
+
+    const handleAddMedia = async () => {
+        const current = getMediaItems();
+        const currentPhotos = current.filter((item) => item.type === 'photo').length;
+        const currentVideos = current.filter((item) => item.type === 'video').length;
+        if (currentPhotos >= MAX_PHOTOS && currentVideos >= MAX_VIDEOS) {
+            Alert.alert('Limit reached', `You can add up to ${MAX_PHOTOS} photos and ${MAX_VIDEOS} video.`);
+            return;
+        }
+
+        // Only offer what still has room, so the picker doesn't show things we'd have to reject.
+        const canAddPhoto = currentPhotos < MAX_PHOTOS;
+        const canAddVideo = currentVideos < MAX_VIDEOS;
         const result = await launchImageLibrary({
-            mediaType: 'photo',
-            selectionLimit: 1,
+            mediaType: canAddPhoto && canAddVideo ? 'mixed' : canAddPhoto ? 'photo' : 'video',
+            selectionLimit: MAX_MEDIA - current.length,
             quality: 0.8,
             // The server rejects images over 5 MB; resizing on the device keeps phone photos under that.
             maxWidth: 1600,
@@ -134,25 +195,65 @@ const CreateServiceRequest = ({ navigation }) => {
         });
         if (result.didCancel) return;
         if (result.errorCode) {
-            Alert.alert('Could not open photos', result.errorMessage || 'Please check photo permissions and try again.');
+            Alert.alert('Could not open your gallery', result.errorMessage || 'Please check permissions and try again.');
             return;
         }
-        const asset = result.assets?.[0];
-        if (!asset?.uri) return;
 
-        // Show the local preview right away, then upload; the uploaded storage path (not the
-        // local URI) is what travels to SERVICE_REQUEST_ATTACHMENT.file_url.
-        setDraft({ photoUri: asset.uri, photoPath: null });
-        setIsUploadingPhoto(true);
-        try {
-            const { path } = await uploadServiceRequestPhoto(asset);
-            setDraft({ photoPath: path });
-        } catch (error) {
-            setDraft({ photoUri: null, photoPath: null });
-            Alert.alert('Photo upload failed', error.message);
-        } finally {
-            setIsUploadingPhoto(false);
+        let photosLeft = MAX_PHOTOS - currentPhotos;
+        let videosLeft = MAX_VIDEOS - currentVideos;
+        let overLimit = 0;
+        let tooLarge = 0;
+        const accepted = [];
+        (result.assets ?? []).forEach((asset) => {
+            if (!asset?.uri) return;
+            const isVideo = (asset.type || '').startsWith('video');
+            if (isVideo) {
+                if (videosLeft <= 0) { overLimit += 1; return; }
+                if (asset.fileSize && asset.fileSize > MAX_VIDEO_BYTES) { tooLarge += 1; return; }
+                videosLeft -= 1;
+            } else {
+                if (photosLeft <= 0) { overLimit += 1; return; }
+                photosLeft -= 1;
+            }
+            accepted.push({ asset, isVideo });
+        });
+
+        if (overLimit > 0 || tooLarge > 0) {
+            Alert.alert(
+                'Some files were skipped',
+                [
+                    overLimit > 0 ? `You can add up to ${MAX_PHOTOS} photos and ${MAX_VIDEOS} video.` : null,
+                    tooLarge > 0 ? `Videos must be under ${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))} MB.` : null,
+                ].filter(Boolean).join(' '),
+            );
         }
+        if (accepted.length === 0) return;
+
+        // Show local previews right away, then upload. The uploaded storage path (not the local
+        // URI) is what travels to SERVICE_REQUEST_ATTACHMENT.file_url.
+        const stamp = Date.now();
+        const newItems = accepted.map(({ asset, isVideo }, index) => ({
+            id: `${stamp}-${index}`,
+            type: isVideo ? 'video' : 'photo',
+            uri: asset.uri,
+            duration: asset.duration ?? null,
+            path: null,
+            status: 'uploading',
+        }));
+        commitMedia([...getMediaItems(), ...newItems]);
+
+        await Promise.all(
+            accepted.map(async ({ asset, isVideo }, index) => {
+                const { id } = newItems[index];
+                try {
+                    const { path } = await (isVideo ? uploadServiceRequestVideo(asset) : uploadServiceRequestPhoto(asset));
+                    patchMedia(id, { path, status: 'ready' });
+                } catch (error) {
+                    handleRemoveMedia(id);
+                    Alert.alert(isVideo ? 'Video upload failed' : 'Photo upload failed', error.message);
+                }
+            }),
+        );
     };
 
     const handleTurnOnLocation = async () => {
@@ -221,6 +322,19 @@ const CreateServiceRequest = ({ navigation }) => {
 
     const isPastDay = (day) => new Date(viewedAppointmentYear, viewedAppointmentMonth, day) < startOfToday;
 
+    // On today's date, slots whose hour has already started can't be picked.
+    const todayIso = toIsoDate(today.getFullYear(), today.getMonth(), today.getDate());
+    const isSlotPast = (slot, day = draftAppointmentDay) =>
+        day !== null &&
+        toIsoDate(viewedAppointmentYear, viewedAppointmentMonth, day) === todayIso &&
+        slot.hour <= today.getHours();
+
+    const handleSelectAppointmentDay = (day) => {
+        setDraftAppointmentDay(day);
+        const pickedSlot = APPOINTMENT_TIME_SLOTS.find((slot) => slot.value === draftAppointmentTime);
+        if (pickedSlot && isSlotPast(pickedSlot, day)) setDraftAppointmentTime(null);
+    };
+
     const handleConfirmAppointment = () => {
         // This is the customer's PREFERRED slot, not a confirmed one — it travels with the
         // draft and lands in SERVICE_REQUEST.preferred_date / preferred_time on submit.
@@ -240,8 +354,8 @@ const CreateServiceRequest = ({ navigation }) => {
             Alert.alert('Describe the problem', 'Tell us what is going on so we can diagnose it.');
             return;
         }
-        if (isUploadingPhoto) {
-            Alert.alert('Please wait', 'Your photo is still uploading.');
+        if (isUploadingMedia) {
+            Alert.alert('Please wait', 'Your photos or video are still uploading.');
             return;
         }
         if (!draft.location) {
@@ -270,7 +384,12 @@ const CreateServiceRequest = ({ navigation }) => {
                     end={{ x: 1, y: 0 }}
                     style={styles.categoryButton}
                 >
-                    <Text style={styles.categoryButtonText} numberOfLines={2}>
+                    <Text
+                        style={styles.categoryButtonText}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.8}
+                    >
                         {category.label}
                     </Text>
                 </LinearGradient>
@@ -313,7 +432,32 @@ const CreateServiceRequest = ({ navigation }) => {
         return renderCategoryRows();
     };
 
-    const canPickAppointment = optionsStatus === 'ready';
+    const renderMediaTile = (item) => (
+        <View key={item.id} style={styles.mediaTile}>
+            {item.type === 'photo' ? (
+                <Image source={{ uri: item.uri }} style={styles.mediaThumb} />
+            ) : (
+                <View style={[styles.mediaThumb, styles.videoThumb]}>
+                    <View style={styles.playTriangle} />
+                    <Text style={styles.videoBadge}>
+                        VIDEO{item.duration ? ` · ${formatDuration(item.duration)}` : ''}
+                    </Text>
+                </View>
+            )}
+            {item.status === 'uploading' && (
+                <View style={styles.uploadOverlay}>
+                    <ActivityIndicator color="#FFFFFF" />
+                </View>
+            )}
+            <TouchableOpacity
+                style={styles.mediaRemove}
+                onPress={() => handleRemoveMedia(item.id)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+                <Text style={styles.mediaRemoveText}>×</Text>
+            </TouchableOpacity>
+        </View>
+    );
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -345,29 +489,35 @@ const CreateServiceRequest = ({ navigation }) => {
                     multiline
                 />
 
-                <Text style={styles.sectionLabel}>Photo (optional)</Text>
-                <TouchableOpacity style={styles.uploadBox} onPress={handleUploadImage} activeOpacity={0.85}>
-                    {draft.photoUri ? (
-                        <>
-                            <Image source={{ uri: draft.photoUri }} style={styles.uploadedImage} />
-                            {isUploadingPhoto && (
-                                <View style={styles.uploadOverlay}>
-                                    <ActivityIndicator color="#FFFFFF" />
-                                </View>
+                <Text style={styles.sectionLabel}>Photos & Video (optional)</Text>
+                {mediaItems.length === 0 ? (
+                    <TouchableOpacity style={styles.uploadBox} onPress={handleAddMedia} activeOpacity={0.85}>
+                        <Image source={require('../assets/icon_upload.png')} style={styles.uploadIcon} />
+                        <Text style={styles.uploadText}>Upload Photos or Video</Text>
+                        <Text style={styles.uploadHint}>
+                            Up to {MAX_PHOTOS} photos and {MAX_VIDEOS} video
+                        </Text>
+                    </TouchableOpacity>
+                ) : (
+                    <View style={styles.mediaSection}>
+                        <View style={styles.mediaGrid}>
+                            {mediaItems.map(renderMediaTile)}
+                            {mediaItems.length < MAX_MEDIA && (
+                                <TouchableOpacity style={styles.addTile} onPress={handleAddMedia} activeOpacity={0.85}>
+                                    <Image source={require('../assets/icon_upload.png')} style={styles.addTileIcon} />
+                                    <Text style={styles.addTileText}>Add</Text>
+                                </TouchableOpacity>
                             )}
-                        </>
-                    ) : (
-                        <>
-                            <Image source={require('../assets/icon_image.png')} style={styles.uploadIcon} />
-                            <Text style={styles.uploadText}>Upload Image</Text>
-                        </>
-                    )}
-                </TouchableOpacity>
+                        </View>
+                        <Text style={styles.uploadHint}>
+                            {photoCount}/{MAX_PHOTOS} photos · {videoCount}/{MAX_VIDEOS} video
+                        </Text>
+                    </View>
+                )}
 
                 <TouchableOpacity
                     style={styles.appointmentBox}
                     onPress={handleOpenAppointmentPicker}
-                    disabled={!canPickAppointment}
                     activeOpacity={0.85}
                 >
                     <Image source={require('../assets/icon_calendar.png')} style={styles.calendarIcon} />
@@ -430,6 +580,7 @@ const CreateServiceRequest = ({ navigation }) => {
                             <Image source={require('../assets/icon_close.png')} style={styles.modalCloseIcon} />
                         </TouchableOpacity>
 
+                        <ScrollView showsVerticalScrollIndicator={false}>
                         <Text style={styles.modalTitle}>Preferred Appointment</Text>
 
                         <Text style={styles.modalSectionLabel}>Select Date</Text>
@@ -461,7 +612,7 @@ const CreateServiceRequest = ({ navigation }) => {
                                             key={`${index}-${day}`}
                                             disabled={isDisabled}
                                             style={[styles.dayCell, isSelected && styles.dayCellSelected]}
-                                            onPress={() => setDraftAppointmentDay(day)}
+                                            onPress={() => handleSelectAppointmentDay(day)}
                                         >
                                             {day !== null && (
                                                 <Text
@@ -482,11 +633,15 @@ const CreateServiceRequest = ({ navigation }) => {
 
                         <Text style={styles.modalSectionLabel}>Select Time</Text>
                         <View style={styles.timeSlotRow}>
-                            {timeSlots.length === 0 && <Text style={styles.uploadText}>No time slots available.</Text>}
-                            {timeSlots.map((slot) => {
+                            {APPOINTMENT_TIME_SLOTS.map((slot) => {
                                 const isSelected = slot.value === draftAppointmentTime;
+                                const isDisabled = isSlotPast(slot);
                                 return (
-                                    <TouchableOpacity key={slot.value} onPress={() => setDraftAppointmentTime(slot.value)}>
+                                    <TouchableOpacity
+                                        key={slot.value}
+                                        disabled={isDisabled}
+                                        onPress={() => setDraftAppointmentTime(slot.value)}
+                                    >
                                         {isSelected ? (
                                             <LinearGradient
                                                 colors={['#0255AF', '#04A5A5']}
@@ -497,8 +652,8 @@ const CreateServiceRequest = ({ navigation }) => {
                                                 <Text style={styles.timeSlotTextSelected}>{slot.label}</Text>
                                             </LinearGradient>
                                         ) : (
-                                            <View style={[styles.timeSlotPill, styles.timeSlotPillInactive]}>
-                                                <Text style={styles.timeSlotText}>{slot.label}</Text>
+                                            <View style={[styles.timeSlotPill, styles.timeSlotPillInactive, isDisabled && styles.timeSlotPillDisabled]}>
+                                                <Text style={[styles.timeSlotText, isDisabled && styles.timeSlotTextDisabled]}>{slot.label}</Text>
                                             </View>
                                         )}
                                     </TouchableOpacity>
@@ -523,6 +678,7 @@ const CreateServiceRequest = ({ navigation }) => {
                                 <Text style={styles.confirmButtonText}>Confirm</Text>
                             </LinearGradient>
                         </TouchableOpacity>
+                        </ScrollView>
                     </View>
                 </View>
             </Modal>
@@ -603,17 +759,17 @@ const styles = StyleSheet.create({
         borderColor: '#1B2A8C',
     },
     categoryButton: {
-        minHeight: 44,
+        // Fixed height so every category button is the same size, whatever its label length.
+        height: 48,
         borderRadius: 10,
         borderWidth: 1,
         borderColor: '#B8C4D6',
-        paddingVertical: 10,
-        paddingHorizontal: 10,
+        paddingHorizontal: 8,
         alignItems: 'center',
         justifyContent: 'center',
     },
     categoryButtonText: {
-        fontSize: 14,
+        fontSize: 13,
         color: '#FFFFFF',
         fontWeight: '500',
         textAlign: 'center',
@@ -643,6 +799,93 @@ const styles = StyleSheet.create({
         height: 32,
         resizeMode: 'contain',
         marginBottom: 8,
+    },
+    uploadHint: {
+        fontSize: 11,
+        color: '#999999',
+        marginTop: 4,
+    },
+    mediaSection: {
+        marginBottom: 20,
+    },
+    mediaGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+    },
+    mediaTile: {
+        width: 92,
+        height: 92,
+        marginRight: 8,
+        marginBottom: 8,
+    },
+    mediaThumb: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 10,
+        resizeMode: 'cover',
+    },
+    videoThumb: {
+        backgroundColor: '#1F2937',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    playTriangle: {
+        width: 0,
+        height: 0,
+        borderTopWidth: 9,
+        borderBottomWidth: 9,
+        borderLeftWidth: 15,
+        borderTopColor: 'transparent',
+        borderBottomColor: 'transparent',
+        borderLeftColor: '#FFFFFF',
+        marginLeft: 4,
+    },
+    videoBadge: {
+        position: 'absolute',
+        left: 6,
+        bottom: 5,
+        fontSize: 9,
+        fontWeight: '700',
+        color: '#FFFFFF',
+    },
+    mediaRemove: {
+        position: 'absolute',
+        top: 4,
+        right: 4,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        backgroundColor: 'rgba(0, 0, 0, 0.65)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    mediaRemoveText: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        lineHeight: 18,
+        fontWeight: '700',
+    },
+    addTile: {
+        width: 92,
+        height: 92,
+        marginRight: 8,
+        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: '#C9C9C9',
+        borderStyle: 'dashed',
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    addTileIcon: {
+        width: 22,
+        height: 22,
+        resizeMode: 'contain',
+        marginBottom: 4,
+    },
+    addTileText: {
+        fontSize: 12,
+        color: '#666666',
     },
     uploadText: {
         fontSize: 13,
@@ -704,6 +947,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
     },
     modalCard: {
+        maxHeight: '92%',
         width: '100%',
         maxWidth: 420,
         backgroundColor: '#FFFFFF',
@@ -807,10 +1051,17 @@ const styles = StyleSheet.create({
     },
     timeSlotPill: {
         borderRadius: 18,
-        paddingHorizontal: 16,
+        paddingHorizontal: 14,
         paddingVertical: 8,
-        marginRight: 10,
+        marginRight: 8,
         marginBottom: 10,
+    },
+    timeSlotPillDisabled: {
+        backgroundColor: '#F4F4F4',
+        borderColor: '#EEEEEE',
+    },
+    timeSlotTextDisabled: {
+        color: '#BBBBBB',
     },
     timeSlotPillInactive: {
         borderWidth: 1,

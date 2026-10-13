@@ -29,9 +29,10 @@ const ICON_CHECK = require('../assets/icon_check.png');
  *     availabilitySchedule,        // 'Mon-Fri, 8AM-6PM'
  *     workplace,                   // 'Malamaya Studio'
  *     positiveFeedbackPercent,     // 92
+ *     sentimentSummary,            // { positive: 80, neutral: 15, negative: 5 } | null (AI labels)
  *     aiSummaryTags,               // ['Professional', 'Always on Time']
  *     rating, reviewCount,         // 4.8, 95
- *     reviews: [{ id, reviewerName (masked by the backend, e.g. 'N**** O*ea'), rating, serviceAvailed, comment }]
+ *     reviews: [{ id, reviewerName (masked by the backend, e.g. 'N**** O*ea'), rating, serviceAvailed, comment, sentiment }]
  *   }
  * ========================================================================== */
 

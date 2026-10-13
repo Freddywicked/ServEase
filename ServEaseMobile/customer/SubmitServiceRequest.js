@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import React, { useCallback, useEffect } from 'react';
+import { View, Image, Text, TouchableOpacity, ScrollView, BackHandler, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { ROUTES } from '../navigation/routes';
@@ -11,8 +11,10 @@ import ProgressBar from '../components/ProgressBar';
  * ----------------------------------------------------------------------------
  * Pure confirmation UI. The POST /service-requests call already succeeded on
  * RecommendServiceProvider (which then `replace`d itself with this screen), so
- * the request_id and provider name are read from the shared draft store.
- * Done / the close button clear the draft and return to the dashboard.
+ * the request_id, reference code (SR-0001, SR-0002, ... counted per customer by the
+ * backend) and provider name are read from the shared draft store.
+ * Done, the close button and the Android back button all clear the draft and return
+ * to the customer dashboard.
  * ========================================================================== */
 
 const CURRENT_STEP = 4;
@@ -20,15 +22,20 @@ const CURRENT_STEP = 4;
 const SubmitServiceRequest = ({ navigation }) => {
     const providerName = useServiceRequestDraftStore((state) => state.providerName);
     const requestId = useServiceRequestDraftStore((state) => state.submittedRequestId);
+    const referenceCode = useServiceRequestDraftStore((state) => state.submittedReferenceCode);
     const resetDraft = useServiceRequestDraftStore((state) => state.resetDraft);
 
-    const handleDone = () => {
-        resetDraft();
+    // The backend's per-customer reference (e.g. "SR-0001"). The old id-suffix is only a fallback
+    // for a backend that doesn't return one yet.
+    const displayReference = referenceCode || (requestId ? String(requestId).slice(-8).toUpperCase() : '');
+
+    const handleDone = useCallback(() => {
         // reset (not navigate): the dashboard becomes the ONLY screen in the stack.
         // navigate() left AIResult mounted underneath, and its "no diagnosis -> replace
         // with RecommendServiceProvider" effect fired when the draft cleared, stealing
         // the navigation and landing the customer back on the provider step.
         navigation.reset({ index: 0, routes: [{ name: ROUTES.CUSTOMER_HOME }] });
+        resetDraft();
 
         // ---------------------------------------------------------------------
         // PROVIDER COMMUNICATION (comment block — customer side)
@@ -47,7 +54,17 @@ const SubmitServiceRequest = ({ navigation }) => {
         // });
         // // call unsubscribe() on logout or once the request reaches a final status.
         // ---------------------------------------------------------------------
-    };
+    }, [navigation, resetDraft]);
+
+    // The request is already sent, so Android Back must not return into the create flow;
+    // it behaves exactly like Done.
+    useEffect(() => {
+        const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+            handleDone();
+            return true;
+        });
+        return () => subscription.remove();
+    }, [handleDone]);
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -73,8 +90,8 @@ const SubmitServiceRequest = ({ navigation }) => {
                     This service provider will review your request and send a pre-repair quotation. You'll be
                     notified the moment it arrives.
                 </Text>
-                {!!requestId && (
-                    <Text style={styles.referenceText}>Reference: {String(requestId).slice(-8).toUpperCase()}</Text>
+                {!!displayReference && (
+                    <Text style={styles.referenceText}>Reference: {displayReference}</Text>
                 )}
 
                 <TouchableOpacity onPress={handleDone}>

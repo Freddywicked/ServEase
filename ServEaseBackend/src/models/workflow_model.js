@@ -129,7 +129,17 @@ const latestPaymentForRequest = async (requestId) =>
   );
 
 // ---------- ratings ----------
-const addRating = async (row) => unwrap(await supabase.from('ratings').insert(row).select().single());
+// The sentiment column arrives with migration 006; databases that have not run
+// it yet reject the unknown column (PGRST204 / 42703). Retry without it so the
+// rating itself is never lost over the sentiment label.
+const addRating = async (row) => {
+  const { data, error } = await supabase.from('ratings').insert(row).select().single();
+  if (error && (error.code === 'PGRST204' || error.code === '42703') && 'sentiment' in row) {
+    const { sentiment, ...withoutSentiment } = row;
+    return unwrap(await supabase.from('ratings').insert(withoutSentiment).select().single());
+  }
+  return unwrap({ data, error });
+};
 
 const findRatingForRequest = async (requestId) =>
   unwrap(await supabase.from('ratings').select('*').eq('request_id', requestId).maybeSingle());

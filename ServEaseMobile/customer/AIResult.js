@@ -132,13 +132,17 @@ const AIResult = ({ navigation }) => {
                                 {isSaving ? (
                                     <ActivityIndicator color="#FFFFFF" />
                                 ) : (
-                                    <Text style={styles.actionButtonText}>Yes, solved</Text>
+                                    <Text style={styles.actionButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                                        Yes, solved
+                                    </Text>
                                 )}
                             </LinearGradient>
                         </TouchableOpacity>
                         <TouchableOpacity style={styles.actionButtonHalf} onPress={handleFindServiceProviders} disabled={isSaving}>
                             <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.actionButton}>
-                                <Text style={styles.actionButtonText}>Find Service Providers</Text>
+                                <Text style={styles.actionButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                                    Find Service Providers
+                                </Text>
                             </LinearGradient>
                         </TouchableOpacity>
                     </View>
@@ -316,13 +320,15 @@ const styles = StyleSheet.create({
         marginHorizontal: 4,
     },
     actionButton: {
+        // Fixed height + single-line text: both buttons are always the same size.
+        height: 48,
         borderRadius: 12,
-        paddingVertical: 15,
+        paddingHorizontal: 6,
         alignItems: 'center',
         justifyContent: 'center',
     },
     actionButtonText: {
-        fontSize: 14,
+        fontSize: 12,
         color: '#FFFFFF',
         fontWeight: '700',
         textAlign: 'center',

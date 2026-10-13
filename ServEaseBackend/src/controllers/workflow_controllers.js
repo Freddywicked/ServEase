@@ -23,6 +23,7 @@ const Request = require('../models/servicerequest_model');
 const Workflow = require('../models/workflow_model');
 const Provider = require('../models/provider_model');
 const { getProviderFileUrl } = require('../utils/storage');
+const { analyzeSentiment } = require('../utils/ai_sentiment');
 
 // The stage list the provider's Jobs screen offers; also the customer's timeline.
 const JOB_STAGES = ['Assessing', 'Repairing', 'Quality Check', 'Completed'];
@@ -137,15 +138,18 @@ const getTracking = asyncHandler(async (req, res) => {
   const rows = await Request.listForCustomer(req.user.user_id);
   const requestIds = rows.map((r) => r.request_id);
 
-  // NOTE: payments are intentionally NOT fetched here — no tracking card uses them,
-  // and a payments-table problem must never blank out the whole Track screen.
-  const [recipientLists, quotationLists, proposals, paymentRequests, progressRows] =
+  // The completed card's finalAmount is the REMAINING balance (total minus everything the
+  // customer already paid — the 20% initial fee and any additional payments paid up front),
+  // so this needs the payments table. A payments-table problem must still never blank out
+  // the whole Track screen, so that fetch falls back to an empty list.
+  const [recipientLists, quotationLists, proposals, paymentRequests, progressRows, paymentRows] =
     await Promise.all([
       Promise.all(rows.map((r) => Request.listRecipients(r.request_id))),
       Promise.all(rows.map((r) => Request.listQuotations(r.request_id))),
       Workflow.listScheduleProposals(requestIds),
       Workflow.listPaymentRequests(requestIds),
       Workflow.listProgressUpdates(requestIds),
+      Workflow.listPayments(requestIds).catch(() => []),
     ]);
 
   const providerIds = [
@@ -175,6 +179,12 @@ const getTracking = asyncHandler(async (req, res) => {
     const approvedExtras = my(paymentRequests)
       .filter((p) => p.status === 'approved')
       .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    // Everything the customer has already paid (initial fee + additional payments +
+    // any earlier final-payment attempt) counts towards the remaining balance.
+    const paidTotal = my(paymentRows)
+      .filter((p) => p.status === 'paid')
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const round2 = (n) => Math.round(n * 100) / 100;
     const ai = row.ai_diagnosis?.status === 'done' ? row.ai_diagnosis : null;
 
     if (row.request_status === 'Pending') {
@@ -253,7 +263,10 @@ const getTracking = asyncHandler(async (req, res) => {
         id: cardId('completed'),
         cardType: 'completed',
         statusLabel: 'Completed',
-        finalAmount: quoteTotal + approvedExtras,
+        // Remaining balance, not the grand total: the 20% initial fee is already paid,
+        // and so is any additional payment the customer chose to pay right away instead
+        // of "Pay Later" (pay-later extras stay in approvedExtras, so they are added here).
+        finalAmount: round2(Math.max(0, quoteTotal + approvedExtras - paidTotal)),
         timeline,
       });
       return;
@@ -435,14 +448,20 @@ const payForRequest = asyncHandler(async (req, res) => {
 
   // ---- PayMongo Checkout Session ----
   const payment = await Workflow.addPayment({ request_id: row.request_id, amount, method, stage, status: 'pending' });
+  // Tag the return URLs with the calling app so /api/payments/return knows where to send
+  // the customer afterwards: browsers always send an Origin header (web app), React Native
+  // does not (mobile app -> deep link back into it).
+  const client = req.headers.origin ? 'web' : 'mobile';
+  const returnUrl = (status) =>
+    `${config.baseUrl}/api/payments/return?status=${status}&ref=${payment.payment_id}&client=${client}`;
   try {
     const session = await paymongo.createCheckoutSession({
       amount,
       method,
       description: `ServEase ${refOf(row)} — ${stage === 'initial' ? 'initial fee' : stage === 'additional' ? 'additional payment' : 'service payment'}`,
       referenceNumber: payment.payment_id, // the webhook finds our row through this
-      successUrl: `${config.baseUrl}/api/payments/return?status=success&ref=${payment.payment_id}`,
-      cancelUrl: `${config.baseUrl}/api/payments/return?status=cancelled&ref=${payment.payment_id}`,
+      successUrl: returnUrl('success'),
+      cancelUrl: returnUrl('cancelled'),
     });
     await Workflow.updatePayment(payment.payment_id, { checkout_session_id: session.id });
     return res.status(201).json({
@@ -617,16 +636,42 @@ const paymongoWebhook = asyncHandler(async (req, res) => {
   res.json({ received: true });
 });
 
-// GET /api/payments/return — the browser lands here after PayMongo checkout.
+// GET /api/payments/return — the browser lands here after PayMongo checkout
+// (the "Return to Merchant" button). Web checkouts (client=web) are redirected
+// straight back to the web app's Track screen; mobile checkouts get a page that
+// re-opens the app on its Track screen through the servease://payment-return
+// deep link (mapped in App.js).
 const paymentReturn = (req, res) => {
   const ok = req.query.status === 'success';
+  const status = ok ? 'success' : 'cancelled';
+  const ref = String(req.query.ref || '');
+  const webOrigin = config.clientOrigin.split(',')[0].trim().replace(/\/+$/, '');
+  const webTrackUrl = `${webOrigin}/customer/requests?payment=${status}`;
+
+  if (req.query.client === 'web') {
+    return res.redirect(webTrackUrl);
+  }
+
+  const suffix = `status=${status}${ref ? `&ref=${encodeURIComponent(ref)}` : ''}`;
+  const deepLink = `servease://payment-return?${suffix}`;
+  // Android Chrome ignores JS-fired custom schemes without a user gesture; the
+  // intent:// form (with the app's package name) is the reliable one there.
+  const intentUrl = `intent://payment-return?${suffix}#Intent;scheme=servease;package=com.serveasemobile;end`;
+
   res.send(
     `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">` +
       `<body style="font-family:sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;background:#f4f7fb">` +
       `<div style="text-align:center;padding:24px">` +
       `<h1 style="color:#1B2A8C">${ok ? 'Payment submitted' : 'Payment cancelled'}</h1>` +
-      `<p>${ok ? 'You can now return to the ServEase app — your receipt will appear in a moment.' : 'No charge was made. Return to the ServEase app to try again.'}</p>` +
-      `</div></body>`
+      `<p>${ok ? 'Your receipt will appear in the app in a moment.' : 'No charge was made. You can try again from the app.'}</p>` +
+      `<a href="${deepLink}" style="display:inline-block;margin-top:12px;padding:12px 28px;border-radius:20px;background:#0255AF;color:#ffffff;text-decoration:none;font-weight:700">Return to ServEase</a>` +
+      `<p style="margin-top:16px"><a href="${webTrackUrl}" style="color:#0255AF;font-size:13px">Using ServEase on the web? Continue to your requests</a></p>` +
+      `</div>` +
+      `<script>` +
+      `var isAndroid=/Android/i.test(navigator.userAgent);` +
+      `window.location.replace(isAndroid?${JSON.stringify(intentUrl)}:${JSON.stringify(deepLink)});` +
+      `</script>` +
+      `</body>`
   );
 };
 
@@ -646,12 +691,16 @@ const rateRequest = asyncHandler(async (req, res) => {
   const providerId = pickProviderId(row, recipients);
   if (!providerId) throw new ApiError(409, 'This request has no provider to rate');
 
+  // AI sentiment (Gemini, or the keyword fallback without an AI key) is stored
+  // with the rating so the provider profile can summarize customer satisfaction.
+  const sentiment = await analyzeSentiment({ rating, review });
   const saved = await Workflow.addRating({
     request_id: row.request_id,
     provider_id: providerId,
     customer_id: req.user.user_id,
     rating,
     review: review || null,
+    sentiment,
   });
   await Workflow.notify({
     userId: providerId,
@@ -659,7 +708,8 @@ const rateRequest = asyncHandler(async (req, res) => {
     message: `${await customerNameOf(row)} rated you ${rating}/5 for ${refOf(row)}.`,
     requestId: row.request_id,
   });
-  res.status(201).json({ rating: { id: saved.rating_id, rating, review } });
+  // rating_id only exists once migration 006 has run; older tables return no id.
+  res.status(201).json({ rating: { id: saved.rating_id || null, rating, review, sentiment } });
 });
 
 // ============================ PROVIDER ACTIONS ============================
@@ -1249,11 +1299,32 @@ const currentCalendarSlot = () => {
   };
 };
 
-// Ids of the providers who marked the current date/hour unavailable.
+// The bookable slots of one calendar day, matching each provider dashboard's
+// TIME_SLOTS (web: 8-11 AM + 1-4 PM; mobile: 9 AM-5 PM). Blocking every slot of
+// either list is how a provider marks the whole day unavailable on the calendar.
+const WEB_DAY_SLOTS = ['08:00', '09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00'];
+const MOBILE_DAY_SLOTS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+const isWholeDayBlocked = (slots) =>
+  WEB_DAY_SLOTS.every((s) => slots.has(s)) || MOBILE_DAY_SLOTS.every((s) => slots.has(s));
+
+// Ids of the providers unavailable right now: they marked the current date/hour
+// slot unavailable, OR they blocked the whole of today on the calendar (the
+// dashboards' "Unavailable (all day)" state) — which keeps them out of the
+// customer Find screen's Available tab for the entire day, not just the hour
+// that happens to be current.
 const unavailableProviderIds = async (providerIds) => {
   const { date, slot } = currentCalendarSlot();
   const rows = await Workflow.listUnavailableSlotsFor(providerIds, date);
-  return new Set(rows.filter((r) => r.slot === slot).map((r) => r.provider_id));
+  const blockedByProvider = new Map();
+  rows.forEach((r) => {
+    if (!blockedByProvider.has(r.provider_id)) blockedByProvider.set(r.provider_id, new Set());
+    blockedByProvider.get(r.provider_id).add(r.slot);
+  });
+  const unavailable = new Set();
+  blockedByProvider.forEach((slots, providerId) => {
+    if (slots.has(slot) || isWholeDayBlocked(slots)) unavailable.add(providerId);
+  });
+  return unavailable;
 };
 
 // Reviewer privacy: only the first letter (and the last two of longer words)
@@ -1266,11 +1337,16 @@ const maskNamePart = (part) => {
 const maskReviewerName = (name) =>
   String(name || 'Customer').trim().split(/\s+/).map(maskNamePart).join(' ');
 
-// Chips under "AI Summary Insights": mined from what reviewers actually wrote,
-// falling back to the provider's stats when there are no comments to mine yet.
+// Chips under "AI Summary Insights": mined from what reviewers actually wrote
+// plus the AI sentiment label stored with each rating, falling back to the
+// provider's stats when there are no comments to mine yet.
 const deriveSummaryTags = (reviews, { rating, experienceYears }) => {
   const text = reviews.map((r) => (r.comment || '').toLowerCase()).join(' ');
   const tags = [];
+  const analyzed = reviews.filter((r) => r.sentiment);
+  if (analyzed.length > 0 && analyzed.filter((r) => r.sentiment === 'positive').length / analyzed.length >= 0.7) {
+    tags.push('Positive Reviews');
+  }
   if (/profession/.test(text)) tags.push('Professional');
   if (/on time|punctual|prompt/.test(text)) tags.push('Always on Time');
   if (/clean|neat|tidy/.test(text)) tags.push('Clean Work');
@@ -1370,6 +1446,21 @@ const getProviderDetails = asyncHandler(async (req, res) => {
     ? Math.round((values.filter((n) => n >= 4).length / reviewCount) * 100)
     : null;
 
+  // AI sentiment breakdown of the reviews that have a label (migration 006).
+  // Percentages over the analyzed reviews only, so unlabeled ones don't skew it.
+  const sentimentCounts = { positive: 0, neutral: 0, negative: 0 };
+  reviews.forEach((r) => {
+    if (Object.prototype.hasOwnProperty.call(sentimentCounts, r.sentiment)) sentimentCounts[r.sentiment] += 1;
+  });
+  const analyzedCount = sentimentCounts.positive + sentimentCounts.neutral + sentimentCounts.negative;
+  const sentimentSummary = analyzedCount
+    ? {
+        positive: Math.round((sentimentCounts.positive / analyzedCount) * 100),
+        neutral: Math.round((sentimentCounts.neutral / analyzedCount) * 100),
+        negative: Math.round((sentimentCounts.negative / analyzedCount) * 100),
+      }
+    : null;
+
   res.json({
     provider: {
       id: p.user_id,
@@ -1387,6 +1478,7 @@ const getProviderDetails = asyncHandler(async (req, res) => {
       rating,
       reviewCount,
       positiveFeedbackPercent,
+      sentimentSummary,
       aiSummaryTags: deriveSummaryTags(reviews, { rating, experienceYears: p.years_of_experience }),
       reviews: reviews.map((r) => ({ ...r, reviewerName: maskReviewerName(r.reviewerName) })),
     },

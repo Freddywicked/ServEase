@@ -44,6 +44,18 @@ const Stack = createNativeStackNavigator();
 // Lets the navbar (rendered outside the stack) navigate and know the focused screen.
 const navigationRef = createNavigationContainerRef();
 
+// Deep links into the app. 'payment-return' is where the backend's PayMongo return
+// page (servease://payment-return?status=...) sends the customer after checkout —
+// it opens the Track screen, where the paid request and its receipt now show.
+const linking = {
+  prefixes: ['servease://'],
+  config: {
+    screens: {
+      Track: 'payment-return',
+    },
+  },
+};
+
 const App = () => {
   const [routeName, setRouteName] = useState();
   const syncRoute = () => setRouteName(navigationRef.getCurrentRoute()?.name);
@@ -54,7 +66,7 @@ const App = () => {
         status bar) can draw white icons on white, so the clock/battery look missing. */}
     <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
     <AuthProvider>
-    <NavigationContainer ref={navigationRef} onReady={syncRoute} onStateChange={syncRoute}>
+    <NavigationContainer ref={navigationRef} linking={linking} onReady={syncRoute} onStateChange={syncRoute}>
     <View style={{ flex: 1 }}>
     <View style={{ flex: 1 }}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet, Animated, Easing } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
@@ -36,9 +36,13 @@ const AIDiagnosis = ({ navigation }) => {
     const setDraft = useServiceRequestDraftStore((state) => state.setDraft);
     const [status, setStatus] = useState('choice'); // 'choice' | 'loading' | 'failed'
     const [failureMessage, setFailureMessage] = useState('');
-    // 0 = the customer hasn't chosen "Use AI Diagnosis" yet. Each increment starts one AI run.
-    const [attempt, setAttempt] = useState(0);
     const spinValue = useRef(new Animated.Value(0)).current;
+    const abortRef = useRef(null);
+
+    // Cancel any in-flight AI call when the screen goes away (close button, navigating on, unmount).
+    useEffect(() => () => {
+        if (abortRef.current) abortRef.current.abort();
+    }, []);
 
     useEffect(() => {
         if (status !== 'loading') {
@@ -57,48 +61,39 @@ const AIDiagnosis = ({ navigation }) => {
         return () => spinAnimation.stop();
     }, [status, spinValue]);
 
-    useEffect(() => {
-        // Nothing to run until the customer taps "Use AI Diagnosis".
-        if (attempt === 0) {
-            return undefined;
-        }
-
-        let cancelled = false;
+    // The AI call is started ONLY from a button press (never from an effect), so opening this
+    // screen — or a Fast Refresh / re-render — can never start a diagnosis by itself.
+    const runDiagnosis = useCallback(async () => {
+        if (abortRef.current) abortRef.current.abort();
         const controller = new AbortController();
+        abortRef.current = controller;
+        setFailureMessage('');
         setStatus('loading');
 
-        const runDiagnosis = async () => {
-            try {
-                // getState() so this effect only re-runs on a new attempt, not on every draft change.
-                const draft = useServiceRequestDraftStore.getState();
-                const diagnosis = await diagnoseServiceRequest(draft, { signal: controller.signal });
-                if (cancelled) return;
+        try {
+            // getState() reads the latest draft without subscribing this screen to every change.
+            const draft = useServiceRequestDraftStore.getState();
+            const diagnosis = await diagnoseServiceRequest(draft, { signal: controller.signal });
+            if (controller.signal.aborted) return;
 
-                // A low-confidence diagnosis is still a diagnosis — show it (AIResult
-                // displays a "low confidence" note) instead of dead-ending the customer
-                // on an error screen. Only a missing/empty result counts as a failure.
-                if (!diagnosis || !diagnosis.probableCause) {
-                    setDraft({ aiDiagnosis: null });
-                    setFailureMessage("We couldn't reach a confident diagnosis for this one.");
-                    setStatus('failed');
-                    return;
-                }
-                setDraft({ aiDiagnosis: diagnosis });
-                navigation.replace(ROUTES.AI_RESULT);
-            } catch (error) {
-                if (cancelled) return;
+            // A low-confidence diagnosis is still a diagnosis — show it (AIResult
+            // displays a "low confidence" note) instead of dead-ending the customer
+            // on an error screen. Only a missing/empty result counts as a failure.
+            if (!diagnosis || !diagnosis.probableCause) {
                 setDraft({ aiDiagnosis: null });
-                setFailureMessage(error.message);
+                setFailureMessage("We couldn't reach a confident diagnosis for this one.");
                 setStatus('failed');
+                return;
             }
-        };
-
-        runDiagnosis();
-        return () => {
-            cancelled = true;
-            controller.abort();
-        };
-    }, [attempt, navigation, setDraft]);
+            setDraft({ aiDiagnosis: diagnosis });
+            navigation.replace(ROUTES.AI_RESULT);
+        } catch (error) {
+            if (controller.signal.aborted) return;
+            setDraft({ aiDiagnosis: null });
+            setFailureMessage(error.message);
+            setStatus('failed');
+        }
+    }, [navigation, setDraft]);
 
     const spin = spinValue.interpolate({
         inputRange: [0, 1],
@@ -111,7 +106,7 @@ const AIDiagnosis = ({ navigation }) => {
 
     // Starts a run (first time from the choice screen, or again after a failure).
     const handleUseAI = () => {
-        setAttempt((count) => count + 1);
+        runDiagnosis();
     };
 
     // From the choice screen: navigate (not replace) so Back from the providers

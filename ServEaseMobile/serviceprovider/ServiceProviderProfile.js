@@ -3,6 +3,7 @@ import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } fr
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth, VERIFIED_STATUS } from '../context/auth_context';
 import { getProviderProfile, setActiveMode } from '../api/client';
+import { getServiceProviderDetails } from '../api/servicerequest_api';
 
 // Specializations are saved as one list (categories + chosen services); these
 // are the category names, used to pick the provider's role line.
@@ -24,6 +25,11 @@ const ServiceProviderProfile = ({ navigation }) => {
     const { user, provider, refreshUser, signOut } = useAuth();
     const [profile, setProfile] = useState(null);
     const [switching, setSwitching] = useState(false);
+    // Ratings / reviews / AI sentiment summary for THIS provider:
+    //   { positiveFeedbackPercent, rating, reviewCount, aiSummaryTags: [],
+    //     reviews: [{ id, reviewerName (masked), rating, serviceAvailed, comment }] }
+    // null = not loaded / nothing to show.
+    const [feedback, setFeedback] = useState(null);
 
     const isVerified = provider?.verification_status === VERIFIED_STATUS;
     const specializations = profile?.specializations || [];
@@ -46,9 +52,33 @@ const ServiceProviderProfile = ({ navigation }) => {
         }
     }, []);
 
+    // The feedback summary is the same GET /service-providers/:id data the
+    // customer's ProviderDetails screen shows, fetched for this provider's own
+    // id. Only verified providers have a public profile (the endpoint 404s
+    // otherwise), and any failure just means "no feedback to show".
+    const loadFeedback = useCallback(async () => {
+        if (!isVerified || !user?.user_id) {
+            setFeedback(null);
+            return;
+        }
+        try {
+            const details = await getServiceProviderDetails(user.user_id);
+            setFeedback({
+                positiveFeedbackPercent: details?.positiveFeedbackPercent ?? null,
+                rating: details?.rating ?? null,
+                reviewCount: details?.reviewCount ?? 0,
+                aiSummaryTags: details?.aiSummaryTags ?? [],
+                reviews: Array.isArray(details?.reviews) ? details.reviews : [],
+            });
+        } catch (error) {
+            // Non-fatal: keep the last known data (or none).
+        }
+    }, [isVerified, user?.user_id]);
+
     useEffect(() => {
         loadProfile();
-    }, [loadProfile]);
+        loadFeedback();
+    }, [loadProfile, loadFeedback]);
 
     // Keep the profile in sync with the backend whenever the screen is focused.
     useEffect(() => {
@@ -59,9 +89,10 @@ const ServiceProviderProfile = ({ navigation }) => {
                 // Non-fatal: keep showing the last known data.
             }
             loadProfile();
+            loadFeedback();
         });
         return unsubscribe;
-    }, [navigation, refreshUser, loadProfile]);
+    }, [navigation, refreshUser, loadProfile, loadFeedback]);
 
 
     const handleEditProfile = () => {
@@ -174,9 +205,49 @@ const ServiceProviderProfile = ({ navigation }) => {
 
                 <View style={styles.aiSection}>
                     <Text style={styles.aiHeading}>AI Summary Insights</Text>
-                    {/* TODO: show feedback % and tags once a reviews/ratings API exists. */}
-                    <Text style={styles.aiFeedback}>No feedback yet</Text>
+                    <Text style={styles.aiFeedback}>
+                        {feedback?.positiveFeedbackPercent != null
+                            ? `${feedback.positiveFeedbackPercent}% Positive Feedback`
+                            : 'No feedback yet'}
+                    </Text>
+                    {(feedback?.aiSummaryTags || []).length > 0 && (
+                        <View style={styles.tagRow}>
+                            {feedback.aiSummaryTags.map((tag) => (
+                                <View key={tag} style={styles.tag}>
+                                    <Text style={styles.tagText}>{tag}</Text>
+                                </View>
+                            ))}
+                        </View>
+                    )}
+                    {feedback?.rating != null && (
+                        <View style={styles.ratingRow}>
+                            <Image source={require('../assets/icon_star.png')} style={styles.ratingStar} />
+                            <Text style={styles.ratingValue}>{feedback.rating}</Text>
+                            <Text style={styles.ratingCount}>
+                                {feedback.reviewCount} {feedback.reviewCount === 1 ? 'review' : 'reviews'}
+                            </Text>
+                        </View>
+                    )}
                 </View>
+
+                {(feedback?.reviews || []).length > 0 && (
+                    <View style={styles.reviewsBlock}>
+                        {feedback.reviews.slice(0, 3).map((review) => (
+                            <View key={review.id} style={styles.reviewCard}>
+                                <View style={styles.reviewHeader}>
+                                    <Text style={styles.reviewerName}>{review.reviewerName}</Text>
+                                    <Text style={styles.reviewRating}>{review.rating}/5</Text>
+                                </View>
+                                {!!review.serviceAvailed && (
+                                    <Text style={styles.reviewService}>{review.serviceAvailed}</Text>
+                                )}
+                                {!!review.comment && (
+                                    <Text style={styles.reviewComment}>{review.comment}</Text>
+                                )}
+                            </View>
+                        ))}
+                    </View>
+                )}
 
                 <View style={styles.menuList}>
                     <TouchableOpacity style={styles.menuItem} onPress={handleEditProfile}>
@@ -326,6 +397,65 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#444444',
         fontWeight: '600',
+    },
+    ratingRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 4,
+    },
+    ratingStar: {
+        width: 18,
+        height: 18,
+        resizeMode: 'contain',
+        marginRight: 6,
+    },
+    ratingValue: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#111111',
+    },
+    ratingCount: {
+        fontSize: 12,
+        color: '#666666',
+        marginLeft: 10,
+    },
+    reviewsBlock: {
+        marginBottom: 20,
+    },
+    reviewCard: {
+        borderWidth: 1,
+        borderColor: '#E0E0E0',
+        borderRadius: 10,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        marginBottom: 10,
+        backgroundColor: '#FFFFFF',
+    },
+    reviewHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 4,
+    },
+    reviewerName: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#222222',
+    },
+    reviewRating: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#B8860B',
+    },
+    reviewService: {
+        fontSize: 11,
+        color: '#777777',
+        marginBottom: 4,
+    },
+    reviewComment: {
+        fontSize: 12,
+        color: '#333333',
+        lineHeight: 17,
     },
     menuList: {
         marginTop: 4,

@@ -328,6 +328,13 @@ export const getServiceRequest = (requestId) => request(`/service-requests/${req
 export const payForServiceRequest = (requestId, { amount, method, stage }) =>
     request(`/service-requests/${requestId}/payment`, { method: 'POST', body: { amount, method, stage } });
 
+// Server-computed amounts per payment stage -> { total, paid, due: { initial, additional, final } }.
+// Payment.js reads the amount to charge from here instead of trusting the route param,
+// so the 20% initial fee and any already-paid additional payments are always deducted
+// ('final' is the remaining balance: total - everything already paid).
+export const getPaymentDue = (requestId) =>
+    request(`/service-requests/${requestId}/payment-due`);
+
 // The latest payment attempt's status ('pending' | 'paid' | 'failed'). The backend
 // re-checks PayMongo before answering, so polling this is the payment confirmation.
 export const getPaymentStatus = (requestId) =>

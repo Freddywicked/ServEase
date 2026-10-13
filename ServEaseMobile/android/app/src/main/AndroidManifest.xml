@@ -26,6 +26,15 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
+        <!-- Deep link back into the app after PayMongo checkout: the backend's
+             /api/payments/return page opens servease://payment-return?status=...,
+             which React Navigation (App.js linking config) maps to the Track screen. -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="servease" android:host="payment-return" />
+        </intent-filter>
       </activity>
     </application>
 </manifest>

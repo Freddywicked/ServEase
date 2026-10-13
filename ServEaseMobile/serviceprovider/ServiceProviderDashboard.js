@@ -14,9 +14,10 @@ import NotificationsModal from '../components/NotificationsModal';
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-// Bookable hourly slots, 9:00 AM through 5:00 PM. Change the range here.
+// Bookable hourly slots, 9:00 AM through 4:00 PM (working hours end at 5:00 PM, so the
+// last slot starts at 4:00 PM). Change the range here.
 const FIRST_HOUR = 9;
-const LAST_HOUR = 17;
+const LAST_HOUR = 16;
 const TIME_SLOTS = Array.from({ length: LAST_HOUR - FIRST_HOUR + 1 }, (_, index) => {
     const hour = FIRST_HOUR + index;
     const suffix = hour >= 12 ? 'PM' : 'AM';
@@ -414,7 +415,8 @@ const ServiceProviderDashboard = ({ navigation }) => {
                                 }
                                 const key = toDateKey(date);
                                 const isPast = key < todayKey;
-                                const blockedCount = unavailableSlots.filter((slot) => slot.startsWith(`${key}T`)).length;
+                                // Count only slots that still exist, so a stale 5:00 PM entry can't mark a day as fully blocked.
+                                const blockedCount = TIME_SLOTS.filter((slot) => unavailableSlots.includes(`${key}T${slot.value}`)).length;
                                 const isUnavailable = blockedCount >= TIME_SLOTS.length;
                                 const isPartial = blockedCount > 0 && !isUnavailable;
                                 const isSelected = key === selectedDate;

@@ -39,11 +39,13 @@ const Ratings = ({ navigation, route }) => {
             navigation.navigate('Track');
         } catch (error) {
             setIsSending(false);
-            // 409 = already rated — just move on.
-            if (error.status === 409) {
+            // 409 "already rated" = the review IS saved — just move on. Every other
+            // failure must be shown: silently navigating away makes a lost review
+            // look like it was sent (and it never reaches the provider's profile).
+            if (error.status === 409 && /already rated/i.test(error.message || '')) {
                 navigation.navigate('Track');
             } else {
-                Alert.alert('Could not send your review', error.message);
+                Alert.alert('Could not send your review', error.message || 'Please try again.');
             }
         }
     };

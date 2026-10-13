@@ -119,6 +119,10 @@ CREATE TABLE IF NOT EXISTS public.ratings (
   customer_id uuid NOT NULL,
   rating integer NOT NULL CHECK (rating BETWEEN 1 AND 5),
   review text,
+  -- AI sentiment label of the review ('positive' | 'neutral' | 'negative'),
+  -- written by utils/ai_sentiment.js. On databases created before this column
+  -- existed, migration 006 adds it.
+  sentiment text,
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT ratings_pkey PRIMARY KEY (rating_id),
   CONSTRAINT ratings_request_id_key UNIQUE (request_id), -- one rating per request

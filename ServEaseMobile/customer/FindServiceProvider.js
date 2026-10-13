@@ -27,7 +27,10 @@ const STATIC_FILTERS = [
  *                                 available  true when the "Available" chip is selected
  *                                 sort       'rating' when the "Top-rated" chip is selected
  *
- * Every change to the search text or the selected chip re-fetches from the backend.
+ * Every change to the search text or the selected chip re-fetches from the backend,
+ * and the list also re-fetches when the screen regains focus — so a provider who
+ * marked the day unavailable on their calendar stops showing in the Available tab
+ * (the backend flags whole-day-blocked providers as available: false).
  * ========================================================================== */
 
 const FindServiceProvider = ({ navigation }) => {
@@ -89,6 +92,22 @@ const FindServiceProvider = ({ navigation }) => {
         );
         return () => clearTimeout(timer);
     }, [selectedFilter, searchQuery, loadProviders]);
+
+    // Re-fetch when the screen comes back into focus, so a provider who marked
+    // today unavailable on their calendar drops out of the Available tab without
+    // the customer having to retype the search or re-tap a chip. The first focus
+    // is skipped — the effect above already loads on mount.
+    const skipFirstFocus = useRef(true);
+    useEffect(() => {
+        const unsubscribe = navigation.addListener('focus', () => {
+            if (skipFirstFocus.current) {
+                skipFirstFocus.current = false;
+                return;
+            }
+            loadProviders(selectedFilter, searchQuery);
+        });
+        return unsubscribe;
+    }, [navigation, loadProviders, selectedFilter, searchQuery]);
 
     const handleProviderPress = (provider) => {
         // `provider` is passed along so the details screen can show the basics instantly

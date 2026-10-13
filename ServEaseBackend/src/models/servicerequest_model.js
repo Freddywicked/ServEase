@@ -226,9 +226,13 @@ const findVerifiedProviderById = async (userId) => {
 // yet", never a failed request. Reviewer names are returned raw — the controller
 // masks them before they leave the server.
 const listReviewsForProvider = async (providerId) => {
+  // select('*') on purpose: ratings tables created before migration 006 have no
+  // rating_id column, and naming a missing column fails the whole query in
+  // PostgREST — which, combined with the error tolerance below, used to make
+  // every provider profile show "no reviews yet" even when ratings existed.
   const { data, error } = await supabase
     .from('ratings')
-    .select('rating_id, request_id, customer_id, rating, review, created_at')
+    .select('*')
     .eq('provider_id', providerId)
     .order('created_at', { ascending: false });
   if (error || !data || data.length === 0) return [];
@@ -240,10 +244,11 @@ const listReviewsForProvider = async (providerId) => {
   const categoryByRequest = Object.fromEntries(requests.map((r) => [r.request_id, r.category]));
 
   return data.map((row) => ({
-    id: row.rating_id,
+    id: row.rating_id || row.id || row.request_id,
     reviewerName: users[row.customer_id]?.name || 'Customer',
     rating: row.rating,
     comment: row.review || '',
+    sentiment: row.sentiment || null, // 'positive' | 'neutral' | 'negative' (migration 006)
     serviceAvailed: categoryByRequest[row.request_id] || null,
     createdAt: row.created_at,
   }));
