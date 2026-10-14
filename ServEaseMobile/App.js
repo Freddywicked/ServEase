@@ -45,8 +45,9 @@ const Stack = createNativeStackNavigator();
 const navigationRef = createNavigationContainerRef();
 
 // Deep links into the app. 'payment-return' is where the backend's PayMongo return
-// page (servease://payment-return?status=...) sends the customer after checkout —
-// it opens the Track screen, where the paid request and its receipt now show.
+// page (servease://payment-return?status=...&tab=...) sends the customer after
+// checkout — it opens the Track screen (query params arrive as route params, and
+// `tab` pre-selects the tab: a completed final payment lands on Done).
 const linking = {
   prefixes: ['servease://'],
   config: {

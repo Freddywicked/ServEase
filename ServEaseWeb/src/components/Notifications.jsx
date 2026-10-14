@@ -162,6 +162,24 @@ export function useNotifications(viewer = 'customer') {
     reload();
   }, [reload]);
 
+  // Poll so new notifications (e.g. a customer just sent a request) show up on
+  // the bell without waiting for the user to open the popup. Paused while the
+  // tab is hidden to save requests; refetches the moment the tab regains focus.
+  useEffect(() => {
+    const POLL_MS = 30000;
+    const tick = () => {
+      if (document.visibilityState === 'visible') reload();
+    };
+    const interval = setInterval(tick, POLL_MS);
+    window.addEventListener('focus', reload);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', reload);
+      document.removeEventListener('visibilitychange', tick);
+    };
+  }, [reload]);
+
   const openNotification = (notification) => {
     setNotifications((prev) =>
       prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n))

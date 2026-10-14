@@ -74,7 +74,7 @@ const getSearchableText = (request) =>
         .join(' ')
         .toLowerCase();
 
-const Track = ({ navigation }) => {
+const Track = ({ navigation, route }) => {
     const [selectedStatus, setSelectedStatus] = useState(STATUS_FILTERS[0]);
     const [searchQuery, setSearchQuery] = useState('');
     const [groups, setGroups] = useState(null); // null until the first load finishes
@@ -103,10 +103,19 @@ const Track = ({ navigation }) => {
     }, []);
 
     // Reload every time the customer comes back to this tab (e.g. after sending a request).
+    // A `tab` route param (from the PayMongo return deep link, the Payment screen or
+    // Ratings) pre-selects the tab that matches what just happened — a completed
+    // final payment opens Done — and is consumed so it doesn't stick afterwards.
     useFocusEffect(
         useCallback(() => {
+            const tabKey = route?.params?.tab;
+            const target = STATUS_FILTERS.find((filter) => filter.key === tabKey);
+            if (target) {
+                setSelectedStatus(target);
+                navigation.setParams({ tab: undefined });
+            }
             loadTracking();
-        }, [loadTracking]),
+        }, [loadTracking, navigation, route?.params?.tab]),
     );
 
     // ---------------------------------------------------------------------
@@ -360,11 +369,11 @@ const Track = ({ navigation }) => {
                 <Text style={styles.reasonText}>{request.reason}</Text>
 
                 <View style={styles.actionRow}>
-                    <TouchableOpacity style={[styles.actionButton, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleAcceptSchedule(request)}>
-                        <Text style={styles.actionButtonText}>Accept</Text>
+                    <TouchableOpacity style={[styles.actionButton, styles.actionButtonAccept, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleAcceptSchedule(request)}>
+                        <Text style={[styles.actionButtonText, styles.actionButtonTextLight]}>Accept</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.actionButton, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleRejectSchedule(request)}>
-                        <Text style={styles.actionButtonText}>Reject</Text>
+                    <TouchableOpacity style={[styles.actionButton, styles.actionButtonReject, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleRejectSchedule(request)}>
+                        <Text style={[styles.actionButtonText, styles.actionButtonTextLight]}>Reject</Text>
                     </TouchableOpacity>
                 </View>
             </View>
@@ -412,11 +421,11 @@ const Track = ({ navigation }) => {
                 </View>
 
                 <View style={styles.actionRow}>
-                    <TouchableOpacity style={[styles.actionButton, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleApprovePayment(request)}>
-                        <Text style={styles.actionButtonText}>Approve</Text>
+                    <TouchableOpacity style={[styles.actionButton, styles.actionButtonAccept, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleApprovePayment(request)}>
+                        <Text style={[styles.actionButtonText, styles.actionButtonTextLight]}>Approve</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.actionButton, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleRejectPayment(request)}>
-                        <Text style={styles.actionButtonText}>Reject</Text>
+                    <TouchableOpacity style={[styles.actionButton, styles.actionButtonReject, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleRejectPayment(request)}>
+                        <Text style={[styles.actionButtonText, styles.actionButtonTextLight]}>Reject</Text>
                     </TouchableOpacity>
                 </View>
 
@@ -450,7 +459,12 @@ const Track = ({ navigation }) => {
 
     const renderDeclinedCard = (request) => (
         <View key={request.id} style={styles.requestCard}>
-            <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
+            <View style={styles.cardTopRow}>
+                <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
+                <View style={styles.badgeDeclined}>
+                    <Text style={styles.badgeDeclinedText}>Declined</Text>
+                </View>
+            </View>
             <Text style={styles.sentToLine}>{request.providerName} declined this request.</Text>
             {!!request.reason && (
                 <>
@@ -754,6 +768,18 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: '#FFFFFF',
     },
+    badgeDeclined: {
+        backgroundColor: '#DA5555',
+        borderRadius: 14,
+        paddingHorizontal: 12,
+        paddingVertical: 5,
+        marginBottom: 4,
+    },
+    badgeDeclinedText: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: '#FFFFFF',
+    },
     badgeBlue: {
         backgroundColor: '#5C7CC9',
         borderRadius: 14,
@@ -840,6 +866,17 @@ const styles = StyleSheet.create({
         fontSize: 13,
         color: '#333333',
         fontWeight: '700',
+    },
+    actionButtonAccept: {
+        backgroundColor: '#167713',
+        borderColor: '#167713',
+    },
+    actionButtonReject: {
+        backgroundColor: '#C62828',
+        borderColor: '#C62828',
+    },
+    actionButtonTextLight: {
+        color: '#FFFFFF',
     },
     paymentNotice: {
         flexDirection: 'row',

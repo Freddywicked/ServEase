@@ -2,7 +2,6 @@ import React, { useState, useCallback, useRef } from 'react';
 import { View, Image, Text, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl, Alert, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import LinearGradient from 'react-native-linear-gradient';
 import { ROUTES } from '../navigation/routes';
 import { getIncomingRequests, acceptServiceRequest } from '../api/servicerequest_api';
 import { formatShortDate, formatAiSuggestion } from '../utils/formatters';
@@ -178,19 +177,13 @@ const IncomingServiceRequest = ({ navigation }) => {
                                 onPress={() => handleApproveRequest(item.id)}
                                 disabled={approvingId !== null}
                                 activeOpacity={0.85}
+                                style={[styles.approveButton, approvingId !== null && !isApproving && styles.approveButtonDisabled]}
                             >
-                                <LinearGradient
-                                    colors={['#0255AF', '#04A5A5']}
-                                    start={{ x: 0, y: 0 }}
-                                    end={{ x: 1, y: 0 }}
-                                    style={[styles.approveButton, approvingId !== null && !isApproving && styles.approveButtonDisabled]}
-                                >
-                                    {isApproving ? (
-                                        <ActivityIndicator color="#FFFFFF" />
-                                    ) : (
-                                        <Text style={styles.approveButtonText}>Approve</Text>
-                                    )}
-                                </LinearGradient>
+                                {isApproving ? (
+                                    <ActivityIndicator color="#FFFFFF" />
+                                ) : (
+                                    <Text style={styles.approveButtonText}>Approve</Text>
+                                )}
                             </TouchableOpacity>
                         ) : null}
                     </View>
@@ -353,6 +346,7 @@ const styles = StyleSheet.create({
         color: '#333333',
     },
     approveButton: {
+        backgroundColor: '#167713',
         borderRadius: 20,
         paddingVertical: 10,
         paddingHorizontal: 24,

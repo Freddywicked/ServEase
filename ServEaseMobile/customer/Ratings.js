@@ -26,7 +26,7 @@ const Ratings = ({ navigation, route }) => {
     const handleSendReview = async () => {
         if (isSending) return;
         if (!requestId) {
-            navigation.navigate('Track');
+            navigation.navigate('Track', { tab: 'done' });
             return;
         }
         if (rating === 0) {
@@ -36,14 +36,15 @@ const Ratings = ({ navigation, route }) => {
         setIsSending(true);
         try {
             await rateServiceRequest(requestId, { rating, review: reviewText.trim() });
-            navigation.navigate('Track');
+            // The job is paid and done — land on Track's Done tab.
+            navigation.navigate('Track', { tab: 'done' });
         } catch (error) {
             setIsSending(false);
             // 409 "already rated" = the review IS saved — just move on. Every other
             // failure must be shown: silently navigating away makes a lost review
             // look like it was sent (and it never reaches the provider's profile).
             if (error.status === 409 && /already rated/i.test(error.message || '')) {
-                navigation.navigate('Track');
+                navigation.navigate('Track', { tab: 'done' });
             } else {
                 Alert.alert('Could not send your review', error.message || 'Please try again.');
             }

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, ActivityIndicator, Alert, StyleSheet, Animated, Easing } from 'react-native';
+import { View, Image, Text, TouchableOpacity, ScrollView, Modal, ActivityIndicator, Alert, StyleSheet, Animated, Easing } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { ROUTES } from '../navigation/routes';
@@ -26,6 +26,11 @@ import { getRecommendedProviders, createServiceRequest } from '../api/servicereq
  *            returns only matched providers; once every match has been seen it starts
  *            again from the best match instead of falling back to other categories.
  *
+ *   Empty    When no provider can take the preferred schedule, the "Please choose another
+ *   state    date and time." link opens the same Preferred Appointment calendar modal used in
+ *            CreateServiceRequest.js. Confirming it updates draft.preferredDate /
+ *            draft.preferredTime and re-runs the provider search for the new schedule.
+ *
  *   Request  POST /service-requests with the full draft (category, description, photo URL,
  *   Quotation  lat/long, preferred date/time, ai_diagnosis) + the chosen providerId. The
  *            backend creates the SERVICE_REQUEST ('pending_quotation') and — on the
@@ -35,6 +40,43 @@ import { getRecommendedProviders, createServiceRequest } from '../api/servicereq
  * ========================================================================== */
 
 const CURRENT_STEP = 3;
+
+// --- Preferred-appointment picker (same slots/format as CreateServiceRequest.js) -----------
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+// Hourly from 9:00 AM to 4:00 PM (working hours end at 5:00 PM). Keep in step with
+// APPOINTMENT_TIME_SLOTS in CreateServiceRequest.js.
+const APPOINTMENT_START_HOUR = 9;
+const APPOINTMENT_END_HOUR = 16;
+const formatSlotLabel = (hour24) => `${hour24 % 12 === 0 ? 12 : hour24 % 12}:00 ${hour24 >= 12 ? 'PM' : 'AM'}`;
+const APPOINTMENT_TIME_SLOTS = Array.from(
+    { length: APPOINTMENT_END_HOUR - APPOINTMENT_START_HOUR + 1 },
+    (_, index) => {
+        const hour = APPOINTMENT_START_HOUR + index;
+        return { value: `${String(hour).padStart(2, '0')}:00`, label: formatSlotLabel(hour), hour };
+    },
+);
+
+// Pads the leading cells with `null` so day 1 lands under the correct weekday column.
+const getCalendarDays = (year, monthIndex) => {
+    const startWeekday = new Date(year, monthIndex, 1).getDay();
+    const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+    const days = [];
+    for (let i = 0; i < startWeekday; i += 1) days.push(null);
+    for (let day = 1; day <= daysInMonth; day += 1) days.push(day);
+    return days;
+};
+
+// The draft stores the preferred date as 'YYYY-MM-DD' (what the backend wants).
+const toIsoDate = (year, monthIndex, day) =>
+    `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+const parseIsoDate = (iso) => {
+    if (!iso) return null;
+    const [year, month, day] = iso.split('-').map(Number);
+    return { year, monthIndex: month - 1, day };
+};
 
 const formatLocation = (provider) =>
     [
@@ -84,6 +126,17 @@ const RecommendServiceProvider = ({ navigation }) => {
     const [loadError, setLoadError] = useState('');
     const [notice, setNotice] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    // Appointment picker. `viewed*` is the month the grid shows; `draftAppointment*` is the
+    // in-progress pick, so closing without confirming never changes the saved preference.
+    const today = new Date();
+    const [isAppointmentModalVisible, setIsAppointmentModalVisible] = useState(false);
+    const [viewedAppointmentYear, setViewedAppointmentYear] = useState(today.getFullYear());
+    const [viewedAppointmentMonth, setViewedAppointmentMonth] = useState(today.getMonth());
+    const [draftAppointmentDay, setDraftAppointmentDay] = useState(null);
+    const [draftAppointmentTime, setDraftAppointmentTime] = useState(null);
+    const appointmentCalendarDays = getCalendarDays(viewedAppointmentYear, viewedAppointmentMonth);
+    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const spinValue = useRef(new Animated.Value(0)).current;
     const seenProviderIdsRef = useRef(new Set());
     const isMountedRef = useRef(true);
@@ -184,6 +237,75 @@ const RecommendServiceProvider = ({ navigation }) => {
 
     const handleFindAnother = () => {
         loadProviders({ findAnother: true });
+    };
+
+    // --- Preferred appointment picker -------------------------------------------------------
+    const handleOpenAppointmentPicker = () => {
+        // Re-open on the saved preference (or the current month if there isn't one).
+        const { preferredDate, preferredTime } = useServiceRequestDraftStore.getState();
+        const saved = parseIsoDate(preferredDate);
+        if (saved) {
+            setViewedAppointmentYear(saved.year);
+            setViewedAppointmentMonth(saved.monthIndex);
+            setDraftAppointmentDay(saved.day);
+            setDraftAppointmentTime(preferredTime ?? null);
+        } else {
+            setViewedAppointmentYear(today.getFullYear());
+            setViewedAppointmentMonth(today.getMonth());
+            setDraftAppointmentDay(null);
+            setDraftAppointmentTime(null);
+        }
+        setIsAppointmentModalVisible(true);
+    };
+
+    const handleCloseAppointmentPicker = () => {
+        setIsAppointmentModalVisible(false);
+    };
+
+    const handlePrevAppointmentMonth = () => {
+        setViewedAppointmentMonth((month) => {
+            if (month === 0) {
+                setViewedAppointmentYear((year) => year - 1);
+                return 11;
+            }
+            return month - 1;
+        });
+    };
+
+    const handleNextAppointmentMonth = () => {
+        setViewedAppointmentMonth((month) => {
+            if (month === 11) {
+                setViewedAppointmentYear((year) => year + 1);
+                return 0;
+            }
+            return month + 1;
+        });
+    };
+
+    const isPastDay = (day) => new Date(viewedAppointmentYear, viewedAppointmentMonth, day) < startOfToday;
+
+    // On today's date, slots whose hour has already started can't be picked.
+    const todayIso = toIsoDate(today.getFullYear(), today.getMonth(), today.getDate());
+    const isSlotPast = (slot, day = draftAppointmentDay) =>
+        day !== null &&
+        toIsoDate(viewedAppointmentYear, viewedAppointmentMonth, day) === todayIso &&
+        slot.hour <= today.getHours();
+
+    const handleSelectAppointmentDay = (day) => {
+        setDraftAppointmentDay(day);
+        const pickedSlot = APPOINTMENT_TIME_SLOTS.find((slot) => slot.value === draftAppointmentTime);
+        if (pickedSlot && isSlotPast(pickedSlot, day)) setDraftAppointmentTime(null);
+    };
+
+    const handleConfirmAppointment = () => {
+        // Save the new preferred slot, then search again — loadProviders reads the draft
+        // from the store, and setDraft updates it synchronously.
+        setDraft({
+            preferredDate: toIsoDate(viewedAppointmentYear, viewedAppointmentMonth, draftAppointmentDay),
+            preferredTime: draftAppointmentTime,
+        });
+        setIsAppointmentModalVisible(false);
+        loadProviders();
     };
 
     const handleRequestQuotation = async () => {
@@ -335,15 +457,30 @@ const RecommendServiceProvider = ({ navigation }) => {
 
         if (providers.length === 0) {
             return (
-                <View style={styles.reloadingSection}>
-                    <Text style={styles.noProviderText}>No Service Provider Available</Text>
-                    <Text style={styles.reloadingText}>
-                        Try a different date or time, or search again.
-                    </Text>
-                    <TouchableOpacity onPress={() => loadProviders()} style={styles.findAnotherWrap}>
-                        <Text style={styles.findAnotherText}>Search again</Text>
+                <>
+                    <View style={styles.emptySection}>
+                        <Text style={styles.emptyText}>There are no available service providers at this time.</Text>
+                        <TouchableOpacity onPress={handleOpenAppointmentPicker} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                            <Text style={styles.emptyLinkText}>Please choose another date and time.</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Nothing to request yet, so the button is shown disabled (matches the design). */}
+                    <TouchableOpacity disabled>
+                        <LinearGradient
+                            colors={['#0255AF', '#04A5A5']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={[styles.requestButton, styles.requestButtonDisabled]}
+                        >
+                            <Text style={styles.requestButtonText}>Request Quotation</Text>
+                        </LinearGradient>
                     </TouchableOpacity>
-                </View>
+
+                    <TouchableOpacity onPress={handleFindAnother} style={styles.findAnotherWrap}>
+                        <Text style={styles.findAnotherText}>Find another Service Provider</Text>
+                    </TouchableOpacity>
+                </>
             );
         }
 
@@ -394,6 +531,121 @@ const RecommendServiceProvider = ({ navigation }) => {
 
                 {renderBody()}
             </ScrollView>
+
+            <Modal
+                visible={isAppointmentModalVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={handleCloseAppointmentPicker}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalCard}>
+                        <TouchableOpacity onPress={handleCloseAppointmentPicker} style={styles.modalCloseButton}>
+                            <Image source={require('../assets/icon_close.png')} style={styles.modalCloseIcon} />
+                        </TouchableOpacity>
+
+                        <ScrollView showsVerticalScrollIndicator={false}>
+                            <Text style={styles.modalTitle}>Preferred Appointment</Text>
+
+                            <Text style={styles.modalSectionLabel}>Select Date</Text>
+                            <View style={styles.calendarCard}>
+                                <View style={styles.calendarHeaderRow}>
+                                    <TouchableOpacity onPress={handlePrevAppointmentMonth} style={styles.calendarArrowButton}>
+                                        <Text style={styles.calendarArrow}>‹</Text>
+                                    </TouchableOpacity>
+                                    <Text style={styles.calendarMonthYear}>
+                                        {MONTH_NAMES[viewedAppointmentMonth].slice(0, 3)} {viewedAppointmentYear}
+                                    </Text>
+                                    <TouchableOpacity onPress={handleNextAppointmentMonth} style={styles.calendarArrowButton}>
+                                        <Text style={styles.calendarArrow}>›</Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                <View style={styles.weekdayRow}>
+                                    {WEEKDAY_LABELS.map((label) => (
+                                        <Text key={label} style={styles.weekdayLabel}>{label}</Text>
+                                    ))}
+                                </View>
+
+                                <View style={styles.daysGrid}>
+                                    {appointmentCalendarDays.map((day, index) => {
+                                        const isSelected = day !== null && day === draftAppointmentDay;
+                                        const isDisabled = day === null || isPastDay(day);
+                                        return (
+                                            <TouchableOpacity
+                                                key={`${index}-${day}`}
+                                                disabled={isDisabled}
+                                                style={[styles.dayCell, isSelected && styles.dayCellSelected]}
+                                                onPress={() => handleSelectAppointmentDay(day)}
+                                            >
+                                                {day !== null && (
+                                                    <Text
+                                                        style={[
+                                                            styles.dayCellText,
+                                                            isSelected && styles.dayCellTextSelected,
+                                                            isDisabled && styles.dayCellTextDisabled,
+                                                        ]}
+                                                    >
+                                                        {day}
+                                                    </Text>
+                                                )}
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+                            </View>
+
+                            <Text style={styles.modalSectionLabel}>Select Time</Text>
+                            <View style={styles.timeSlotRow}>
+                                {APPOINTMENT_TIME_SLOTS.map((slot) => {
+                                    const isSelected = slot.value === draftAppointmentTime;
+                                    const isDisabled = isSlotPast(slot);
+                                    return (
+                                        <TouchableOpacity
+                                            key={slot.value}
+                                            disabled={isDisabled}
+                                            onPress={() => setDraftAppointmentTime(slot.value)}
+                                        >
+                                            {isSelected ? (
+                                                <LinearGradient
+                                                    colors={['#0255AF', '#04A5A5']}
+                                                    start={{ x: 0, y: 0 }}
+                                                    end={{ x: 1, y: 0 }}
+                                                    style={styles.timeSlotPill}
+                                                >
+                                                    <Text style={styles.timeSlotTextSelected}>{slot.label}</Text>
+                                                </LinearGradient>
+                                            ) : (
+                                                <View style={[styles.timeSlotPill, styles.timeSlotPillInactive, isDisabled && styles.timeSlotPillDisabled]}>
+                                                    <Text style={[styles.timeSlotText, isDisabled && styles.timeSlotTextDisabled]}>{slot.label}</Text>
+                                                </View>
+                                            )}
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+
+                            <TouchableOpacity
+                                onPress={handleConfirmAppointment}
+                                disabled={draftAppointmentDay === null || draftAppointmentTime === null}
+                                style={styles.confirmButtonWrap}
+                            >
+                                <LinearGradient
+                                    colors={['#0255AF', '#04A5A5']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 0 }}
+                                    style={[
+                                        styles.confirmButton,
+                                        (draftAppointmentDay === null || draftAppointmentTime === null) && styles.confirmButtonDisabled,
+                                    ]}
+                                >
+                                    <Text style={styles.confirmButtonText}>Confirm</Text>
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 };
@@ -457,12 +709,22 @@ const styles = StyleSheet.create({
         color: '#666666',
         textAlign: 'center',
     },
-    noProviderText: {
-        fontSize: 15,
-        fontWeight: '700',
-        color: '#1B2A8C',
-        marginBottom: 6,
+    emptySection: {
+        alignItems: 'center',
+        paddingVertical: 60,
+        paddingHorizontal: 8,
+    },
+    emptyText: {
+        fontSize: 13,
+        color: '#111111',
         textAlign: 'center',
+        marginBottom: 2,
+    },
+    emptyLinkText: {
+        fontSize: 13,
+        color: '#111111',
+        textAlign: 'center',
+        textDecorationLine: 'underline',
     },
     providerCard: {
         borderWidth: 1,
@@ -588,6 +850,9 @@ const styles = StyleSheet.create({
         marginTop: 6,
         marginBottom: 16,
     },
+    requestButtonDisabled: {
+        opacity: 0.5,
+    },
     requestButtonText: {
         fontSize: 16,
         color: '#FFFFFF',
@@ -606,6 +871,158 @@ const styles = StyleSheet.create({
         color: '#666666',
         textAlign: 'center',
         marginBottom: 12,
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(20, 24, 40, 0.55)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+    },
+    modalCard: {
+        maxHeight: '92%',
+        width: '100%',
+        maxWidth: 420,
+        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
+        padding: 20,
+    },
+    modalCloseButton: {
+        alignSelf: 'flex-end',
+        marginBottom: 4,
+    },
+    modalCloseIcon: {
+        width: 16,
+        height: 16,
+        resizeMode: 'contain',
+    },
+    modalTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#111111',
+        textAlign: 'center',
+        marginBottom: 16,
+    },
+    modalSectionLabel: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#333333',
+        marginBottom: 8,
+    },
+    calendarCard: {
+        backgroundColor: '#F1F2F5',
+        borderRadius: 12,
+        padding: 12,
+        marginBottom: 18,
+    },
+    calendarHeaderRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 10,
+    },
+    calendarArrowButton: {
+        width: 26,
+        height: 26,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    calendarArrow: {
+        fontSize: 18,
+        color: '#333333',
+        fontWeight: '700',
+    },
+    calendarMonthYear: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#111111',
+    },
+    weekdayRow: {
+        flexDirection: 'row',
+        marginBottom: 6,
+    },
+    weekdayLabel: {
+        flex: 1,
+        textAlign: 'center',
+        fontSize: 11,
+        color: '#999999',
+    },
+    daysGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+    },
+    dayCell: {
+        width: `${100 / 7}%`,
+        aspectRatio: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 8,
+        marginBottom: 2,
+    },
+    dayCellSelected: {
+        backgroundColor: '#204C96',
+    },
+    dayCellText: {
+        fontSize: 12,
+        color: '#333333',
+    },
+    dayCellTextSelected: {
+        color: '#FFFFFF',
+        fontWeight: '700',
+    },
+    dayCellTextDisabled: {
+        color: '#CCCCCC',
+    },
+    timeSlotRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        marginBottom: 20,
+    },
+    timeSlotPill: {
+        borderRadius: 18,
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        marginRight: 8,
+        marginBottom: 10,
+    },
+    timeSlotPillDisabled: {
+        backgroundColor: '#F4F4F4',
+        borderColor: '#EEEEEE',
+    },
+    timeSlotTextDisabled: {
+        color: '#BBBBBB',
+    },
+    timeSlotPillInactive: {
+        borderWidth: 1,
+        borderColor: '#DDDDDD',
+        backgroundColor: '#FFFFFF',
+    },
+    timeSlotText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#333333',
+    },
+    timeSlotTextSelected: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#FFFFFF',
+    },
+    confirmButtonWrap: {
+        alignSelf: 'flex-end',
+    },
+    confirmButton: {
+        borderRadius: 10,
+        paddingHorizontal: 24,
+        paddingVertical: 11,
+        alignItems: 'center',
+    },
+    confirmButtonDisabled: {
+        opacity: 0.5,
+    },
+    confirmButtonText: {
+        fontSize: 13,
+        color: '#FFFFFF',
+        fontWeight: '700',
     },
 });
 

@@ -399,6 +399,10 @@ const PAYMENT_METHODS = ['gcash', 'qrph', 'card'];
 const paymongo = require('../utils/paymongo');
 const config = require('../config');
 
+// True for URLs that only work on the machine the server runs on (localhost /
+// loopback) — never reachable from a customer's own phone or browser.
+const isLocalUrl = (url) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\/?$/i.test(String(url || ''));
+
 // Marks a payment paid exactly once and tells the provider.
 const markPaymentPaid = async (payment, paymongoPaymentId = null) => {
   if (payment.status === 'paid') return payment;
@@ -452,8 +456,16 @@ const payForRequest = asyncHandler(async (req, res) => {
   // the customer afterwards: browsers always send an Origin header (web app), React Native
   // does not (mobile app -> deep link back into it).
   const client = req.headers.origin ? 'web' : 'mobile';
+  // PayMongo redirects the customer's browser to these URLs after checkout, so they
+  // must be publicly reachable. If BASE_URL is unset (config falls back to
+  // http://localhost:5000) but this request arrived on a public host, rebuild the
+  // base from the request itself — otherwise "Return to Merchant" lands on
+  // localhost on the customer's phone, which can never work.
+  const requestOrigin = `${req.protocol}://${req.get('host') || ''}`;
+  const publicBase = isLocalUrl(config.baseUrl) && !isLocalUrl(requestOrigin) ? requestOrigin : config.baseUrl;
   const returnUrl = (status) =>
-    `${config.baseUrl}/api/payments/return?status=${status}&ref=${payment.payment_id}&client=${client}`;
+    `${publicBase}/api/payments/return?status=${status}&ref=${payment.payment_id}&client=${client}&stage=${stage}` +
+    (client === 'web' ? `&origin=${encodeURIComponent(req.headers.origin)}` : '');
   try {
     const session = await paymongo.createCheckoutSession({
       amount,
@@ -641,18 +653,31 @@ const paymongoWebhook = asyncHandler(async (req, res) => {
 // straight back to the web app's Track screen; mobile checkouts get a page that
 // re-opens the app on its Track screen through the servease://payment-return
 // deep link (mapped in App.js).
+
+// Which Track tab a successful payment should open. Once the 20% initial fee is
+// paid the quotation is settled and the job is underway, so it lands on On-going;
+// a mid-job extra returns to the same On-going tab the customer paid from; the
+// final payment means the job is done and paid for, so it lands on Done.
+const TRACK_TAB_BY_STAGE = { initial: 'ongoing', additional: 'ongoing', final: 'done' };
+
 const paymentReturn = (req, res) => {
   const ok = req.query.status === 'success';
   const status = ok ? 'success' : 'cancelled';
   const ref = String(req.query.ref || '');
-  const webOrigin = config.clientOrigin.split(',')[0].trim().replace(/\/+$/, '');
+  // Prefer the origin the checkout was started from (embedded by payForRequest) —
+  // config.clientOrigin falls back to http://localhost:5173 when CLIENT_ORIGIN is
+  // not set on the deployed server, which would strand web customers on localhost.
+  const originParam = /^https?:\/\//i.test(String(req.query.origin || '')) ? String(req.query.origin) : '';
+  const webOrigin = (originParam || config.clientOrigin.split(',')[0].trim()).replace(/\/+$/, '');
   const webTrackUrl = `${webOrigin}/customer/requests?payment=${status}`;
 
   if (req.query.client === 'web') {
     return res.redirect(webTrackUrl);
   }
 
-  const suffix = `status=${status}${ref ? `&ref=${encodeURIComponent(ref)}` : ''}`;
+  const tab = ok ? TRACK_TAB_BY_STAGE[req.query.stage] || 'done' : null;
+  const suffix =
+    `status=${status}${ref ? `&ref=${encodeURIComponent(ref)}` : ''}` + (tab ? `&tab=${tab}` : '');
   const deepLink = `servease://payment-return?${suffix}`;
   // Android Chrome ignores JS-fired custom schemes without a user gesture; the
   // intent:// form (with the app's package name) is the reliable one there.

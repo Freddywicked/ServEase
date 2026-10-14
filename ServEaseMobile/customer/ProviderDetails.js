@@ -147,9 +147,6 @@ const ProviderDetails = ({ navigation, route }) => {
                     <View style={[styles.availabilityBadge, { backgroundColor: provider.available ? AVAILABLE_COLOR : UNAVAILABLE_COLOR }]}>
                         <Text style={styles.availabilityText}>{provider.available ? 'Available' : 'Unavailable'}</Text>
                     </View>
-                    <TouchableOpacity onPress={handleMessage} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                        <Text style={styles.messageText}>Message</Text>
-                    </TouchableOpacity>
                 </View>
 
                 {provider.experienceYears != null && (
@@ -194,6 +191,17 @@ const ProviderDetails = ({ navigation, route }) => {
                         <Text style={styles.stateText}>Couldn't load the full profile. Tap to retry.</Text>
                     </TouchableOpacity>
                 )}
+
+                <TouchableOpacity activeOpacity={0.85} onPress={handleMessage} style={styles.ctaWrap}>
+                    <LinearGradient
+                        colors={['#0255AF', '#04A5A5']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={styles.cta}
+                    >
+                        <Text style={styles.ctaText}>Message Service Provider</Text>
+                    </LinearGradient>
+                </TouchableOpacity>
 
                 <TouchableOpacity activeOpacity={0.85} onPress={handleChooseProvider} style={styles.ctaWrap}>
                     <LinearGradient
@@ -331,18 +339,11 @@ const styles = StyleSheet.create({
         borderRadius: 10,
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: 9,
     },
     availabilityText: {
         fontSize: 12,
         lineHeight: 14,
         color: '#FFFFFF',
-    },
-    messageText: {
-        fontSize: 12,
-        lineHeight: 14,
-        fontWeight: '700',
-        color: '#18315B',
     },
     experience: {
         fontSize: 12,
@@ -460,7 +461,7 @@ const styles = StyleSheet.create({
         marginTop: 3,
     },
     ctaWrap: {
-        marginTop: 7,
+        marginTop: 12,
     },
     cta: {
         height: 46,

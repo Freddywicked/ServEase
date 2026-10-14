@@ -12,6 +12,11 @@ const { errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
 
+// Behind Render's TLS-terminating proxy, honor X-Forwarded-Proto so req.protocol
+// is 'https' — the PayMongo return URLs are rebuilt from the request when BASE_URL
+// is not configured (see workflow_controllers.payForRequest).
+app.set('trust proxy', 1);
+
 const allowedOrigins = config.clientOrigin.split(',').map((o) => o.trim());
 
 // Log every request the moment it arrives (before anything can fail).

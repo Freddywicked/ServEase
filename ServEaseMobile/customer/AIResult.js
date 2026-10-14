@@ -13,6 +13,9 @@ import { createServiceRequest } from '../api/servicerequest_api';
  * Displays draft.aiDiagnosis, which AIDiagnosis.js stored after calling the AI
  * endpoint. Two ways out:
  *
+ * The confidence is shown as plain text ("82% AI Confidence based on similar reported
+ * cases") — there is no confidence progress bar on this screen.
+ *
  *   "Yes, solved"            -> POST /service-requests with resolvedByAi: true.
  *                               The backend stores it as 'resolved_self_ai' with no
  *                               provider, so AI-handled requests can be tracked. Then the
@@ -96,13 +99,9 @@ const AIResult = ({ navigation }) => {
                     <View style={styles.resultCard}>
                         <Text style={styles.cardLabel}>Probable Cause</Text>
                         <Text style={styles.probableCauseText}>{diagnosis.probableCause}</Text>
-                        <View style={styles.confidenceRow}>
-                            <View style={styles.confidenceBarTrack}>
-                                <View style={[styles.confidenceBarFill, { width: `${diagnosis.confidence}%` }]} />
-                            </View>
-                            <Text style={styles.confidencePercent}>{diagnosis.confidence}%</Text>
-                        </View>
-                        <Text style={styles.confidenceCaption}>Confidence based on similar reported cases</Text>
+                        <Text style={styles.confidenceText}>
+                            {diagnosis.confidence}% AI Confidence based on similar reported cases
+                        </Text>
                         {diagnosis.lowConfidence ? (
                             <Text style={styles.lowConfidenceNote}>
                                 Low confidence — add more detail or a clearer photo for a sharper diagnosis.
@@ -236,38 +235,15 @@ const styles = StyleSheet.create({
         color: '#111111',
         marginBottom: 12,
     },
-    confidenceRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 6,
-    },
-    confidenceBarTrack: {
-        flex: 1,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: '#E0E0E0',
-        marginRight: 10,
-        overflow: 'hidden',
-    },
-    confidenceBarFill: {
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: '#0255AF',
-    },
-    confidencePercent: {
-        fontSize: 13,
+    confidenceText: {
+        fontSize: 12,
         fontWeight: '700',
         color: '#333333',
-    },
-    confidenceCaption: {
-        fontSize: 11,
-        color: '#999999',
         marginBottom: 12,
     },
     lowConfidenceNote: {
         fontSize: 11,
         color: '#B26A00',
-        marginTop: -8,
         marginBottom: 12,
     },
     tagRow: {

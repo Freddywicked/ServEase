@@ -77,6 +77,30 @@ const toNumberOrNull = (value) => {
   return Number.isFinite(n) ? n : null;
 };
 
+// Display name for the "new_request" notification the provider receives
+// (same lookup as customerNameOf in workflow_controllers.js).
+const customerNameOf = async (row) => {
+  const users = await Request.findUsersByIds([row.customer_id]);
+  return users[row.customer_id]?.name || 'Customer';
+};
+
+// In-app notification + FCM push so the provider knows a request just landed
+// (instantly, like the other workflow events). Best-effort: notify() never throws.
+const notifyProvidersOfNewRequest = async (row, providerIds) => {
+  const customerName = await customerNameOf(row);
+  const ref = Request.formatRequestId(row.request_number);
+  await Promise.all(
+    providerIds.map((providerId) =>
+      Workflow.notify({
+        userId: providerId,
+        type: 'new_request',
+        message: `${customerName} sent you a new ${row.category} service request (${ref}).`,
+        requestId: row.request_id,
+      })
+    )
+  );
+};
+
 // ---------- shapes sent to the frontend ----------
 // ai_diagnosis is one jsonb column (ERD): { status: 'done' | 'skipped',
 // probableCause, confidencePercent, relatedChecks, troubleshootingSuggestions }.
@@ -270,9 +294,11 @@ const create = asyncHandler(async (req, res) => {
     });
   }
 
-  // Picked a provider: the request lands in their Incoming Service Requests list.
+  // Picked a provider: the request lands in their Incoming Service Requests list,
+  // and they get an instant in-app notification + push.
   if (providerId && !resolvedByAi) {
     await Request.addRecipients(row.request_id, [providerId]);
+    await notifyProvidersOfNewRequest(row, [providerId]);
   }
 
   const request = await customerView(row);
@@ -550,7 +576,8 @@ const submit = asyncHandler(async (req, res) => {
 
   await Request.addRecipients(row.request_id, providerIds);
   const updated = await Request.update(row.request_number, { request_status: 'Pending' });
-  // TODO: create a "new_request" notification for each provider (see Notifications.jsx).
+  // Instant in-app notification + push for each chosen provider (see Notifications.jsx).
+  await notifyProvidersOfNewRequest(row, providerIds);
   res.json({ request: await customerView(updated) });
 });
 

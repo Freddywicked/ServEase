@@ -134,17 +134,17 @@ const Payment = ({ navigation, route }) => {
         setShowProcessedModal(false);
     };
 
-    const handleDownloadReceipt = () => {
-        // TODO: download/share the actual receipt once the backend generates one
-    };
-
-    // 'final' continues to the review; every other payment just goes back ("Go back").
+    // 'final' continues to the review (Ratings lands on Track's Done tab); every
+    // other payment goes back to the Track tab that matches what was just paid —
+    // a paid initial fee or extra means the job is underway, so both land on
+    // On-going (the screen the customer was on before paying).
+    const TRACK_TAB_BY_STAGE = { initial: 'ongoing', additional: 'ongoing', final: 'done' };
     const handlePrimaryCta = () => {
         setShowProcessedModal(false);
         if (paymentStage === 'final') {
             navigation.navigate('Ratings', { requestId, requestNumber });
         } else {
-            navigation.navigate('Track');
+            navigation.navigate('Track', { tab: TRACK_TAB_BY_STAGE[paymentStage] });
         }
     };
 
@@ -207,10 +207,6 @@ const Payment = ({ navigation, route }) => {
                                 ? 'The payment for additional parts has been processed.'
                                 : 'The money was sent to the service provider.'}
                         </Text>
-
-                        <TouchableOpacity style={styles.receiptBox} onPress={handleDownloadReceipt} activeOpacity={0.85}>
-                            <Image source={require('../assets/icon_download.png')} style={styles.downloadIcon} />
-                        </TouchableOpacity>
 
                         <TouchableOpacity style={styles.primaryCtaButton} onPress={handlePrimaryCta}>
                             <Text style={styles.primaryCtaText}>
@@ -341,20 +337,6 @@ const styles = StyleSheet.create({
         color: '#666666',
         textAlign: 'center',
         marginBottom: 16,
-    },
-    receiptBox: {
-        height: 150,
-        borderRadius: 10,
-        backgroundColor: '#E6E6E6',
-        alignItems: 'flex-end',
-        justifyContent: 'flex-start',
-        padding: 10,
-        marginBottom: 18,
-    },
-    downloadIcon: {
-        width: 18,
-        height: 18,
-        resizeMode: 'contain',
     },
     primaryCtaButton: {
         borderWidth: 1,

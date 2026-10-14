@@ -93,6 +93,8 @@ const config = {
   },
 
   // Public address of THIS server — used for PayMongo success/cancel redirect URLs.
+  // MUST be set on the deployed server; when it's left at the localhost fallback,
+  // payForRequest rebuilds the redirect base from the incoming request instead.
   baseUrl: (env.BASE_URL || 'http://localhost:5000').replace(/\/+$/, ''),
 };
 
