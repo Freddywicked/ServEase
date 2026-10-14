@@ -254,6 +254,53 @@ const listReviewsForProvider = async (providerId) => {
   }));
 };
 
+// Requests already occupying a provider's schedule on a date ('YYYY-MM-DD'):
+//   - booked jobs: provider_id is set on the request itself (ERD: "Accepted by")
+//     with status Approved / In Progress;
+//   - open requests addressed to the provider (service_request_providers row in
+//     'sent' / 'quoted' / 'accepted') whose request is still active on that date.
+// Returns [{ provider_id, time }] (time is the stored string, e.g. '10:00 AM' or
+// 'HH:mm', possibly null). Error-tolerant like listRatingsForProviders: a failed
+// read means "nobody is busy", never a failed request.
+const listActiveEngagementsOnDate = async (providerIds, date) => {
+  const ids = [...new Set(providerIds.filter(Boolean))];
+  if (ids.length === 0 || !date) return [];
+
+  const engagements = [];
+
+  const { data: booked, error: bookedError } = await supabase
+    .from(REQUESTS)
+    .select('provider_id, time')
+    .in('provider_id', ids)
+    .eq('date', date)
+    .in('request_status', ['Approved', 'In Progress']);
+  if (!bookedError && booked) engagements.push(...booked);
+
+  const { data: recipients, error: recipientsError } = await supabase
+    .from(RECIPIENTS)
+    .select('request_id, provider_id')
+    .in('provider_id', ids)
+    .in('status', ['sent', 'quoted', 'accepted']);
+  if (!recipientsError && recipients && recipients.length > 0) {
+    const { data: rows, error: rowsError } = await supabase
+      .from(REQUESTS)
+      .select('request_id, time')
+      .in('request_id', [...new Set(recipients.map((r) => r.request_id))])
+      .eq('date', date)
+      .in('request_status', ['Pending', 'Approved', 'In Progress']);
+    if (!rowsError && rows) {
+      const timeByRequest = Object.fromEntries(rows.map((r) => [r.request_id, r.time]));
+      recipients.forEach((r) => {
+        if (Object.prototype.hasOwnProperty.call(timeByRequest, r.request_id)) {
+          engagements.push({ provider_id: r.provider_id, time: timeByRequest[r.request_id] });
+        }
+      });
+    }
+  }
+
+  return engagements;
+};
+
 // ---------- storage ----------
 // Uploads the customer's photo to the private request-photos bucket and returns
 // its PATH. Store the path in service_request_attachments.file_url; sign a URL
@@ -283,5 +330,6 @@ module.exports = {
   findVerifiedProviderById,
   listRatingsForProviders,
   listReviewsForProvider,
+  listActiveEngagementsOnDate,
   uploadPhoto,
 };

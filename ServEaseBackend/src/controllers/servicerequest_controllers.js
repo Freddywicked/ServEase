@@ -14,6 +14,7 @@ const ApiError = require('../utils/api_error');
 const asyncHandler = require('../utils/async_handler');
 const Provider = require('../models/provider_model');
 const Request = require('../models/servicerequest_model');
+const Workflow = require('../models/workflow_model');
 const { diagnose } = require('../utils/ai_diagnosis');
 const { getProviderFileUrl } = require('../utils/storage');
 
@@ -227,6 +228,17 @@ const create = asyncHandler(async (req, res) => {
     const provider = await Provider.findByUserId(providerId);
     if (!provider) throw new ApiError(404, 'Service provider not found');
     if (providerId === req.user.user_id) throw new ApiError(400, 'You cannot send a request to yourself');
+
+    // The provider may have become unavailable between the recommendation list and
+    // this submit (RecommendServiceProvider.js handles this exact 409).
+    const scheduledDate = toIsoDateOrNull(req.body.appointmentDate || req.body.preferredDate);
+    if (scheduledDate) {
+      const scheduledSlot = to24hSlot(req.body.appointmentTime || req.body.preferredTime);
+      const blocked = await unavailableForSchedule([providerId], scheduledDate, scheduledSlot);
+      if (blocked.has(providerId)) {
+        throw new ApiError(409, 'This service provider is unavailable on the selected schedule');
+      }
+    }
   }
 
   const row = await Request.create({
@@ -347,11 +359,70 @@ const recommendedProviders = asyncHandler(async (req, res) => {
   res.json({ providers: list });
 });
 
-// GET /api/service-providers/recommended?category&latitude&longitude&exclude
+// ================= AVAILABILITY FOR THE DRAFT'S SCHEDULE =================
+// The mobile draft carries a preferred date ('YYYY-MM-DD') and time slot; a provider
+// who can't take that schedule must not be recommended at all.
+
+// '10:00 AM' (web app) / '13:00' (mobile slot values) -> 24-hour 'HH:00', the way
+// provider_unavailable_slots.slot is stored. Same parsing as to24h in
+// workflow_controllers.js.
+const to24hSlot = (value) => {
+  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i.exec(String(value || '').trim());
+  if (!m) return null;
+  let h = Number(m[1]);
+  if (/PM/i.test(m[3] || '') && h !== 12) h += 12;
+  if (/AM/i.test(m[3] || '') && h === 12) h = 0;
+  if (h > 23) return null;
+  return `${String(h).padStart(2, '0')}:00`;
+};
+
+// The bookable slots of one calendar day on each provider dashboard (same lists as
+// workflow_controllers.js): blocking every slot of either list is how a provider
+// marks the whole day unavailable on their Manage Calendar.
+const WEB_DAY_SLOTS = ['08:00', '09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00'];
+const MOBILE_DAY_SLOTS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
+const isWholeDayBlocked = (slots) =>
+  WEB_DAY_SLOTS.every((s) => slots.has(s)) || MOBILE_DAY_SLOTS.every((s) => slots.has(s));
+
+// Ids of the providers who can't take the given schedule (date + optional 24-hour
+// slot): they blocked it on their Manage Calendar (that slot, or the whole day),
+// or they already have a request on that date — sent to them, quoted, or booked —
+// at the same slot (an unknown time on either side counts as a clash).
+const unavailableForSchedule = async (providerIds, date, slot) => {
+  const unavailable = new Set();
+  if (!date) return unavailable;
+
+  const calendarRows = await Workflow.listUnavailableSlotsFor(providerIds, date);
+  const slotsByProvider = new Map();
+  calendarRows.forEach((r) => {
+    if (!slotsByProvider.has(r.provider_id)) slotsByProvider.set(r.provider_id, new Set());
+    slotsByProvider.get(r.provider_id).add(r.slot);
+  });
+  slotsByProvider.forEach((slots, providerId) => {
+    if (isWholeDayBlocked(slots) || (slot && slots.has(slot))) unavailable.add(providerId);
+  });
+
+  const engagements = await Request.listActiveEngagementsOnDate(providerIds, date);
+  engagements.forEach((e) => {
+    const bookedSlot = to24hSlot(e.time);
+    if (!slot || !bookedSlot || bookedSlot === slot) unavailable.add(e.provider_id);
+  });
+
+  return unavailable;
+};
+
+// 'YYYY-MM-DD' from a query/body value, or null when it isn't a valid date.
+const toIsoDateOrNull = (value) => {
+  const text = String(value || '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+};
+
+// GET /api/service-providers/recommended?category&latitude&longitude&preferredDate&preferredTime&exclude
 // Mobile step 3 (RecommendServiceProvider.js): unlike recommendedProviders above, the
-// request row does not exist yet (it is created on submit), so the draft's category and
-// coordinates arrive as query params. Verified providers only, filtered by the request's
-// service category (specialization match), then ranked by rating and distance.
+// request row does not exist yet (it is created on submit), so the draft's category,
+// coordinates and preferred schedule arrive as query params. Verified providers only,
+// filtered by the request's service category (specialization match) and by
+// availability on the preferred schedule, then ranked by rating and distance.
 
 // In-process geocode cache: provider addresses rarely change and Geocoding API calls
 // cost money, so each distinct address is looked up once per server run.
@@ -391,6 +462,9 @@ const recommendedForDraft = asyncHandler(async (req, res) => {
   const wanted = SPECIALIZATION_FOR_CATEGORY[category] || '';
   const latitude = toNumberOrNull(req.query.latitude);
   const longitude = toNumberOrNull(req.query.longitude);
+  // The draft's preferred schedule: providers who can't take it are excluded below.
+  const preferredDate = toIsoDateOrNull(req.query.preferredDate);
+  const preferredSlot = to24hSlot(req.query.preferredTime);
   // `exclude` arrives as repeated params and/or comma-separated ids, depending on the client.
   const exclude = new Set(
     (Array.isArray(req.query.exclude) ? req.query.exclude : [req.query.exclude])
@@ -404,9 +478,10 @@ const recommendedForDraft = asyncHandler(async (req, res) => {
   const candidates = providers.filter(
     (p) => p.user_id !== req.user.user_id && !exclude.has(String(p.user_id))
   );
-  const [users, ratings] = await Promise.all([
+  const [users, ratings, unavailable] = await Promise.all([
     Request.findUsersByIds(candidates.map((p) => p.user_id)),
     Request.listRatingsForProviders(candidates.map((p) => p.user_id)),
+    unavailableForSchedule(candidates.map((p) => p.user_id), preferredDate, preferredSlot),
   ]);
 
   // Distance: providers store a text address (company_address), not coordinates, so it
@@ -426,7 +501,7 @@ const recommendedForDraft = asyncHandler(async (req, res) => {
         specialty: p.specializations[0] || '',
         specialties: p.specializations,
         verified: true,
-        available: true,
+        available: !unavailable.has(p.user_id),
         availabilitySchedule: p.availability || null,
         rating: rating ? Math.round(rating.rating * 10) / 10 : null,
         reviewCount: rating?.reviewCount || 0,
@@ -441,10 +516,14 @@ const recommendedForDraft = asyncHandler(async (req, res) => {
     })
   );
 
+  // Providers who can't take the preferred schedule are never shown (the screen
+  // answers with its "No Service Provider Available" state when nobody is left).
+  const availableList = preferredDate ? list.filter((p) => p.available) : list;
+
   // Filter by the service category; if nobody matches, fall back to all verified
   // providers so the screen never dead-ends. Rank by rating, then distance.
-  const matching = list.filter((p) => p.matchesCategory);
-  const pool = wanted && matching.length > 0 ? matching : list;
+  const matching = availableList.filter((p) => p.matchesCategory);
+  const pool = wanted && matching.length > 0 ? matching : availableList;
   pool.sort(
     (a, b) => (b.rating ?? -1) - (a.rating ?? -1) || (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity)
   );

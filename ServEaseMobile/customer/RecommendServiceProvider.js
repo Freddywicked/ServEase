@@ -15,9 +15,13 @@ import { getRecommendedProviders, createServiceRequest } from '../api/servicereq
  *   Loads    GET /service-providers/recommended using the draft (category,
  *            latitude/longitude, preferred date/time). Matching and sorting by
  *            specialization, ratings/sentiment, distance and availability is done
- *            server-side; the category match is a HARD filter, not a ranking boost.
- *            This screen re-checks it, so a provider from another category (e.g. a
- *            home-repair provider on an automotive request) is never shown.
+ *            server-side; the category match is a HARD filter, not a ranking boost,
+ *            and providers who can't take the preferred schedule (blocked it on
+ *            their Manage Calendar, or already have a request then) are excluded —
+ *            when nobody is left the screen shows "No Service Provider Available".
+ *            This screen re-checks both, so a provider from another category (e.g. a
+ *            home-repair provider on an automotive request) or an unavailable one is
+ *            never shown.
  *            "Find another" re-calls it with `exclude` = ids already shown and still
  *            returns only matched providers; once every match has been seen it starts
  *            again from the best match instead of falling back to other categories.
@@ -122,7 +126,11 @@ const RecommendServiceProvider = ({ navigation }) => {
             exclude,
         });
         list.forEach((provider) => seenProviderIdsRef.current.add(provider.id));
-        return list.filter((provider) => matchesRequestCategory(provider, draft.categoryKey));
+        // The server already excludes providers who are unavailable on the draft's
+        // preferred schedule; this keeps any stale/unfiltered response out as well.
+        return list.filter(
+            (provider) => provider.available !== false && matchesRequestCategory(provider, draft.categoryKey),
+        );
     }, []);
 
     // `findAnother` = true re-queries excluding every provider already shown, instead of
@@ -328,8 +336,9 @@ const RecommendServiceProvider = ({ navigation }) => {
         if (providers.length === 0) {
             return (
                 <View style={styles.reloadingSection}>
+                    <Text style={styles.noProviderText}>No Service Provider Available</Text>
                     <Text style={styles.reloadingText}>
-                        No matching service providers are available for this request yet.
+                        Try a different date or time, or search again.
                     </Text>
                     <TouchableOpacity onPress={() => loadProviders()} style={styles.findAnotherWrap}>
                         <Text style={styles.findAnotherText}>Search again</Text>
@@ -446,6 +455,14 @@ const styles = StyleSheet.create({
     reloadingText: {
         fontSize: 13,
         color: '#666666',
+        textAlign: 'center',
+    },
+    noProviderText: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#1B2A8C',
+        marginBottom: 6,
+        textAlign: 'center',
     },
     providerCard: {
         borderWidth: 1,
