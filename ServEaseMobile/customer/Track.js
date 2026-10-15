@@ -61,7 +61,168 @@ const STATUS_FILTERS = [
 // Badge text on the expandable cards. Not part of the card contract, so it is chosen by cardType;
 // a backend-supplied `statusLabel` wins if one is ever sent.
 const STATUS_TAG_BY_CARD_TYPE = { payment: 'In progress', timeline: 'In progress', completed: 'Completed' };
-const getStatusTag = (request) => request.statusLabel ?? STATUS_TAG_BY_CARD_TYPE[request.cardType];
+
+/* ============================================================================
+ * BACKEND CHECKLIST for the On-going / Done tab indicators
+ * (GET /service-requests/tracking, see getTrackedRequests in servicerequest_api.js)
+ *
+ * Track.js already handles the UI below. These are the fields the backend must send:
+ *
+ * 1. serviceType on every card -> 'home' or 'shop' (any value containing "home" / "shop").
+ *    Picks the indicator variant. If missing, the backend's own timeline steps are shown as-is
+ *    and only the payment rule is applied. (Field names also accepted: serviceMode, serviceLocation.)
+ *
+ * 2. A paid signal on every card (checked in this order; with none, the card counts as UNPAID):
+ *      isPaid: true | false
+ *      paymentStatus: 'paid' | 'pending' | ...
+ *      remainingBalance: number            (<= 0 means paid; getPaymentDue's due.final can feed this)
+ *    The backend currently files a provider-completed card under `done` as soon as completeJob
+ *    runs. That is fine: Track.js shows it in On-going until it is paid, then in Done.
+ *    (Cleaner option: have the backend return unpaid completed cards under `ongoing` itself.)
+ *
+ * 3. timeline step names (updateJobProgress -> timeline: [{ label, timestamp, done }]).
+ *    Steps are matched by label (or key / id), so the labels must be exactly:
+ *      home: "Preparing", "Service Provider is on the way", "Arrived at the Customer's location"
+ *      shop: "Assessing", "Repairing", "Quality Checking"
+ *    A step that doesn't match stays grey. A step is blue + check only when done: true.
+ *
+ * 4. Completion time: on the "Completed" step's timestamp, or card.completedAt (ISO).
+ *    Shown under the grey Completed step on home-based cards while payment is pending.
+ *    Shop-based cards show "Payment Pending" there instead.
+ *
+ * 5. Card for a finished job: cardType 'completed'. Track.js treats this as "provider finished,
+ *    show Proceed to Payment until paid". Once paid, the button disappears and the Completed
+ *    step turns blue.
+ * ========================================================================== */
+
+// ===========================================================================
+// BACKEND TODO (GET /service-requests/tracking): fields this screen expects on each card.
+// Until these exist the indicators fall back to the old behavior (see notes below).
+//
+// 1. serviceType: 'home' | 'shop'  (any value containing "home" or "shop" works)
+//      Picks the indicator set in TIMELINE_TEMPLATES. Without it, the screen shows the backend's
+//      own steps and only applies the payment rule.
+//      Alternate field names also read: serviceMode, serviceLocation (see getServiceMode).
+//
+// 2. A paid signal, any ONE of (read in this order, see isRequestPaid):
+//      isPaid: boolean | paymentStatus: 'paid' | remainingBalance: number (0 = paid)
+//      Without one, a card always counts as unpaid, so it never moves to the Done tab.
+//      getPaymentDue(requestId) already computes the remaining balance (due.final).
+//
+// 3. Grouping: the provider-finished card (cardType 'completed') may stay in `done` as it does
+//      today. The screen shows it under On-going until it is paid, then under Done.
+//      Optional: put unpaid ones in `ongoing` on the backend and this screen still works.
+//
+// 4. timeline step labels must match TIMELINE_TEMPLATES exactly (case/punctuation ignored):
+//      home: Preparing | Service Provider is on the way | Arrived at the Customer's location | Completed
+//      shop: Assessing | Repairing | Quality Checking | Completed
+//      Each step: { label, timestamp (ISO) | null, done: boolean }. A step the provider has not
+//      updated can be missing or done: false (it shows grey). Unmatched labels stay grey.
+//      A 'key' or 'id' on each step (preparing, on_the_way, arrived, assessing, repairing,
+//      quality_checking, completed) is matched too, which is safer than relying on labels.
+//
+// 5. Completion time: send it as the "Completed" step's timestamp, or as card.completedAt
+//      (ISO). Shown in grey under Completed (home-based) while the balance is unpaid.
+//
+// The Completed step is only colored when the card is paid, even though the provider has
+// finished (cardType 'completed'); "Proceed to Payment" shows only in that unpaid state.
+// ===========================================================================
+
+// A request counts as paid once the customer settled the remaining balance. The backend puts a
+// provider-completed card in `done` as soon as the job is finished (before payment), so being in
+// `done` does NOT mean paid; the card needs one of these fields, checked in order:
+// isPaid, paymentStatus, remainingBalance. With none of them the card counts as unpaid.
+const isRequestPaid = (request) => {
+    if (typeof request.isPaid === 'boolean') return request.isPaid;
+    if (request.paymentStatus) return String(request.paymentStatus).toLowerCase() === 'paid';
+    if (request.remainingBalance !== undefined && request.remainingBalance !== null) {
+        return Number(request.remainingBalance) <= 0;
+    }
+    return false;
+};
+
+const getStatusTag = (request) => {
+    if (request.statusLabel) return request.statusLabel;
+    // Finished repair but still waiting on the customer's payment: keep the "In progress" badge.
+    if (request.cardType === 'completed' && !isRequestPaid(request)) return 'In progress';
+    return STATUS_TAG_BY_CARD_TYPE[request.cardType];
+};
+
+// ---------------------------------------------------------------------------
+// On-going tab indicators. Two variants, chosen by the request's service type:
+//   home-based -> Preparing / Service Provider is on the way / Arrived / Completed
+//   shop-based -> Assessing / Repairing / Quality Checking / Completed
+// A step is grey until the provider updates it (then blue + check). "Completed" stays grey
+// until the customer has paid the remaining balance.
+// ---------------------------------------------------------------------------
+const TIMELINE_TEMPLATES = {
+    home: [
+        { key: 'preparing', label: 'Preparing' },
+        { key: 'on_the_way', label: 'Service Provider is on the way' },
+        { key: 'arrived', label: "Arrived at the Customer's location" },
+        { key: 'completed', label: 'Completed' },
+    ],
+    shop: [
+        { key: 'assessing', label: 'Assessing' },
+        { key: 'repairing', label: 'Repairing' },
+        { key: 'quality_checking', label: 'Quality Checking' },
+        { key: 'completed', label: 'Completed' },
+    ],
+};
+
+const normalizeText = (value) => String(value ?? '').toLowerCase().replace(/[^a-z]/g, '');
+
+// Returns 'home' | 'shop' | null. Adjust the field names to whatever the backend sends.
+const getServiceMode = (request) => {
+    const value = normalizeText(request.serviceType ?? request.serviceMode ?? request.serviceLocation);
+    if (value.includes('home')) return 'home';
+    if (value.includes('shop')) return 'shop';
+    return null;
+};
+
+const buildTimeline = (request) => {
+    const source = request.timeline || [];
+    const mode = getServiceMode(request);
+    const paid = isRequestPaid(request);
+    // The provider has finished the job (completeJob) but the customer may not have paid yet.
+    const jobFinished = request.cardType === 'completed';
+
+    // "Completed" is grey (done: false) until the remaining balance is paid. While unpaid it still
+    // shows when the provider finished (home-based) or "Payment Pending" (shop-based).
+    const withPaymentGate = (step, isCompletedStep) => {
+        if (!isCompletedStep) return step;
+        const finished = jobFinished || !!step.done;
+        const finishedAt = step.timestamp ?? request.completedAt ?? null;
+        const showPending = !paid && finished && mode === 'shop';
+        return {
+            ...step,
+            done: paid,
+            timestamp: finished && !showPending ? finishedAt : null,
+            description: showPending ? 'Payment Pending' : step.description,
+        };
+    };
+
+    // Unknown service type: keep the backend's steps, only apply the payment rule.
+    if (!mode) {
+        return source.map((step) => withPaymentGate(step, normalizeText(step.label) === 'completed'));
+    }
+
+    return TIMELINE_TEMPLATES[mode].map((template) => {
+        const match = source.find(
+            (step) =>
+                normalizeText(step.key ?? step.id) === normalizeText(template.key) ||
+                normalizeText(step.label) === normalizeText(template.label),
+        );
+        const step = {
+            id: template.key,
+            label: template.label,
+            done: !!match?.done,
+            timestamp: match?.done ? match.timestamp : null,
+            description: match?.description,
+        };
+        return withPaymentGate(step, template.key === 'completed');
+    });
+};
 
 const formatPeso = (amount) => `₱${Number(amount ?? 0).toFixed(2)}`;
 
@@ -134,7 +295,19 @@ const Track = ({ navigation, route }) => {
     // The FCM push the backend sends on each provider action can call loadTracking() too.
     // ---------------------------------------------------------------------
 
-    const statusRequests = groups?.[selectedStatus.key] ?? [];
+    // The backend files a provider-completed card under `done` right away. Here it only stays in
+    // Done once its remaining balance is paid; until then it is shown in On-going.
+    const displayGroups = (() => {
+        if (!groups) return groups;
+        const done = groups.done ?? [];
+        return {
+            ...groups,
+            ongoing: [...(groups.ongoing ?? []), ...done.filter((request) => !isRequestPaid(request))],
+            done: done.filter((request) => isRequestPaid(request)),
+        };
+    })();
+
+    const statusRequests = displayGroups?.[selectedStatus.key] ?? [];
     const visibleRequests = searchQuery.trim()
         ? statusRequests.filter((request) => getSearchableText(request).includes(searchQuery.trim().toLowerCase()))
         : statusRequests;
@@ -257,20 +430,29 @@ const Track = ({ navigation, route }) => {
         });
     };
 
-    const renderTimeline = (timeline) =>
-        (timeline || []).map((step, index) => (
+    const renderTimeline = (request) => {
+        const steps = buildTimeline(request);
+        // The vertical connector is only part of the home-based design.
+        const showConnector = getServiceMode(request) === 'home';
+        return steps.map((step, index) => (
             <View key={step.id ?? `${step.label}-${index}`} style={styles.timelineRow}>
-                <View style={styles.timelineDot}>
+                {showConnector && index < steps.length - 1 && (
+                    <View style={[styles.timelineConnector, step.done && steps[index + 1].done && styles.timelineConnectorDone]} />
+                )}
+                <View style={[styles.timelineDot, !step.done && styles.timelineDotPending]}>
                     {step.done && <Image source={require('../assets/icon_check.png')} style={styles.timelineCheckIcon} />}
                 </View>
                 <View style={styles.timelineTextWrap}>
-                    <Text style={styles.timelineLabel}>{step.label}</Text>
-                    <Text style={styles.timelineSubtext}>
-                        {step.timestamp ? formatDateTime(step.timestamp) : step.description}
-                    </Text>
+                    <Text style={[styles.timelineLabel, !step.done && styles.timelineLabelPending]}>{step.label}</Text>
+                    {(step.timestamp || step.description) ? (
+                        <Text style={styles.timelineSubtext}>
+                            {step.timestamp ? formatDateTime(step.timestamp) : step.description}
+                        </Text>
+                    ) : null}
                 </View>
             </View>
         ));
+    };
 
     const renderDiagnosisCard = (request) => (
         <TouchableOpacity
@@ -432,7 +614,7 @@ const Track = ({ navigation, route }) => {
                 {request.timeline?.length > 0 && (
                     <>
                         <View style={styles.cardDivider} />
-                        {renderTimeline(request.timeline)}
+                        {renderTimeline(request)}
                     </>
                 )}
 
@@ -448,7 +630,7 @@ const Track = ({ navigation, route }) => {
         <View key={request.id} style={styles.requestCard}>
             {renderCardHeader(request)}
             {renderDeferredNote(request)}
-            {renderTimeline(request.timeline)}
+            {renderTimeline(request)}
 
             <View style={styles.cardDivider} />
             <TouchableOpacity onPress={() => handleMessageProvider(request)} style={styles.messageButton}>
@@ -479,13 +661,15 @@ const Track = ({ navigation, route }) => {
         <View key={request.id} style={styles.requestCard}>
             {renderCardHeader(request)}
             {renderDeferredNote(request)}
-            {renderTimeline(request.timeline)}
+            {renderTimeline(request)}
 
             <View style={styles.cardDivider} />
             <View style={styles.actionRow}>
-                <TouchableOpacity style={styles.actionButton} onPress={() => handleProceedToPayment(request)}>
-                    <Text style={styles.actionButtonText}>Proceed to Payment</Text>
-                </TouchableOpacity>
+                {!isRequestPaid(request) && (
+                    <TouchableOpacity style={styles.actionButton} onPress={() => handleProceedToPayment(request)}>
+                        <Text style={styles.actionButtonText}>Proceed to Payment</Text>
+                    </TouchableOpacity>
+                )}
                 <TouchableOpacity style={styles.actionButton} onPress={() => handleMessageProvider(request)}>
                     <Text style={styles.actionButtonText}>Message</Text>
                 </TouchableOpacity>
@@ -557,7 +741,7 @@ const Track = ({ navigation, route }) => {
                 >
                     {STATUS_FILTERS.map((status) => {
                         const isSelected = status.key === selectedStatus.key;
-                        const count = groups?.[status.key]?.length;
+                        const count = displayGroups?.[status.key]?.length;
                         return (
                             <TouchableOpacity
                                 key={status.key}
@@ -936,10 +1120,24 @@ const styles = StyleSheet.create({
         width: 24,
         height: 24,
         borderRadius: 12,
-        backgroundColor: '#5C7CC9',
+        backgroundColor: '#577FBB',
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: 12,
+    },
+    timelineDotPending: {
+        backgroundColor: '#646565',
+    },
+    timelineConnector: {
+        position: 'absolute',
+        left: 11.5,
+        top: 24,
+        bottom: -12,
+        width: 1,
+        backgroundColor: '#D9D9D9',
+    },
+    timelineConnectorDone: {
+        backgroundColor: '#577FBB',
     },
     timelineCheckIcon: {
         width: 12,
@@ -954,6 +1152,9 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: '700',
         color: '#111111',
+    },
+    timelineLabelPending: {
+        color: '#414141',
     },
     timelineSubtext: {
         fontSize: 11,

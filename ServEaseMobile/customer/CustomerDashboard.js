@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import LinearGradient from 'react-native-linear-gradient';
@@ -9,8 +9,12 @@ import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
 import { getActiveRepair, getMyServiceRequests } from '../api/servicerequest_api';
 import { formatTimeAgo } from '../utils/formatters';
 import NotificationsModal from '../components/NotificationsModal';
+import { DashboardSection, DashboardItem, DashboardEmpty } from '../components/DashboardSection';
 
-const HISTORY_PREVIEW_LIMIT = 3; // how many recent history entries the dashboard card previews
+const PREVIEW_LIMIT = 2; // each container previews two rows, like the design
+
+// "Roof Leakage | #SR-0000"
+const historyTitle = (item) => `${item.category} | #${item.id}`;
 
 const CustomerDashboard = ({ navigation, route }) => {
     // `user` and `provider` come from auth_context (populated on login, kept in sync via
@@ -26,6 +30,8 @@ const CustomerDashboard = ({ navigation, route }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [loadFailed, setLoadFailed] = useState(false);
     const [notificationsVisible, setNotificationsVisible] = useState(false);
+    const [bellAnchor, setBellAnchor] = useState(null);
+    const bellRef = useRef(null);
 
     // Loads the active repair + a short preview of the customer's history from the backend.
     // Runs every time the dashboard regains focus, so a request just sent from the
@@ -38,7 +44,7 @@ const CustomerDashboard = ({ navigation, route }) => {
             getMyServiceRequests(), // newest first
         ]);
         if (repairResult.status === 'fulfilled') setActiveRepair(repairResult.value);
-        if (historyResult.status === 'fulfilled') setRecentHistory(historyResult.value.slice(0, HISTORY_PREVIEW_LIMIT));
+        if (historyResult.status === 'fulfilled') setRecentHistory(historyResult.value.slice(0, PREVIEW_LIMIT));
         if (repairResult.status === 'rejected' || historyResult.status === 'rejected') setLoadFailed(true);
         setIsLoading(false);
     }, []);
@@ -69,7 +75,7 @@ const CustomerDashboard = ({ navigation, route }) => {
     }, [route?.params?.pendingApproval, applicationStatus, refreshUser]);
 
     // PROVIDER COMMUNICATION (comment block): subscribe to the customer's active request so
-    // the "Active Repair" card refreshes the moment the provider submits a QUOTATION or
+    // the "Active Repair" container refreshes the moment the provider submits a QUOTATION or
     // declines. Uncomment once serviceRequestApi.js's Realtime helpers are enabled.
     //
     // useEffect(() => {
@@ -88,22 +94,52 @@ const CustomerDashboard = ({ navigation, route }) => {
         navigation.navigate(ROUTES.CREATE_SERVICE_REQUEST);
     };
 
-    const renderCardMessage = (message) => (
-        <TouchableOpacity onPress={loadDashboardData} disabled={!loadFailed}>
-            <Text style={styles.emptyStateText}>{message}</Text>
-        </TouchableOpacity>
-    );
+    // Measure the bell first so the popup can highlight it and sit right under it.
+    const handleNotificationsPress = () => {
+        if (bellRef.current?.measureInWindow) {
+            bellRef.current.measureInWindow((x, y, width, height) => {
+                setBellAnchor({ x, y, width, height });
+                setNotificationsVisible(true);
+            });
+        } else {
+            setNotificationsVisible(true);
+        }
+    };
+
+    const goToTrack = () => navigation.navigate(ROUTES.TRACK);
+    const goToHistory = () => navigation.navigate('History');
+
+    const activeItems = activeRepair
+        ? [{ id: activeRepair.requestId ?? 'active-repair', title: activeRepair.statusLabel ?? activeRepair.requestStatus, summary: '' }]
+        : [];
+
+    const historyItems = recentHistory.map((item) => ({
+        id: item.id,
+        title: historyTitle(item),
+        summary: `${item.status} · ${formatTimeAgo(item.createdAt)}`,
+    }));
+
+    const emptyMessage = (fallback) => (loadFailed ? "Couldn't load. Tap to retry." : fallback);
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.headerRow}>
                     <View style={styles.headerTextWrap}>
-                        <Text style={styles.welcomeText}>Welcome, {customerName}!</Text>
+                        <Text style={styles.welcomeText} numberOfLines={1} adjustsFontSizeToFit>
+                            Welcome, {customerName}!
+                        </Text>
                         <Text style={styles.subtitle}>What needs fixing today?</Text>
                     </View>
-                    <TouchableOpacity onPress={() => setNotificationsVisible(true)}>
-                        <Image source={require('../assets/icon_ringbell.png')} style={styles.bellIcon} />
+                    <TouchableOpacity
+                        onPress={handleNotificationsPress}
+                        style={styles.bellButton}
+                        accessibilityRole="button"
+                        accessibilityLabel="Notifications"
+                    >
+                        <View ref={bellRef} collapsable={false}>
+                            <Image source={require('../assets/icon_ringbell.png')} style={styles.bellIcon} />
+                        </View>
                     </TouchableOpacity>
                 </View>
 
@@ -115,8 +151,7 @@ const CustomerDashboard = ({ navigation, route }) => {
                     </View>
                 )}
 
-                <Text style={styles.sectionLabel}>QUICK START</Text>
-                <TouchableOpacity onPress={handleCreateServiceRequest}>
+                <TouchableOpacity onPress={handleCreateServiceRequest} activeOpacity={0.85}>
                     <LinearGradient
                         colors={['#0255AF', '#04A5A5']}
                         start={{ x: 0, y: 0 }}
@@ -129,49 +164,48 @@ const CustomerDashboard = ({ navigation, route }) => {
 
                 <View style={styles.divider} />
 
-                <Text style={styles.sectionLabel}>ACTIVE REPAIR</Text>
-                <View style={styles.activeCard}>
-                    {isLoading ? (
-                        <ActivityIndicator color="#0255AF" />
-                    ) : activeRepair ? (
-                        <TouchableOpacity onPress={() => navigation.navigate(ROUTES.TRACK)}>
-                            <Text style={styles.activeRepairText}>{activeRepair.statusLabel ?? activeRepair.requestStatus}</Text>
-                        </TouchableOpacity>
+                <DashboardSection title="Active Repair" onActionPress={goToTrack} style={styles.firstSection}>
+                    {isLoading || activeItems.length === 0 ? (
+                        <DashboardEmpty
+                            loading={isLoading}
+                            message={emptyMessage('No Active Repair')}
+                            onPress={loadFailed ? loadDashboardData : undefined}
+                        />
                     ) : (
-                        renderCardMessage(loadFailed ? "Couldn't load. Tap to retry." : 'No Active Repair')
-                    )}
-                </View>
-
-                <Text style={styles.sectionLabel}>HISTORY</Text>
-                {/* The whole card is tappable -> full History screen (its list is fetched from the backend) */}
-                <TouchableOpacity
-                    style={styles.historyCard}
-                    activeOpacity={0.85}
-                    onPress={() => navigation.navigate('History')}
-                    accessibilityRole="button"
-                    accessibilityLabel="View full history"
-                >
-                    {isLoading ? (
-                        <ActivityIndicator color="#0255AF" style={styles.historyLoader} />
-                    ) : recentHistory.length > 0 ? (
-                        recentHistory.map((item) => (
-                            <View key={item.id} style={styles.historyItem}>
-                                <Text style={styles.historyMessage}>
-                                    {item.category} · {item.status}
-                                </Text>
-                                <Text style={styles.historyTime}>{formatTimeAgo(item.createdAt)}</Text>
-                                <View style={styles.historyLine} />
-                            </View>
+                        activeItems.map((item, index) => (
+                            <DashboardItem
+                                key={item.id}
+                                isFirst={index === 0}
+                                title={item.title}
+                                summary={item.summary}
+                                onPress={goToTrack}
+                            />
                         ))
-                    ) : (
-                        <View style={styles.historyEmpty}>
-                            {renderCardMessage(loadFailed ? "Couldn't load. Tap to retry." : 'No history yet')}
-                        </View>
                     )}
-                </TouchableOpacity>
+                </DashboardSection>
+
+                <DashboardSection title="History" onActionPress={goToHistory} style={styles.nextSection}>
+                    {isLoading || historyItems.length === 0 ? (
+                        <DashboardEmpty
+                            loading={isLoading}
+                            message={emptyMessage('No history yet')}
+                            onPress={loadFailed ? loadDashboardData : undefined}
+                        />
+                    ) : (
+                        historyItems.map((item, index) => (
+                            <DashboardItem
+                                key={item.id}
+                                isFirst={index === 0}
+                                title={item.title}
+                                summary={item.summary}
+                                onPress={goToHistory}
+                            />
+                        ))
+                    )}
+                </DashboardSection>
             </ScrollView>
 
-            <NotificationsModal visible={notificationsVisible} onClose={() => setNotificationsVisible(false)} />
+            <NotificationsModal visible={notificationsVisible} onClose={() => setNotificationsVisible(false)} anchor={bellAnchor} />
         </SafeAreaView>
     );
 };
@@ -182,36 +216,42 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFFFF',
     },
     scrollContent: {
-        paddingHorizontal: 24,
-        paddingTop: 16,
-        paddingBottom: 24,
+        paddingHorizontal: 25,
+        paddingTop: 29,
+        paddingBottom: 32,
     },
     headerRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        marginBottom: 16,
+        marginBottom: 22,
     },
     headerTextWrap: {
         flex: 1,
         marginRight: 12,
     },
     welcomeText: {
-        fontSize: 24,
-        fontWeight: '800',
-        color: '#1B2A8C',
+        fontSize: 35,
+        lineHeight: 42,
+        fontWeight: '700',
+        color: '#021E79',
     },
     subtitle: {
         fontSize: 14,
-        fontWeight: '600',
-        color: '#333333',
+        lineHeight: 16,
+        fontWeight: '700',
+        color: '#000000',
+        opacity: 0.7,
+        marginTop: 8,
+    },
+    bellButton: {
         marginTop: 6,
+        marginRight: 10,
     },
     bellIcon: {
-        width: 24,
-        height: 24,
+        width: 27,
+        height: 27,
         resizeMode: 'contain',
-        marginTop: 4,
     },
     pendingBanner: {
         borderWidth: 1,
@@ -225,18 +265,14 @@ const styles = StyleSheet.create({
         fontSize: 13,
         color: '#555555',
     },
-    sectionLabel: {
-        fontSize: 11,
-        fontWeight: '600',
-        color: '#888888',
-        letterSpacing: 1,
-        marginTop: 20,
-        marginBottom: 10,
-    },
     createRequestButton: {
+        height: 46,
         borderRadius: 8,
-        paddingVertical: 15,
+        borderWidth: 1,
+        borderColor: 'rgba(0, 0, 0, 0.3)',
+        marginHorizontal: -1, // Figma: the button is 354 wide, the containers 352
         alignItems: 'center',
+        justifyContent: 'center',
     },
     createRequestText: {
         color: '#FFFFFF',
@@ -245,61 +281,16 @@ const styles = StyleSheet.create({
     },
     divider: {
         height: 1,
-        backgroundColor: '#8A8A8A',
-        marginTop: 20,
+        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+        marginTop: 23,
     },
-    activeCard: {
-        borderWidth: 1,
-        borderColor: '#C9C9C9',
-        borderRadius: 10,
-        backgroundColor: '#FFFFFF',
-        padding: 16,
-        height: 110,
-        justifyContent: 'center',
+    firstSection: {
+        minHeight: 148,
+        marginTop: 28,
     },
-    activeRepairText: {
-        fontSize: 14,
-        color: '#333333',
-        textAlign: 'center',
-    },
-    historyCard: {
-        borderWidth: 1,
-        borderColor: '#C9C9C9',
-        borderRadius: 10,
-        backgroundColor: '#FFFFFF',
-        paddingHorizontal: 16,
-        paddingTop: 16,
-        paddingBottom: 12,
-        minHeight: 160,
-    },
-    historyLoader: {
-        marginTop: 16,
-    },
-    historyItem: {
-        marginBottom: 8,
-    },
-    historyMessage: {
-        fontSize: 12,
-        color: '#333333',
-    },
-    historyTime: {
-        fontSize: 10,
-        fontWeight: '600',
-        color: '#666666',
-        marginTop: 2,
-        marginBottom: 8,
-    },
-    historyLine: {
-        height: 1,
-        backgroundColor: '#8A8A8A',
-    },
-    historyEmpty: {
-        paddingVertical: 24,
-    },
-    emptyStateText: {
-        fontSize: 13,
-        color: '#999999',
-        textAlign: 'center',
+    nextSection: {
+        minHeight: 149,
+        marginTop: 27,
     },
 });
 

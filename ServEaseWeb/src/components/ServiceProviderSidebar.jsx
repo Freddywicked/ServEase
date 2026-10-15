@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { LogOut } from 'lucide-react';
 import { logout } from '../api/client';
 import { useAuth } from '../context/auth_context';
+import useSidebarCollapsed from '../hooks/SidebarCollapse';
 import fullLogo from '../assets/servease_web_sidebar.png';
 import iconLogo from '../assets/servease_icon.png';
 import dashboardIconWhite from '../assets/icon_dashboard_white.png';
@@ -21,10 +22,13 @@ import Notifications from './Notifications';
 
 const EXPANDED_WIDTH = 229;
 const COLLAPSED_WIDTH = 84;
-const AUTO_COLLAPSE_QUERY = '(max-width: 900px)';
 
 // Switch Account takes the provider back to their customer side.
 const CUSTOMER_HOME_PATH = '/customer/dashboard';
+
+// Name + email in the dropdown open the provider's profile (ServiceProviderProfile page).
+// Adjust if the route in your router differs.
+const PROVIDER_PROFILE_PATH = '/serviceprovider/profile';
 
 // "Mark Frederick Cerillo" -> "MC"
 const getInitials = (name = '') => {
@@ -64,9 +68,7 @@ const NAV_ITEMS = [
 ];
 
 export default function ServiceProviderSidebar({ children, initials }) {
-  const [collapsed, setCollapsed] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia(AUTO_COLLAPSE_QUERY).matches
-  );
+  const [collapsed, setCollapsed] = useSidebarCollapsed();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const location = useLocation();
@@ -78,13 +80,7 @@ export default function ServiceProviderSidebar({ children, initials }) {
   // The bell is hidden on the dashboard (notifications are shown inside its container).
   const onDashboard = location.pathname.startsWith('/serviceprovider/dashboard');
 
-  // Responsive: collapse the sidebar automatically on small screens, expand again on large ones.
-  useEffect(() => {
-    const mq = window.matchMedia(AUTO_COLLAPSE_QUERY);
-    const onChange = (e) => setCollapsed(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
+  // Collapsed state lives in useSidebarCollapsed, so it survives tab changes (remounts).
 
   // Close the account dropdown when clicking outside of it or pressing Escape.
   useEffect(() => {
@@ -102,6 +98,11 @@ export default function ServiceProviderSidebar({ children, initials }) {
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [menuOpen]);
+
+  const handleProfileClick = () => {
+    setMenuOpen(false);
+    navigate(PROVIDER_PROFILE_PATH);
+  };
 
   const handleSwitchAccount = () => {
     setMenuOpen(false);
@@ -165,12 +166,19 @@ export default function ServiceProviderSidebar({ children, initials }) {
                 role="menu"
                 className="absolute right-0 top-full z-50 mt-2 box-border w-[260px] rounded-[4px] border border-black/15 bg-white px-5 py-4 font-[Inter] shadow-[0_4px_12px_rgba(0,0,0,0.08)]"
               >
-                <p className="m-0 truncate text-[18px] font-bold leading-[22px] text-black">
-                  {user?.name}
-                </p>
-                <p className="m-0 mb-4 truncate text-[16px] leading-[24px] text-[#5B5959]">
-                  {user?.email}
-                </p>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={handleProfileClick}
+                  className="m-0 mb-4 block w-full cursor-pointer border-none bg-transparent p-0 text-left"
+                >
+                  <span className="block truncate text-[18px] font-bold leading-[22px] text-black">
+                    {user?.name}
+                  </span>
+                  <span className="block truncate text-[16px] font-normal leading-[24px] text-[#5B5959]">
+                    {user?.email}
+                  </span>
+                </button>
                 <button
                   type="button"
                   role="menuitem"

@@ -25,6 +25,7 @@ import IncomingServiceRequest from './serviceprovider/IncomingServiceRequest'
 import ServiceRequestDetails from './serviceprovider/ServiceRequestDetails'
 import ActiveJobs from './serviceprovider/ActiveJobs'
 import Earnings from './serviceprovider/Earnings'
+import ServiceProviderProfile from './serviceprovider/ServiceProviderProfile'
 
 function App() {
   return (
@@ -71,6 +72,8 @@ function App() {
         <Route path="/serviceprovider/requests/:requestId" element={<ServiceRequestDetails />} />
         <Route path="/serviceprovider/jobs" element={<ActiveJobs />} />
         <Route path="/serviceprovider/earnings" element={<Earnings />} />
+        {/* Opened from the ServiceProviderSidebar account dropdown (name + email) */}
+        <Route path="/serviceprovider/profile" element={<ServiceProviderProfile />} />
       </Routes>
     </BrowserRouter>
     

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Image, Text, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -10,6 +10,8 @@ import { getCategories, getProviderDashboard } from '../api/servicerequest_api';
 import { getProviderEarnings } from '../api/providerWork_api';
 import { formatPeso } from '../utils/provider_formatters';
 import NotificationsModal from '../components/NotificationsModal';
+import { DashboardSection, DashboardItem, DashboardEmpty } from '../components/DashboardSection';
+import { formatAiSuggestion } from '../utils/formatters';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -42,6 +44,32 @@ const buildMonthCells = (year, month) => {
     }
     return cells;
 };
+
+const PREVIEW_LIMIT = 2; // each container previews two rows, like the design
+
+// The three stat boxes above the calendar button. Values come from `stats` in
+// GET /provider/dashboard; several key spellings are accepted so a backend rename
+// doesn't blank the boxes. A missing value shows '–'.
+const STAT_CARDS = [
+    { label: 'Active jobs', keys: ['activeJobs', 'active_jobs', 'active'] },
+    { label: 'This month', keys: ['thisMonth', 'this_month', 'jobsThisMonth', 'completedThisMonth'] },
+    { label: 'Rating', keys: ['rating', 'averageRating', 'average_rating', 'avgRating'], decimals: 1 },
+];
+
+const readStat = (stats, keys) => {
+    for (const key of keys) {
+        if (stats?.[key] !== undefined && stats[key] !== null) return stats[key];
+    }
+    return null;
+};
+
+const formatStat = (value, decimals) => {
+    if (value === null || !Number.isFinite(Number(value))) return '–';
+    return decimals ? Number(value).toFixed(decimals) : String(Number(value));
+};
+
+// "Roof Leakage | #SR-0000"
+const rowTitle = (item) => `${item.customerName || 'Service Request'} | #${item.requestNumber}`;
 
 const ServiceProviderDashboard = ({ navigation }) => {
     // `user` (name, email, ...) and `provider` ({ verification_status }) come from
@@ -79,6 +107,8 @@ const ServiceProviderDashboard = ({ navigation }) => {
     // Bell -> NotificationsModal, and the summary shown in the EARNINGS container.
     const [notificationsVisible, setNotificationsVisible] = useState(false);
     const [earningsSummary, setEarningsSummary] = useState(null); // null until loaded / on failure
+    const [bellAnchor, setBellAnchor] = useState(null);
+    const bellRef = useRef(null);
 
     // The provider's title is the first of their saved specializations that is a service category.
     // Registration stores specialization names as free text mixed with chosen services
@@ -238,8 +268,16 @@ const ServiceProviderDashboard = ({ navigation }) => {
         }
     };
 
+    // Measure the bell first so the popup can highlight it and sit right under it.
     const handleNotificationsPress = () => {
-        setNotificationsVisible(true);
+        if (bellRef.current?.measureInWindow) {
+            bellRef.current.measureInWindow((x, y, width, height) => {
+                setBellAnchor({ x, y, width, height });
+                setNotificationsVisible(true);
+            });
+        } else {
+            setNotificationsVisible(true);
+        }
     };
 
     const handleActiveRepairPress = () => {
@@ -253,6 +291,16 @@ const ServiceProviderDashboard = ({ navigation }) => {
     const handlePendingRequestPress = () => {
         navigation.navigate(ROUTES.INCOMING_SERVICE_REQUEST);
     };
+
+    const pendingItems = pendingRequests.slice(0, PREVIEW_LIMIT).map((item) => ({
+        id: item.id,
+        title: rowTitle(item),
+        summary: formatAiSuggestion(item.aiDiagnosis) || '',
+    }));
+
+    const activeItems = activeRepair
+        ? [{ id: 'active-repair', title: activeRepair.customerName || 'Active Repair', summary: activeRepair.statusLabel || '' }]
+        : [];
 
     const todayKey = toDateKey(new Date());
     const monthCells = buildMonthCells(viewMonth.getFullYear(), viewMonth.getMonth());
@@ -272,10 +320,13 @@ const ServiceProviderDashboard = ({ navigation }) => {
                     </View>
                     <TouchableOpacity
                         onPress={handleNotificationsPress}
+                        style={styles.bellButton}
                         accessibilityRole="button"
                         accessibilityLabel="Notifications"
                     >
-                        <Image source={require('../assets/icon_ringbell.png')} style={styles.bellIcon} />
+                        <View ref={bellRef} collapsable={false}>
+                            <Image source={require('../assets/icon_ringbell.png')} style={styles.bellIcon} />
+                        </View>
                     </TouchableOpacity>
                 </View>
 
@@ -295,6 +346,18 @@ const ServiceProviderDashboard = ({ navigation }) => {
                     </TouchableOpacity>
                 )}
 
+                <View style={styles.statsRow}>
+                    {STAT_CARDS.map((card, index) => (
+                        <View
+                            key={card.label}
+                            style={[styles.statCard, index < STAT_CARDS.length - 1 && styles.statCardSpacing]}
+                        >
+                            <Text style={styles.statValue}>{formatStat(readStat(stats, card.keys), card.decimals)}</Text>
+                            <Text style={styles.statLabel}>{card.label}</Text>
+                        </View>
+                    ))}
+                </View>
+
                 <TouchableOpacity onPress={handleManageCalendar} activeOpacity={0.85}>
                     <LinearGradient
                         colors={['#0255AF', '#04A5A5']}
@@ -308,70 +371,55 @@ const ServiceProviderDashboard = ({ navigation }) => {
 
                 <View style={styles.divider} />
 
-                <Text style={styles.sectionLabel}>ACTIVE REPAIR</Text>
-                <TouchableOpacity
-                    style={styles.card}
-                    activeOpacity={0.85}
-                    onPress={handleActiveRepairPress}
-                    accessibilityRole="button"
-                    accessibilityLabel="View active repair"
-                >
-                    {activeRepair ? (
-                        <Text style={styles.activeRepairText}>
-                            {activeRepair.customerName ? `${activeRepair.customerName} — ` : ''}
-                            {activeRepair.statusLabel}
-                        </Text>
+                <DashboardSection title="Pending Request" onActionPress={handlePendingRequestPress} style={styles.firstSection}>
+                    {pendingItems.length > 0 ? (
+                        pendingItems.map((item, index) => (
+                            <DashboardItem
+                                key={item.id}
+                                isFirst={index === 0}
+                                title={item.title}
+                                summary={item.summary}
+                                onPress={handlePendingRequestPress}
+                            />
+                        ))
                     ) : (
-                        <Text style={styles.emptyStateText}>No Active Repair</Text>
+                        <DashboardEmpty message="No Pending Requests" />
                     )}
-                </TouchableOpacity>
+                </DashboardSection>
 
-                <Text style={styles.sectionLabel}>PENDING REQUESTS</Text>
-                <TouchableOpacity
-                    style={styles.card}
-                    activeOpacity={0.85}
-                    onPress={handlePendingRequestPress}
-                    accessibilityRole="button"
-                    accessibilityLabel="View pending requests"
-                >
-                    {pendingRequests.length > 0 ? (
-                        <View>
-                            {pendingRequests.slice(0, 3).map((item) => (
-                                <View key={item.id} style={styles.notificationItem}>
-                                    <Text style={styles.notificationMessage}>
-                                        #{item.requestNumber} · {item.customerName}
-                                    </Text>
-                                </View>
-                            ))}
-                        </View>
+                <DashboardSection title="Active Repair" onActionPress={handleActiveRepairPress} style={styles.nextSection}>
+                    {activeItems.length > 0 ? (
+                        activeItems.map((item, index) => (
+                            <DashboardItem
+                                key={item.id}
+                                isFirst={index === 0}
+                                title={item.title}
+                                summary={item.summary}
+                                onPress={handleActiveRepairPress}
+                            />
+                        ))
                     ) : (
-                        <Text style={styles.emptyStateText}>No Pending Requests</Text>
+                        <DashboardEmpty message="No Active Repair" />
                     )}
-                </TouchableOpacity>
+                </DashboardSection>
 
-                <Text style={styles.sectionLabel}>EARNINGS</Text>
-                <TouchableOpacity
-                    style={styles.card}
-                    activeOpacity={0.85}
-                    onPress={handleEarningsPress}
-                    accessibilityRole="button"
-                    accessibilityLabel="View earnings"
+                <DashboardSection
+                    title="Earnings"
+                   
+                    onActionPress={handleEarningsPress}
+                    style={[styles.nextSection, styles.earningsSection]}
                 >
-                    {earningsSummary ? (
-                        <View style={styles.earningsRow}>
-                            <View style={styles.earningsItem}>
-                                <Text style={styles.earningsAmount}>{formatPeso(earningsSummary.thisWeek)}</Text>
-                                <Text style={styles.earningsLabel}>This week</Text>
-                            </View>
-                            <View style={styles.earningsItem}>
-                                <Text style={styles.earningsAmount}>{formatPeso(earningsSummary.pendingPayment)}</Text>
-                                <Text style={styles.earningsLabel}>Pending Payment</Text>
-                            </View>
+                    <View style={styles.earningsRow}>
+                        <View style={styles.earningsItem}>
+                            <Text style={styles.earningsAmount}>{formatPeso(earningsSummary?.thisWeek)}</Text>
+                            <Text style={styles.earningsLabel}>This week</Text>
                         </View>
-                    ) : (
-                        <Text style={styles.emptyStateText}>No Earnings Yet</Text>
-                    )}
-                </TouchableOpacity>
+                        <View style={styles.earningsItem}>
+                            <Text style={styles.earningsAmount}>{formatPeso(earningsSummary?.pendingPayment)}</Text>
+                            <Text style={styles.earningsLabel}>Pending Payment</Text>
+                        </View>
+                    </View>
+                </DashboardSection>
             </ScrollView>
 
             <Modal
@@ -528,7 +576,11 @@ const ServiceProviderDashboard = ({ navigation }) => {
                 </View>
             </Modal>
 
-            <NotificationsModal visible={notificationsVisible} onClose={() => setNotificationsVisible(false)} />
+            <NotificationsModal
+                visible={notificationsVisible}
+                onClose={() => setNotificationsVisible(false)}
+                anchor={bellAnchor}
+            />
         </SafeAreaView>
     );
 };
@@ -539,37 +591,41 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFFFF',
     },
     scrollContent: {
-        paddingHorizontal: 26,
-        paddingTop: 20,
-        paddingBottom: 24,
+        paddingHorizontal: 25,
+        paddingTop: 29,
+        paddingBottom: 32,
     },
     headerRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        marginBottom: 16,
     },
     headerTextWrap: {
         flex: 1,
         marginRight: 12,
     },
     welcomeText: {
-        fontSize: 32,
+        fontSize: 35,
+        lineHeight: 42,
         fontWeight: '700',
         color: '#021E79',
     },
     subtitle: {
         fontSize: 14,
+        lineHeight: 16,
         fontWeight: '700',
         color: '#000000',
         opacity: 0.7,
+        marginTop: 8,
+    },
+    bellButton: {
         marginTop: 6,
+        marginRight: 10,
     },
     bellIcon: {
         width: 27,
         height: 27,
         resizeMode: 'contain',
-        marginTop: 10,
     },
     pendingBanner: {
         borderWidth: 1,
@@ -577,24 +633,51 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         backgroundColor: '#F9F9F9',
         padding: 14,
-        marginTop: 4,
+        marginTop: 12,
     },
     pendingBannerText: {
         fontSize: 13,
         color: '#555555',
     },
+    statsRow: {
+        flexDirection: 'row',
+        marginTop: 20,
+    },
+    statCard: {
+        flex: 1,
+        height: 73,
+        borderRadius: 10,
+        backgroundColor: '#E8E8E8',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    statCardSpacing: {
+        marginRight: 10,
+    },
+    statValue: {
+        fontSize: 18,
+        lineHeight: 24,
+        fontWeight: '700',
+        color: '#111111',
+    },
+    statLabel: {
+        fontSize: 12,
+        lineHeight: 16,
+        color: '#333333',
+        marginTop: 2,
+    },
     calendarButton: {
-        height: 44,
+        height: 46,
         borderRadius: 8,
         borderWidth: 1,
         borderColor: 'rgba(0, 0, 0, 0.3)',
-        marginTop: 16,
+        marginTop: 12,
         alignItems: 'center',
         justifyContent: 'center',
     },
     calendarButtonText: {
         color: '#FFFFFF',
-        fontSize: 14,
+        fontSize: 16,
         fontWeight: '700',
     },
     divider: {
@@ -602,63 +685,34 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0, 0, 0, 0.4)',
         marginTop: 18,
     },
-    sectionLabel: {
-        fontSize: 12,
-        lineHeight: 14,
-        fontWeight: '700',
-        color: '#000000',
-        opacity: 0.5,
-        marginTop: 18,
-        marginBottom: 10,
-        marginLeft: 2,
+    firstSection: {
+        minHeight: 124,
+        marginTop: 14,
     },
-    card: {
-        borderWidth: 0.5,
-        borderColor: 'rgba(31, 29, 29, 0.45)',
-        borderRadius: 8,
-        backgroundColor: '#FFFFFF',
-        padding: 16,
-        minHeight: 119,
-        justifyContent: 'center',
+    nextSection: {
+        minHeight: 124,
+        marginTop: 10,
     },
-    activeRepairText: {
-        fontSize: 14,
-        color: '#333333',
-        textAlign: 'center',
-    },
-    emptyStateText: {
-        fontSize: 10,
-        fontWeight: '500',
-        color: '#817C7C',
-        textAlign: 'center',
-    },
-    notificationItem: {
-        marginBottom: 10,
-    },
-    notificationMessage: {
-        fontSize: 13,
-        color: '#333333',
-    },
-    notificationTime: {
-        fontSize: 11,
-        color: '#999999',
-        marginTop: 2,
+    earningsSection: {
+        minHeight: 104,
     },
     earningsRow: {
         flexDirection: 'row',
-        justifyContent: 'space-around',
+        marginTop: 12,
     },
     earningsItem: {
+        flex: 1,
         alignItems: 'center',
     },
     earningsAmount: {
-        fontSize: 20,
-        fontWeight: '800',
-        color: '#111111',
-        marginBottom: 4,
+        fontSize: 15,
+        lineHeight: 26,
+        fontWeight: '700',
+        color: '#3D3D3D',
     },
     earningsLabel: {
-        fontSize: 11,
+        fontSize: 10,
+        lineHeight: 14,
         color: '#666666',
     },
     modalBackdrop: {

@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { LogOut } from 'lucide-react';
 import { logout } from '../api/client';
 import { useAuth } from '../context/auth_context';
+import useSidebarCollapsed from '../hooks/SidebarCollapse';
 import fullLogo from '../assets/servease_web_sidebar.png';
 import iconLogo from '../assets/servease_icon.png';
 import dashboardIconWhite from '../assets/icon_dashboard_white.png';
@@ -22,7 +23,6 @@ import Notifications from './Notifications';
 
 const EXPANDED_WIDTH = 229;
 const COLLAPSED_WIDTH = 84;
-const AUTO_COLLAPSE_QUERY = '(max-width: 900px)';
 
 // Fallback shown when no logged-in customer data is available yet.
 const DEFAULT_INITIALS = 'CG';
@@ -90,9 +90,7 @@ const NAV_ITEMS = [
 ];
 
 export default function CustomerSidebar({ children, initials }) {
-  const [collapsed, setCollapsed] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia(AUTO_COLLAPSE_QUERY).matches
-  );
+  const [collapsed, setCollapsed] = useSidebarCollapsed();
   const location = useLocation();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -105,13 +103,7 @@ export default function CustomerSidebar({ children, initials }) {
   // The bell is hidden on the dashboard (notifications are shown inside its container).
   const onDashboard = location.pathname.startsWith('/customer/dashboard');
 
-  // Responsive: collapse the sidebar automatically on small screens, expand again on large ones.
-  useEffect(() => {
-    const mq = window.matchMedia(AUTO_COLLAPSE_QUERY);
-    const onChange = (e) => setCollapsed(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
+  // Collapsed state lives in useSidebarCollapsed, so it survives tab changes (remounts).
 
   // Close the account dropdown when clicking outside of it or pressing Escape.
   useEffect(() => {
