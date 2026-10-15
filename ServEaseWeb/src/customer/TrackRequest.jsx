@@ -53,21 +53,31 @@ const formatDateTime = (iso) => {
 
 // The backend timeline is a list of { label, timestamp, description, done } using the
 // provider's job stages; the design shows its own four labels, matched by position.
-// 'current' = the first step not done yet; a finished job's last step is 'completed'.
-const mapTimeline = (steps, isComplete) => {
-  const firstPending = steps.findIndex((s) => !s.done);
-  return steps.map((s, i) => ({
-    label: TIMELINE_LABELS[i] || s.label,
-    time: s.timestamp ? formatDateTime(s.timestamp) : PLACEHOLDER_TIME,
-    state: s.done
-      ? isComplete && i === steps.length - 1
-        ? 'completed'
-        : 'done'
-      : i === firstPending
-        ? 'current'
-        : 'pending',
-  }));
-};
+// Indicator flow (see Figma):
+//  - a step stays grey ('pending') until the service provider updates it, then it is blue
+//    with a check ('done');
+//  - the last step, "Completed", is a darker grey ('completed') until the customer has paid
+//    the remaining balance. Once the provider marked it completed but the balance is unpaid
+//    it reads "Payment Pending"; after payment it turns blue like the other steps.
+const mapTimeline = (steps, isPaid) =>
+  steps.map((s, i) => {
+    const isLast = i === steps.length - 1;
+    if (isLast) {
+      if (s.done && isPaid) {
+        return { label: TIMELINE_LABELS[i] || s.label, time: s.timestamp ? formatDateTime(s.timestamp) : '', state: 'done' };
+      }
+      return {
+        label: TIMELINE_LABELS[i] || s.label,
+        time: s.done ? 'Payment Pending' : '',
+        state: 'completed',
+      };
+    }
+    return {
+      label: TIMELINE_LABELS[i] || s.label,
+      time: s.done && s.timestamp ? formatDateTime(s.timestamp) : '',
+      state: s.done ? 'done' : 'pending',
+    };
+  });
 
 // Turns one backend tracking card (see getTrackingCards in api/client.js) into the
 // shape the card components below render. `tab` is the group the card came from.
@@ -122,16 +132,25 @@ const mapCard = (tab) => (card) => {
         kind: 'progress',
         badge: card.statusLabel || 'In progress',
         finalPayment: card.total,
+        isPaid: false,
+        awaitingPayment: false,
         timeline: mapTimeline(card.timeline || [], false),
       };
-    case 'completed':
+    case 'completed': {
+      // Provider marked the job completed. It is only finished (Done tab) once the customer
+      // paid the remaining balance; until then it stays On-going with "Proceed to Payment".
+      const isPaid = Boolean(card.isPaid ?? card.paid ?? card.paymentStatus === 'paid');
       return {
         ...base,
+        status: isPaid ? 'done' : 'ongoing',
         kind: 'progress',
-        badge: 'Completed',
+        badge: isPaid ? 'Completed' : 'In progress',
         finalPayment: card.finalAmount,
-        timeline: mapTimeline(card.timeline || [], true),
+        isPaid,
+        awaitingPayment: !isPaid,
+        timeline: mapTimeline(card.timeline || [], isPaid),
       };
+    }
     case 'declined':
       return { ...base, kind: 'summary', declinedReason: card.reason || null };
     case 'diagnosis':
@@ -151,12 +170,19 @@ const formatPeso = (n) => `₱${formatAmount(n)}`;
 
 /* ------------------------------------ small UI parts ------------------------------------ */
 
-function SmallButton({ children, onClick, className = '' }) {
+// Accept/Approve buttons are green (#167713) and Decline/Reject buttons red (#C62828).
+const BUTTON_VARIANTS = {
+  default: 'border-[#B1A8A8] bg-[#FFFDFD] text-[#414141] hover:bg-[#F3F3F3]',
+  accept: 'border-[#167713] bg-[#167713] text-white hover:bg-[#126010]',
+  decline: 'border-[#C62828] bg-[#C62828] text-white hover:bg-[#A82020]',
+};
+
+function SmallButton({ children, onClick, variant = 'default', className = '' }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`h-[26px] cursor-pointer rounded-[8px] border border-[#B1A8A8] bg-[#FFFDFD] px-4 font-[Inter] text-[11px] font-bold text-[#414141] hover:bg-[#F3F3F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0255AF] ${className}`}
+      className={`h-[26px] cursor-pointer rounded-[8px] border px-4 font-[Inter] text-[11px] font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0255AF] ${BUTTON_VARIANTS[variant]} ${className}`}
     >
       {children}
     </button>
@@ -203,6 +229,7 @@ function CardTitle({ id }) {
   );
 }
 
+// done = blue + check; pending = grey; completed = darker grey (until the balance is paid).
 function StepDot({ state }) {
   const base = 'flex h-[22px] w-[22px] flex-none items-center justify-center rounded-full';
   if (state === 'done') {
@@ -212,15 +239,8 @@ function StepDot({ state }) {
       </span>
     );
   }
-  if (state === 'current') return <span className={`${base} bg-[#4B78BD]`} />;
-  if (state === 'completed') {
-    return (
-      <span className={`${base} bg-[#2B2B2B]`}>
-        <Check size={13} strokeWidth={3} color="#fff" />
-      </span>
-    );
-  }
-  return <span className={`${base} bg-[#2B2B2B]`} />;
+  if (state === 'completed') return <span className={`${base} bg-[#3F3F3F]`} />;
+  return <span className={`${base} bg-[#6B6B6B]`} />;
 }
 
 function Timeline({ steps }) {
@@ -233,9 +253,11 @@ function Timeline({ steps }) {
             <p className="m-0 font-[Inter] text-[12px] font-bold leading-[14px] text-[#292727]">
               {step.label}
             </p>
-            <p className="m-0 font-[Inter] text-[10px] leading-[12px] text-[#7C7979]">
-              {step.time}
-            </p>
+            {step.time ? (
+              <p className="m-0 font-[Inter] text-[10px] leading-[12px] text-[#7C7979]">
+                {step.time}
+              </p>
+            ) : null}
           </div>
         </li>
       ))}
@@ -341,8 +363,8 @@ function ScheduleCard({ request, onAccept, onReject }) {
         {schedule.reason}
       </p>
       <div className="mt-3 flex justify-end gap-2">
-        <SmallButton onClick={onAccept}>Accept</SmallButton>
-        <SmallButton onClick={onReject}>Reject</SmallButton>
+        <SmallButton variant="accept" onClick={onAccept}>Accept</SmallButton>
+        <SmallButton variant="decline" onClick={onReject}>Reject</SmallButton>
       </div>
     </CardShell>
   );
@@ -383,8 +405,8 @@ function AdditionalPaymentCard({ request, onApprove, onDecline, onMessage }) {
           </div>
         </div>
         <div className="mt-3 flex justify-end gap-2">
-          <SmallButton onClick={onApprove}>Approve</SmallButton>
-          <SmallButton onClick={onDecline}>Decline</SmallButton>
+          <SmallButton variant="accept" onClick={onApprove}>Approve</SmallButton>
+          <SmallButton variant="decline" onClick={onDecline}>Decline</SmallButton>
         </div>
       </div>
 
@@ -412,7 +434,7 @@ function ProgressCard({ request, onPayFinal, onMessage }) {
       <Timeline steps={request.timeline} />
 
       <div className="flex justify-end gap-2 border-t border-[#D9D9D9] pt-3">
-        {request.status === 'done' && (
+        {request.awaitingPayment && (
           <SmallButton onClick={onPayFinal}>Proceed to Payment</SmallButton>
         )}
         <SmallButton onClick={onMessage}>Message</SmallButton>
@@ -455,7 +477,12 @@ export default function TrackRequest() {
       TABS.forEach(({ key }) => {
         mapped[key] = (groups?.[key] ?? []).map(mapCard(key));
       });
-      setCardsByTab(mapped);
+      // An unpaid completed job belongs in On-going; a paid one in Done (mapCard sets `status`).
+      const regrouped = Object.fromEntries(TABS.map(({ key }) => [key, []]));
+      Object.values(mapped)
+        .flat()
+        .forEach((card) => regrouped[card.status in regrouped ? card.status : 'sent'].push(card));
+      setCardsByTab(regrouped);
     } catch (err) {
       setError(err.message || 'Could not load your requests. Please try again.');
     } finally {

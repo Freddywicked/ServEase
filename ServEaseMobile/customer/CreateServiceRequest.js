@@ -36,10 +36,6 @@ import { getCurrentCoordinates } from '../utils/deviceLocation';
  *
  * Preferred-time pills are built locally (hourly, 9:00 AM - 4:00 PM).
  *
- * Service Location Type (Home-based / Shop-based) is picked from a dropdown next to the
- * Preferred Appointment box and stored in draft.serviceLocationType ('home' | 'shop').
- * The backend field it should map to is up to you (e.g. SERVICE_REQUEST.service_location_type).
- *
  * Preferred Appointment is the customer's stated preference
  * (SERVICE_REQUEST.preferred_date / preferred_time). It is distinct from the
  * submission timestamp and from the appointment confirmed later in RequestDetails.js.
@@ -67,12 +63,6 @@ const APPOINTMENT_TIME_SLOTS = Array.from(
         return { value: `${String(hour).padStart(2, '0')}:00`, label: formatSlotLabel(hour), hour };
     },
 );
-
-// Where the repair takes place. `value` is what travels in the draft / to the backend.
-const SERVICE_LOCATION_TYPES = [
-    { value: 'home', label: 'Home-based' },
-    { value: 'shop', label: 'Shop-based' },
-];
 
 // 75 -> "1:15"
 const formatDuration = (seconds) => {
@@ -115,7 +105,6 @@ const CreateServiceRequest = ({ navigation }) => {
     const [optionsStatus, setOptionsStatus] = useState('loading'); // 'loading' | 'ready' | 'error'
     const [optionsError, setOptionsError] = useState(''); // why loading failed (shown under the retry hint)
     const [isLocating, setIsLocating] = useState(false);
-    const [isLocationTypeOpen, setIsLocationTypeOpen] = useState(false);
 
     // Preferred appointment picker.
     // `viewed*` is which month the grid is showing (moves as the customer taps ‹ ›).
@@ -131,7 +120,6 @@ const CreateServiceRequest = ({ navigation }) => {
 
     const confirmedDate = parseIsoDate(draft.preferredDate);
     const confirmedTimeLabel = APPOINTMENT_TIME_SLOTS.find((slot) => slot.value === draft.preferredTime)?.label ?? draft.preferredTime;
-    const selectedLocationType = SERVICE_LOCATION_TYPES.find((type) => type.value === draft.serviceLocationType) ?? null;
     const mediaItems = draft.mediaItems ?? [];
     const photoCount = mediaItems.filter((item) => item.type === 'photo').length;
     const videoCount = mediaItems.filter((item) => item.type === 'video').length;
@@ -163,11 +151,6 @@ const CreateServiceRequest = ({ navigation }) => {
 
     const handleSelectCategory = (categoryKey) => {
         setDraft({ categoryKey });
-    };
-
-    const handleSelectLocationType = (value) => {
-        setDraft({ serviceLocationType: value });
-        setIsLocationTypeOpen(false);
     };
 
     // --- Media (photos + video) -------------------------------------------------------------
@@ -371,10 +354,6 @@ const CreateServiceRequest = ({ navigation }) => {
             Alert.alert('Describe the problem', 'Tell us what is going on so we can diagnose it.');
             return;
         }
-        if (!draft.serviceLocationType) {
-            Alert.alert('Choose a service location type', 'Tell us if the repair is home-based or shop-based.');
-            return;
-        }
         if (isUploadingMedia) {
             Alert.alert('Please wait', 'Your photos or video are still uploading.');
             return;
@@ -388,15 +367,14 @@ const CreateServiceRequest = ({ navigation }) => {
     };
 
     const renderCategoryButton = (category, containerStyle) => {
-        // Every category is a gradient pill (matches the design). The selected one is
-        // marked with a navy ring around it; the ring is always reserved (transparent
-        // when not selected) so selecting never shifts the layout.
+        // Every category is a 42px gradient pill (matches the design). The selected one is
+        // marked with a navy ring drawn as an overlay, so selecting never shifts the layout.
         const isSelected = category.key === draft.categoryKey;
 
         return (
             <Pressable
                 key={category.key}
-                style={[containerStyle, styles.categoryRing, isSelected && styles.categoryRingSelected]}
+                style={containerStyle}
                 onPress={() => handleSelectCategory(category.key)}
             >
                 <LinearGradient
@@ -414,6 +392,7 @@ const CreateServiceRequest = ({ navigation }) => {
                         {category.label}
                     </Text>
                 </LinearGradient>
+                {isSelected ? <View pointerEvents="none" style={styles.categoryRingSelected} /> : null}
             </Pressable>
         );
     };
@@ -510,14 +489,11 @@ const CreateServiceRequest = ({ navigation }) => {
                     multiline
                 />
 
-                <Text style={styles.sectionLabel}>Photos & Video (optional)</Text>
+                <Text style={styles.sectionLabel}>Photo</Text>
                 {mediaItems.length === 0 ? (
                     <TouchableOpacity style={styles.uploadBox} onPress={handleAddMedia} activeOpacity={0.85}>
                         <Image source={require('../assets/icon_upload.png')} style={styles.uploadIcon} />
-                        <Text style={styles.uploadText}>Upload Photos or Video</Text>
-                        <Text style={styles.uploadHint}>
-                            Up to {MAX_PHOTOS} photos and {MAX_VIDEOS} video
-                        </Text>
+                        <Text style={styles.uploadText}>Upload Image</Text>
                     </TouchableOpacity>
                 ) : (
                     <View style={styles.mediaSection}>
@@ -536,62 +512,21 @@ const CreateServiceRequest = ({ navigation }) => {
                     </View>
                 )}
 
-                <View style={[styles.appointmentRow, isLocationTypeOpen && styles.appointmentRowOpen]}>
-                    <TouchableOpacity
-                        style={styles.appointmentBox}
-                        onPress={handleOpenAppointmentPicker}
-                        activeOpacity={0.85}
-                    >
-                        <Image source={require('../assets/icon_calendar.png')} style={styles.calendarIcon} />
-                        <View style={styles.appointmentTextWrap}>
-                            <Text style={styles.appointmentTitle}>Preferred Appointment</Text>
-                            <Text style={styles.appointmentSubtitle}>
-                                {confirmedDate && draft.preferredTime
-                                    ? `${formatAppointmentDate(confirmedDate)} · ${confirmedTimeLabel}`
-                                    : 'Choose a date and time'}
-                            </Text>
-                        </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={styles.locationTypeBox}
-                        onPress={() => setIsLocationTypeOpen((open) => !open)}
-                        activeOpacity={0.85}
-                        accessibilityRole="button"
-                        accessibilityLabel="Service location type"
-                    >
-                        <Text
-                            style={[styles.locationTypeText, !selectedLocationType && styles.locationTypePlaceholder]}
-                            numberOfLines={1}
-                        >
-                            {selectedLocationType ? selectedLocationType.label : 'Service Location Type'}
+                <TouchableOpacity
+                    style={styles.appointmentBox}
+                    onPress={handleOpenAppointmentPicker}
+                    activeOpacity={0.85}
+                >
+                    <Image source={require('../assets/icon_calendar.png')} style={styles.calendarIcon} />
+                    <View style={styles.appointmentTextWrap}>
+                        <Text style={styles.appointmentTitle}>Preferred Appointment</Text>
+                        <Text style={styles.appointmentSubtitle}>
+                            {confirmedDate && draft.preferredTime
+                                ? `${formatAppointmentDate(confirmedDate)} · ${confirmedTimeLabel}`
+                                : 'Choose a date and time'}
                         </Text>
-                        <Text style={[styles.locationTypeChevron, isLocationTypeOpen && styles.locationTypeChevronOpen]}>›</Text>
-                    </TouchableOpacity>
-                </View>
-
-                {isLocationTypeOpen && (
-                    // Rendered in the normal flow (not absolutely positioned) so the options stay
-                    // tappable on Android, which ignores touches outside a parent's bounds.
-                    <View style={styles.locationTypeMenu}>
-                        {SERVICE_LOCATION_TYPES.map((type, index) => (
-                            <TouchableOpacity
-                                key={type.value}
-                                style={[styles.locationTypeOption, index > 0 && styles.locationTypeOptionDivider]}
-                                onPress={() => handleSelectLocationType(type.value)}
-                            >
-                                <Text
-                                    style={[
-                                        styles.locationTypeOptionText,
-                                        type.value === draft.serviceLocationType && styles.locationTypeOptionTextSelected,
-                                    ]}
-                                >
-                                    {type.label}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
                     </View>
-                )}
+                </TouchableOpacity>
 
                 <Text style={styles.sectionLabel}>Location</Text>
                 {draft.location ? (
@@ -607,7 +542,7 @@ const CreateServiceRequest = ({ navigation }) => {
                         </TouchableOpacity>
                     </View>
                 ) : (
-                    <TouchableOpacity onPress={handleTurnOnLocation} disabled={isLocating}>
+                    <TouchableOpacity style={styles.locationPlaceholder} onPress={handleTurnOnLocation} disabled={isLocating}>
                         {isLocating ? (
                             <ActivityIndicator color="#0255AF" />
                         ) : (
@@ -754,7 +689,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFFFF',
     },
     scrollContent: {
-        paddingHorizontal: 24,
+        paddingHorizontal: 20,
         paddingTop: 16,
         paddingBottom: 24,
     },
@@ -762,105 +697,120 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 16,
+        marginBottom: 20,
     },
     headerTitle: {
         fontSize: 20,
-        fontWeight: '800',
-        color: '#1B2A8C',
+        lineHeight: 23,
+        fontWeight: '700',
+        color: '#021E79',
     },
     closeButton: {
+        width: 25,
+        height: 25,
         borderWidth: 1,
-        borderColor: '#E0E0E0',
-        borderRadius: 8,
-        padding: 6,
+        borderColor: '#414141',
+        borderRadius: 5,
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     closeIcon: {
-        width: 16,
-        height: 16,
+        width: 11,
+        height: 11,
         resizeMode: 'contain',
+        tintColor: '#414141',
     },
     questionTitle: {
         fontSize: 16,
-        fontWeight: '700',
-        color: '#1B2A8C',
-        marginBottom: 6,
+        lineHeight: 19,
+        fontWeight: '600',
+        color: '#292727',
+        marginTop: 20,
+        marginBottom: 9,
     },
     questionSubtitle: {
-        fontSize: 13,
-        color: '#666666',
-        lineHeight: 18,
-        marginBottom: 20,
+        fontSize: 14,
+        lineHeight: 16,
+        color: '#414141',
+        marginBottom: 22,
     },
     sectionLabel: {
-        fontSize: 13,
-        fontWeight: '700',
-        color: '#333333',
-        marginBottom: 10,
+        fontSize: 14,
+        lineHeight: 16,
+        fontWeight: '600',
+        color: '#292727',
+        marginBottom: 12,
     },
     categoryList: {
-        marginBottom: 20,
+        marginBottom: -2,
     },
     categoryRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        marginBottom: 12,
+        marginBottom: 16,
     },
     categoryHalf: {
-        width: '48%',
+        width: '48.8%',
     },
     categoryFull: {
         width: '100%',
     },
-    categoryRing: {
-        borderWidth: 2,
-        borderColor: 'transparent',
-        borderRadius: 14,
-    },
     categoryRingSelected: {
-        borderColor: '#1B2A8C',
+        // Overlay drawn just outside the 42px pill (see renderCategoryButton).
+        position: 'absolute',
+        top: -3,
+        left: -3,
+        right: -3,
+        bottom: -3,
+        borderWidth: 2,
+        borderColor: '#021E79',
+        borderRadius: 13,
     },
     categoryButton: {
         // Fixed height so every category button is the same size, whatever its label length.
-        height: 48,
+        height: 42,
         borderRadius: 10,
         borderWidth: 1,
-        borderColor: '#B8C4D6',
+        borderColor: '#818080',
         paddingHorizontal: 8,
         alignItems: 'center',
         justifyContent: 'center',
     },
     categoryButtonText: {
-        fontSize: 13,
+        fontSize: 14,
         color: '#FFFFFF',
-        fontWeight: '500',
+        fontWeight: '400',
         textAlign: 'center',
     },
     problemInput: {
         borderWidth: 1,
-        borderColor: '#E0E0E0',
+        borderColor: '#818080',
         borderRadius: 10,
-        padding: 14,
-        fontSize: 14,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        fontSize: 12,
+        lineHeight: 14,
         color: '#333333',
-        minHeight: 80,
+        height: 67,
         textAlignVertical: 'top',
-        marginBottom: 20,
+        marginBottom: 14,
     },
     uploadBox: {
         borderWidth: 1,
-        borderColor: '#E0E0E0',
+        borderColor: '#818080',
         borderRadius: 10,
-        minHeight: 100,
+        height: 64,
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: 20,
+        marginBottom: 14,
     },
     uploadIcon: {
-        width: 32,
-        height: 32,
+        width: 24,
+        height: 24,
         resizeMode: 'contain',
-        marginBottom: 8,
+        tintColor: '#3F3F3F',
+        marginBottom: 2,
     },
     uploadHint: {
         fontSize: 11,
@@ -868,7 +818,7 @@ const styles = StyleSheet.create({
         marginTop: 4,
     },
     mediaSection: {
-        marginBottom: 20,
+        marginBottom: 14,
     },
     mediaGrid: {
         flexDirection: 'row',
@@ -950,8 +900,9 @@ const styles = StyleSheet.create({
         color: '#666666',
     },
     uploadText: {
-        fontSize: 13,
-        color: '#666666',
+        fontSize: 10,
+        lineHeight: 12,
+        color: '#484040',
     },
     uploadedImage: {
         width: '100%',
@@ -961,110 +912,46 @@ const styles = StyleSheet.create({
     },
     locationImage: {
         width: '100%',
-        height: 110,
-        borderRadius: 10,
+        height: 75,
+        borderRadius: 8,
         resizeMode: 'cover',
     },
     turnOnLocationText: {
-        fontSize: 14,
+        fontSize: 12,
         color: '#0255AF',
         fontWeight: '600',
         textDecorationLine: 'underline',
     },
-    appointmentRow: {
-        flexDirection: 'row',
-        alignItems: 'stretch',
-        marginBottom: 20,
-    },
-    appointmentRowOpen: {
-        marginBottom: 6,
-    },
     appointmentBox: {
-        flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
+        height: 42,
         borderWidth: 1,
-        borderColor: '#E0E0E0',
+        borderColor: '#818080',
         borderRadius: 10,
-        paddingVertical: 12,
-        paddingHorizontal: 10,
-        marginRight: 10,
+        paddingHorizontal: 14,
+        marginBottom: 14,
     },
     calendarIcon: {
-        width: 22,
-        height: 22,
+        width: 23,
+        height: 23,
         resizeMode: 'contain',
         tintColor: '#204C96',
-        marginRight: 8,
-    },
-    locationTypeBox: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        borderWidth: 1,
-        borderColor: '#E0E0E0',
-        borderRadius: 10,
-        paddingHorizontal: 12,
-        paddingVertical: 12,
-    },
-    locationTypeText: {
-        flex: 1,
-        fontSize: 12,
-        color: '#111111',
-        marginRight: 6,
-    },
-    locationTypePlaceholder: {
-        color: '#777777',
-    },
-    locationTypeChevron: {
-        fontSize: 20,
-        lineHeight: 20,
-        color: '#333333',
-        transform: [{ rotate: '90deg' }],
-    },
-    locationTypeChevronOpen: {
-        transform: [{ rotate: '-90deg' }],
-    },
-    locationTypeMenu: {
-        // Sits under the dropdown, i.e. the right-hand half of the row above.
-        alignSelf: 'flex-end',
-        width: '50%',
-        borderWidth: 1,
-        borderColor: '#E0E0E0',
-        borderRadius: 10,
-        backgroundColor: '#FFFFFF',
-        marginBottom: 20,
-        overflow: 'hidden',
-    },
-    locationTypeOption: {
-        paddingVertical: 12,
-        paddingHorizontal: 12,
-    },
-    locationTypeOptionDivider: {
-        borderTopWidth: 1,
-        borderTopColor: '#EEEEEE',
-    },
-    locationTypeOptionText: {
-        fontSize: 12,
-        color: '#333333',
-    },
-    locationTypeOptionTextSelected: {
-        color: '#0255AF',
-        fontWeight: '700',
+        marginRight: 14,
     },
     appointmentTextWrap: {
         flex: 1,
     },
     appointmentTitle: {
-        fontSize: 14,
+        fontSize: 10,
+        lineHeight: 12,
         fontWeight: '700',
-        color: '#111111',
-        marginBottom: 2,
+        color: '#484040',
     },
     appointmentSubtitle: {
-        fontSize: 12,
-        color: '#777777',
+        fontSize: 10,
+        lineHeight: 12,
+        color: '#484040',
     },
     modalOverlay: {
         flex: 1,
@@ -1223,16 +1110,18 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
     footer: {
-        paddingHorizontal: 24,
-        paddingVertical: 16,
-        borderTopWidth: 1,
-        borderTopColor: '#E0E0E0',
+        paddingHorizontal: 20,
+        paddingTop: 8,
+        paddingBottom: 16,
         backgroundColor: '#FFFFFF',
     },
     nextButton: {
-        borderRadius: 12,
-        paddingVertical: 15,
+        height: 46,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(0, 0, 0, 0.3)',
         alignItems: 'center',
+        justifyContent: 'center',
     },
     nextButtonText: {
         color: '#FFFFFF',
@@ -1247,6 +1136,14 @@ const styles = StyleSheet.create({
         ...StyleSheet.absoluteFillObject,
         backgroundColor: 'rgba(0, 0, 0, 0.35)',
         borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    locationPlaceholder: {
+        // Same 75px height as the map thumbnail, so the layout doesn't jump once the map loads.
+        height: 75,
+        borderRadius: 8,
+        backgroundColor: '#E9EEF2',
         alignItems: 'center',
         justifyContent: 'center',
     },

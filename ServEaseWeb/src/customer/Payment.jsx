@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, X } from 'lucide-react';
 import CustomerSidebar from '../components/CustomerSidebar';
 import gcashLogo from '../assets/gcash_logo.png';
 import qrphLogo from '../assets/qrph_logo.png';
@@ -36,7 +36,12 @@ const PAYMENT_METHODS = [
   { id: 'gcash', label: 'Gcash', logo: gcashLogo, logoClass: 'h-[40px] w-[53px]' },
   { id: 'qrph', label: 'QR PH', logo: qrphLogo, logoClass: 'h-[46px] w-[46px]' },
   { id: 'card', label: 'Debit/Credit', logo: cardLogo, logoClass: 'h-[24px] w-[40px]' },
+  // Cash has no logo (matches the Figma): the label sits right next to the radio button.
+  { id: 'cash', label: 'Cash', logo: null, logoClass: '' },
 ];
+
+// Where "Rate and Review" goes after a cash final payment (the Rating route in App.jsx).
+const rateAndReviewPath = (id) => `/customer/requests/${id}/review`;
 
 const formatPeso = (n) =>
   `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -55,6 +60,8 @@ export default function Payment({ requestId, amount, paymentType, onBack, onCont
   const [dueAmount, setDueAmount] = useState(amount ?? state?.amount ?? null);
   const [error, setError] = useState('');
   const [processing, setProcessing] = useState(false);
+  // "Payment Completed" modal — shown after a cash FINAL payment.
+  const [showCompleted, setShowCompleted] = useState(false);
 
   useEffect(() => {
     if (!resolvedRequestId) return undefined;
@@ -100,6 +107,32 @@ export default function Payment({ requestId, amount, paymentType, onBack, onCont
 
     if (onContinue) {
       onContinue({ requestId: resolvedRequestId, method: selectedMethod, paymentType: resolvedType });
+      return;
+    }
+
+    // Cash is paid in person, so there is no checkout:
+    //  - initial / additional: nothing is sent, just go back to the previous screen;
+    //  - final: the backend records the cash payment (marks the request completed/paid so it
+    //    moves to the Done tab) and the "Payment Completed" modal offers "Rate and Review".
+    if (selectedMethod === 'cash') {
+      if (resolvedType !== 'final') {
+        handleBack();
+        return;
+      }
+      setProcessing(true);
+      setError('');
+      try {
+        await payForRequest(resolvedRequestId, {
+          amount: dueAmount,
+          method: 'cash',
+          stage: 'final',
+        });
+        setShowCompleted(true);
+      } catch (err) {
+        setError(err.message || 'Could not complete the request. Please try again.');
+      } finally {
+        setProcessing(false);
+      }
       return;
     }
 
@@ -172,9 +205,11 @@ export default function Payment({ requestId, amount, paymentType, onBack, onCont
                   className="peer sr-only"
                 />
                 <span className="mr-[9px] h-3 w-3 flex-none rounded-full border border-[#BFB7B7] bg-[#D9D9D9] peer-checked:border-[#0255AF] peer-checked:bg-[#0255AF] peer-focus-visible:ring-2 peer-focus-visible:ring-[#0255AF]/40" />
-                <span className="flex h-[46px] w-[53px] flex-none items-center justify-center">
-                  <img src={method.logo} alt="" className={`${method.logoClass} object-contain`} />
-                </span>
+                {method.logo && (
+                  <span className="flex h-[46px] w-[53px] flex-none items-center justify-center">
+                    <img src={method.logo} alt="" className={`${method.logoClass} object-contain`} />
+                  </span>
+                )}
                 <span className="ml-[5px] font-[Inter] text-[13px] leading-[22px] text-[#5B5959]">
                   {method.label}
                 </span>
@@ -192,6 +227,42 @@ export default function Payment({ requestId, amount, paymentType, onBack, onCont
           </button>
         </div>
       </div>
+
+      {showCompleted && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="payment-completed-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-6"
+        >
+          <div className="relative w-full max-w-[420px] rounded-[16px] bg-white px-8 pb-8 pt-10 text-center">
+            <button
+              type="button"
+              onClick={() => setShowCompleted(false)}
+              aria-label="Close"
+              className="absolute right-4 top-4 cursor-pointer border-none bg-transparent p-0"
+            >
+              <X size={22} color="#000" />
+            </button>
+            <h2
+              id="payment-completed-title"
+              className="m-0 font-[Inter] text-[16px] font-bold leading-[22px] text-[#292727]"
+            >
+              Payment Completed
+            </h2>
+            <p className="m-0 mt-3 font-[Inter] text-[12px] leading-[16px] text-[#484040]">
+              Payment completed.
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate(rateAndReviewPath(resolvedRequestId))}
+              className="mt-5 h-8 cursor-pointer rounded-[10px] border border-[#B1A8A8] bg-[#FFFDFD] px-6 font-[Inter] text-[11px] font-bold text-[#414141] hover:bg-[#F3F3F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0255AF]"
+            >
+              Rate and Review
+            </button>
+          </div>
+        </div>
+      )}
     </CustomerSidebar>
   );
 }
