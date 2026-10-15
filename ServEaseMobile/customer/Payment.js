@@ -14,6 +14,8 @@ const PAYMENT_METHODS = [
     { id: 'gcash', label: 'Gcash', icon: require('../assets/gcash_logo.png') },
     { id: 'qrph', label: 'QR PH', icon: require('../assets/qrph_logo.png') },
     { id: 'card', label: 'Debit/Credit', icon: require('../assets/cc_logo.png') },
+    // Cash has no logo (matches the Figma); an empty spacer keeps the labels aligned.
+    { id: 'cash', label: 'Cash', icon: null },
 ];
 
 const Payment = ({ navigation, route }) => {
@@ -109,6 +111,27 @@ const Payment = ({ navigation, route }) => {
             Alert.alert('Missing payment details', 'Go back to Track and open the request again.');
             return;
         }
+        // Cash is paid in person, so there is no PayMongo checkout:
+        //  - initial / additional: nothing is sent, just return to the previous screen;
+        //  - final: the backend records the cash payment, which marks the request completed
+        //    (paid) so it moves to Track's Done tab; the "Payment Completed" modal then offers
+        //    "Rate and Review" (Ratings lands on the Done tab).
+        if (selectedMethod === 'cash') {
+            if (paymentStage !== 'final') {
+                navigation.goBack();
+                return;
+            }
+            setIsPaying(true);
+            try {
+                await payForServiceRequest(requestId, { amount: dueAmount, method: 'cash', stage: 'final' });
+                setShowProcessedModal(true);
+            } catch (error) {
+                Alert.alert('Could not complete the request', error.message);
+            } finally {
+                setIsPaying(false);
+            }
+            return;
+        }
         setIsPaying(true);
         // Local flag — the state variable would be stale inside this closure.
         let openedCheckout = false;
@@ -129,6 +152,8 @@ const Payment = ({ navigation, route }) => {
             if (!openedCheckout) setIsPaying(false);
         }
     };
+
+    const isCashFinal = paymentStage === 'final' && selectedMethod === 'cash';
 
     const handleCloseProcessedModal = () => {
         setShowProcessedModal(false);
@@ -171,7 +196,11 @@ const Payment = ({ navigation, route }) => {
                             <View style={[styles.radioOuter, isSelected && styles.radioOuterSelected]}>
                                 {isSelected ? <View style={styles.radioInner} /> : null}
                             </View>
-                            <Image source={method.icon} style={styles.methodIcon} resizeMode="contain" />
+                            {method.icon ? (
+                                <Image source={method.icon} style={styles.methodIcon} resizeMode="contain" />
+                            ) : (
+                                <View style={styles.methodIcon} />
+                            )}
                             <Text style={styles.methodLabel}>{method.label}</Text>
                         </TouchableOpacity>
                     );
@@ -196,16 +225,18 @@ const Payment = ({ navigation, route }) => {
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalCard}>
                         <View style={styles.modalHeaderRow}>
-                            <Text style={styles.modalTitle}>Payment Processed</Text>
+                            <Text style={styles.modalTitle}>{isCashFinal ? 'Payment Completed' : 'Payment Processed'}</Text>
                             <TouchableOpacity onPress={handleCloseProcessedModal}>
                                 <Image source={require('../assets/icon_close.png')} style={styles.modalCloseIcon} />
                             </TouchableOpacity>
                         </View>
 
                         <Text style={styles.modalSubtitle}>
-                            {paymentStage === 'additional'
-                                ? 'The payment for additional parts has been processed.'
-                                : 'The money was sent to the service provider.'}
+                            {isCashFinal
+                                ? 'Payment completed.'
+                                : paymentStage === 'additional'
+                                  ? 'The payment for additional parts has been processed.'
+                                  : 'The money was sent to the service provider.'}
                         </Text>
 
                         <TouchableOpacity style={styles.primaryCtaButton} onPress={handlePrimaryCta}>

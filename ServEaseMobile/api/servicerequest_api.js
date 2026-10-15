@@ -320,11 +320,14 @@ export const getMyServiceRequests = () => request('/service-requests').then(pick
 // One of the customer's own requests (RequestDetails.js) -> the toCustomerDto shape.
 export const getServiceRequest = (requestId) => request(`/service-requests/${requestId}`).then(pick('request'));
 
-// Starts a payment for the request (Payment.js). method: 'gcash' | 'qrph' | 'card',
+// Starts a payment for the request (Payment.js). method: 'gcash' | 'qrph' | 'card' | 'cash',
 // stage: 'initial' | 'final' | 'additional'. When the backend has PayMongo keys this
 // returns { payment, checkoutUrl } — open checkoutUrl in the browser, then poll
 // getPaymentStatus until 'paid'. Without keys the payment is recorded directly
 // (status 'paid', no checkoutUrl) so dev testing still works.
+// 'cash' never returns a checkoutUrl: it is paid in person, so the backend records it
+// as paid immediately. Payment.js only sends cash for the 'final' stage — that settles
+// the remaining balance and moves the request to Track's Done tab.
 export const payForServiceRequest = (requestId, { amount, method, stage }) =>
     request(`/service-requests/${requestId}/payment`, { method: 'POST', body: { amount, method, stage } });
 

@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS public.payments (
   payment_id uuid NOT NULL DEFAULT gen_random_uuid(),
   request_id uuid NOT NULL,
   amount numeric(10, 2) NOT NULL CHECK (amount > 0),
-  method text NOT NULL,          -- 'gcash' | 'qrph' | 'card'
+  method text NOT NULL,          -- 'gcash' | 'qrph' | 'card' | 'cash' (cash: paid in person, recorded directly)
   stage text NOT NULL DEFAULT 'final'
     CHECK (stage = ANY (ARRAY['initial', 'final', 'additional'])),
   status text NOT NULL DEFAULT 'paid'

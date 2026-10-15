@@ -1,21 +1,17 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Modal, View, Text, Image, Pressable, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { View, Text, Pressable, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
 import { getNotifications } from '../api/servicerequest_api';
 import { formatTimeAgo } from '../utils/formatters';
 
 const NOTIFICATION_LIMIT = 10;
 
-// Figma: 337 x 243 white card, 10px radius, 35% black overlay, bell highlighted in a
-// 42px white circle; the card's top edge sits 35.5px below the bell's centre.
-const CARD_OFFSET_FROM_BELL_CENTER = 35.5;
-const FALLBACK_OFFSET_FROM_SAFE_AREA = 87; // used when the bell position isn't passed in
-const BELL_CIRCLE_SIZE = 42;
-const BELL_ICON_SIZE = 27;
+// Where the dropdown starts, measured from the top of the screen's safe area. Figma: it opens
+// just under the "What needs fixing today?" line and covers the top of the content below.
+const DEFAULT_TOP = 107;
 
-// Row text: a `title` field when the backend sends one, otherwise the first sentence of
-// `message` is the bold line and the rest is the smaller line underneath.
-const splitMessage = (item) => {
+// Splits a notification into a bold first sentence and a smaller second line — used by the
+// "Notifications" container on the dashboard. A `title` field wins when the backend sends one.
+export const splitNotification = (item) => {
     if (item.title) return { heading: item.title, detail: item.message || '' };
     const message = item.message || '';
     const match = message.match(/^(.+?[.!?])\s+(.+)$/);
@@ -23,16 +19,18 @@ const splitMessage = (item) => {
 };
 
 /**
- * Popup shown when the bell icon is pressed.
- * Notifications are fetched from the backend every time the modal opens, so the list is
- * always fresh — and because the backend returns the signed-in user's own notifications,
- * a customer and a service provider each see different content in the same popup.
+ * Dropdown shown under the header when the bell icon is pressed — NOT a modal: no dimmed
+ * overlay, it simply floats over the screen. Render it as the LAST child of the screen's
+ * SafeAreaView so it sits on top. Tapping anywhere outside it (or the bell again) closes it.
  *
- * `anchor` (optional) is the bell's { x, y, width, height } from measureInWindow; it lets
- * the popup highlight the bell and sit directly under it, like the design.
+ * Notifications are fetched from the backend every time it opens, so the list is always
+ * fresh — and because the backend returns the signed-in user's own notifications, a customer
+ * and a service provider each see different content.
+ *
+ * The list is a plain ScrollView (no Pressable wrapped around it), so it scrolls normally
+ * once the notifications are taller than the dropdown.
  */
-const NotificationsModal = ({ visible, onClose, anchor }) => {
-    const insets = useSafeAreaInsets();
+const NotificationsModal = ({ visible, onClose, top = DEFAULT_TOP }) => {
     const [notifications, setNotifications] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [loadFailed, setLoadFailed] = useState(false);
@@ -53,142 +51,104 @@ const NotificationsModal = ({ visible, onClose, anchor }) => {
         if (visible) load();
     }, [visible, load]);
 
-    const cardTop = anchor
-        ? anchor.y + anchor.height / 2 + CARD_OFFSET_FROM_BELL_CENTER
-        : insets.top + FALLBACK_OFFSET_FROM_SAFE_AREA;
+    if (!visible) return null;
 
     return (
-        <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
-            {/* Tapping the dimmed backdrop closes the modal */}
-            <Pressable style={styles.backdrop} onPress={onClose}>
-                {anchor ? (
-                    <View
-                        pointerEvents="none"
-                        style={[
-                            styles.bellCircle,
-                            {
-                                left: anchor.x + anchor.width / 2 - BELL_CIRCLE_SIZE / 2,
-                                top: anchor.y + anchor.height / 2 - BELL_CIRCLE_SIZE / 2,
-                            },
-                        ]}
-                    >
-                        <Image source={require('../assets/icon_ringbell.png')} style={styles.bellIcon} />
+        <>
+            {/* Invisible layer behind the dropdown: a tap outside closes it. */}
+            <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close notifications" />
+
+            <View style={[styles.popup, { top }]}>
+                <Text style={styles.title}>NOTIFICATIONS</Text>
+                <View style={styles.line} />
+
+                {isLoading ? (
+                    <ActivityIndicator color="#0255AF" style={styles.stateWrap} />
+                ) : loadFailed ? (
+                    <Pressable onPress={load} style={styles.stateWrap}>
+                        <Text style={styles.stateText}>Couldn't load. Tap to retry.</Text>
+                    </Pressable>
+                ) : notifications.length === 0 ? (
+                    <View style={styles.stateWrap}>
+                        <Text style={styles.stateText}>No notifications yet</Text>
                     </View>
-                ) : null}
-
-                {/* Inner Pressable swallows taps so touching the card doesn't close it */}
-                <Pressable style={[styles.card, { top: cardTop }]} onPress={() => {}}>
-                    <Text style={styles.title}>NOTIFICATIONS</Text>
-
-                    {isLoading ? (
-                        <ActivityIndicator color="#0255AF" style={styles.stateWrap} />
-                    ) : loadFailed ? (
-                        <Pressable onPress={load} style={styles.stateWrap}>
-                            <Text style={styles.stateText}>Couldn't load. Tap to retry.</Text>
-                        </Pressable>
-                    ) : notifications.length === 0 ? (
-                        <View style={styles.stateWrap}>
-                            <Text style={styles.stateText}>No notifications yet</Text>
-                        </View>
-                    ) : (
-                        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-                            {notifications.map((item) => {
-                                const { heading, detail } = splitMessage(item);
-                                return (
-                                    <View key={item.id} style={styles.item}>
-                                        <Text style={styles.message} numberOfLines={1}>{heading}</Text>
-                                        {detail ? <Text style={styles.detail} numberOfLines={1}>{detail}</Text> : null}
-                                        <Text style={styles.time}>{formatTimeAgo(item.createdAt)}</Text>
-                                    </View>
-                                );
-                            })}
-                        </ScrollView>
-                    )}
-                </Pressable>
-            </Pressable>
-        </Modal>
+                ) : (
+                    <ScrollView
+                        style={styles.list}
+                        nestedScrollEnabled
+                        showsVerticalScrollIndicator
+                        keyboardShouldPersistTaps="handled"
+                    >
+                        {notifications.map((item) => (
+                            <View key={item.id}>
+                                <View style={styles.item}>
+                                    <Text style={styles.message}>{item.message}</Text>
+                                    <Text style={styles.time}>{formatTimeAgo(item.createdAt)}</Text>
+                                </View>
+                                <View style={styles.line} />
+                            </View>
+                        ))}
+                    </ScrollView>
+                )}
+            </View>
+        </>
     );
 };
 
 const styles = StyleSheet.create({
-    backdrop: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.35)',
-    },
-    bellCircle: {
+    popup: {
         position: 'absolute',
-        width: BELL_CIRCLE_SIZE,
-        height: BELL_CIRCLE_SIZE,
-        borderRadius: BELL_CIRCLE_SIZE / 2,
-        backgroundColor: '#FFFFFF',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    bellIcon: {
-        width: BELL_ICON_SIZE,
-        height: BELL_ICON_SIZE,
-        resizeMode: 'contain',
-    },
-    card: {
-        position: 'absolute',
-        left: 32,
-        right: 32,
-        height: 243,
+        left: 25,
+        right: 25,
+        maxHeight: 300, // taller than this -> the list scrolls
         backgroundColor: '#FFFFFF',
         borderRadius: 10,
-        paddingTop: 26,
-        paddingHorizontal: 11,
+        borderWidth: 1,
+        borderColor: '#E0E0E0',
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        paddingBottom: 4,
+        zIndex: 10,
+        elevation: 8,
+        shadowColor: '#000000',
+        shadowOpacity: 0.18,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 4 },
     },
     title: {
-        fontSize: 15,
-        lineHeight: 18,
-        fontWeight: '900',
-        color: '#021E79',
-        opacity: 0.7,
-        marginLeft: 7,
-        marginBottom: 9,
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#3F55A5',
+        marginBottom: 8,
+    },
+    line: {
+        height: 1,
+        backgroundColor: '#8A8A8A',
     },
     list: {
-        paddingBottom: 11,
+        flexGrow: 0,
+        flexShrink: 1,
     },
     item: {
-        height: 43,
-        borderWidth: 1,
-        borderColor: '#C9C2C2',
-        borderRadius: 14,
-        backgroundColor: '#FFFFFF',
-        paddingHorizontal: 11,
-        paddingTop: 5,
-        marginBottom: 11,
+        paddingVertical: 10,
     },
     message: {
-        fontSize: 10,
-        lineHeight: 17,
+        fontSize: 12,
         fontWeight: '700',
-        color: '#3D3D3D',
-        marginRight: 52, // keeps the text clear of the time on the right
-    },
-    detail: {
-        fontSize: 9,
-        lineHeight: 15,
-        color: '#484040',
+        color: '#333333',
     },
     time: {
-        position: 'absolute',
-        right: 10,
-        top: 14,
-        fontSize: 10,
-        lineHeight: 12,
-        color: '#484040',
+        fontSize: 11,
+        color: '#666666',
+        marginTop: 2,
     },
     stateWrap: {
         paddingVertical: 24,
         alignItems: 'center',
     },
     stateText: {
-        fontSize: 10,
-        fontWeight: '500',
-        color: '#817C7C',
+        fontSize: 13,
+        color: '#999999',
         textAlign: 'center',
     },
 });

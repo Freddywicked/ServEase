@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Image, Text, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -107,8 +107,6 @@ const ServiceProviderDashboard = ({ navigation }) => {
     // Bell -> NotificationsModal, and the summary shown in the EARNINGS container.
     const [notificationsVisible, setNotificationsVisible] = useState(false);
     const [earningsSummary, setEarningsSummary] = useState(null); // null until loaded / on failure
-    const [bellAnchor, setBellAnchor] = useState(null);
-    const bellRef = useRef(null);
 
     // The provider's title is the first of their saved specializations that is a service category.
     // Registration stores specialization names as free text mixed with chosen services
@@ -268,16 +266,9 @@ const ServiceProviderDashboard = ({ navigation }) => {
         }
     };
 
-    // Measure the bell first so the popup can highlight it and sit right under it.
+    // The bell toggles the notifications dropdown.
     const handleNotificationsPress = () => {
-        if (bellRef.current?.measureInWindow) {
-            bellRef.current.measureInWindow((x, y, width, height) => {
-                setBellAnchor({ x, y, width, height });
-                setNotificationsVisible(true);
-            });
-        } else {
-            setNotificationsVisible(true);
-        }
+        setNotificationsVisible((visible) => !visible);
     };
 
     const handleActiveRepairPress = () => {
@@ -324,9 +315,7 @@ const ServiceProviderDashboard = ({ navigation }) => {
                         accessibilityRole="button"
                         accessibilityLabel="Notifications"
                     >
-                        <View ref={bellRef} collapsable={false}>
-                            <Image source={require('../assets/icon_ringbell.png')} style={styles.bellIcon} />
-                        </View>
+                        <Image source={require('../assets/icon_ringbell.png')} style={styles.bellIcon} />
                     </TouchableOpacity>
                 </View>
 
@@ -579,7 +568,6 @@ const ServiceProviderDashboard = ({ navigation }) => {
             <NotificationsModal
                 visible={notificationsVisible}
                 onClose={() => setNotificationsVisible(false)}
-                anchor={bellAnchor}
             />
         </SafeAreaView>
     );

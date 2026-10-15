@@ -258,15 +258,22 @@ const getTracking = asyncHandler(async (req, res) => {
     }
 
     if (row.request_status === 'Completed') {
-      groups.done.push({
+      // Remaining balance, not the grand total: the 20% initial fee is already paid,
+      // and so is any additional payment the customer chose to pay right away instead
+      // of "Pay Later" (pay-later extras stay in approvedExtras, so they are added here).
+      const finalAmount = round2(Math.max(0, quoteTotal + approvedExtras - paidTotal));
+      // Paid means the remaining balance is settled. Only then does the card belong in
+      // Done; a completed-but-unpaid job stays in On-going labelled "In progress" so
+      // the customer still gets "Proceed to Payment". The app also reads `isPaid`
+      // (payment indicator, badge, deferred-payment note) instead of trusting the tab.
+      const isPaid = finalAmount <= 0;
+      (isPaid ? groups.done : groups.ongoing).push({
         ...base,
         id: cardId('completed'),
         cardType: 'completed',
-        statusLabel: 'Completed',
-        // Remaining balance, not the grand total: the 20% initial fee is already paid,
-        // and so is any additional payment the customer chose to pay right away instead
-        // of "Pay Later" (pay-later extras stay in approvedExtras, so they are added here).
-        finalAmount: round2(Math.max(0, quoteTotal + approvedExtras - paidTotal)),
+        statusLabel: isPaid ? 'Completed' : 'In progress',
+        finalAmount,
+        isPaid,
         timeline,
       });
       return;
@@ -394,7 +401,9 @@ const respondToQuotation = asyncHandler(async (req, res) => {
 // its checkoutUrl — the app opens it (GCash / QR Ph / card) and then polls
 // GET .../payment-status. Without keys (local dev) the payment is recorded as paid
 // directly so the flow can still be tested end to end.
-const PAYMENT_METHODS = ['gcash', 'qrph', 'card'];
+// 'cash' is paid to the provider in person, so it never creates a checkout session —
+// it is recorded as paid right away even when PayMongo keys are configured.
+const PAYMENT_METHODS = ['gcash', 'qrph', 'card', 'cash'];
 
 const paymongo = require('../utils/paymongo');
 const config = require('../config');
@@ -434,8 +443,11 @@ const payForRequest = asyncHandler(async (req, res) => {
   if (!Number.isFinite(amount) || amount <= 0) throw new ApiError(400, 'Enter a valid amount');
   if (!PAYMENT_METHODS.includes(method)) throw new ApiError(400, 'Choose a payment method');
 
-  // ---- No PayMongo key: dev mode, record the payment straight away. ----
-  if (!config.paymongo.secretKey) {
+  // ---- Cash, or no PayMongo key (dev mode): record the payment straight away. ----
+  // Cash is handed to the provider in person, so there is no checkout to confirm.
+  // A final cash payment settles the remaining balance immediately — that is what
+  // moves the request from the customer's On-going tab to Done (see getTracking).
+  if (method === 'cash' || !config.paymongo.secretKey) {
     const payment = await Workflow.addPayment({ request_id: row.request_id, amount, method, stage, status: 'paid' });
     const recipients = await Request.listRecipients(row.request_id);
     const providerId = pickProviderId(row, recipients);

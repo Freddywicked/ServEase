@@ -6,9 +6,9 @@ import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/auth_context';
 import { ROUTES } from '../navigation/routes';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
-import { getActiveRepair, getMyServiceRequests } from '../api/servicerequest_api';
+import { getActiveRepair, getMyServiceRequests, getNotifications } from '../api/servicerequest_api';
 import { formatTimeAgo } from '../utils/formatters';
-import NotificationsModal from '../components/NotificationsModal';
+import NotificationsModal, { splitNotification } from '../components/NotificationsModal';
 import { DashboardSection, DashboardItem, DashboardEmpty } from '../components/DashboardSection';
 
 const PREVIEW_LIMIT = 2; // each container previews two rows, like the design
@@ -30,8 +30,9 @@ const CustomerDashboard = ({ navigation, route }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [loadFailed, setLoadFailed] = useState(false);
     const [notificationsVisible, setNotificationsVisible] = useState(false);
-    const [bellAnchor, setBellAnchor] = useState(null);
-    const bellRef = useRef(null);
+    const [notifications, setNotifications] = useState([]); // latest few, for the Notifications container
+    const [notificationsFailed, setNotificationsFailed] = useState(false);
+    const scrollRef = useRef(null);
 
     // Loads the active repair + a short preview of the customer's history from the backend.
     // Runs every time the dashboard regains focus, so a request just sent from the
@@ -39,10 +40,13 @@ const CustomerDashboard = ({ navigation, route }) => {
     // (Notifications are fetched by NotificationsModal when it opens.)
     const loadDashboardData = useCallback(async () => {
         setLoadFailed(false);
-        const [repairResult, historyResult] = await Promise.allSettled([
+        const [repairResult, historyResult, notificationsResult] = await Promise.allSettled([
             getActiveRepair(),
             getMyServiceRequests(), // newest first
+            getNotifications({ limit: PREVIEW_LIMIT }),
         ]);
+        if (notificationsResult.status === 'fulfilled') setNotifications(notificationsResult.value);
+        setNotificationsFailed(notificationsResult.status === 'rejected');
         if (repairResult.status === 'fulfilled') setActiveRepair(repairResult.value);
         if (historyResult.status === 'fulfilled') setRecentHistory(historyResult.value.slice(0, PREVIEW_LIMIT));
         if (repairResult.status === 'rejected' || historyResult.status === 'rejected') setLoadFailed(true);
@@ -94,16 +98,10 @@ const CustomerDashboard = ({ navigation, route }) => {
         navigation.navigate(ROUTES.CREATE_SERVICE_REQUEST);
     };
 
-    // Measure the bell first so the popup can highlight it and sit right under it.
+    // The bell toggles the dropdown. Scroll to the top first so it opens right under the header.
     const handleNotificationsPress = () => {
-        if (bellRef.current?.measureInWindow) {
-            bellRef.current.measureInWindow((x, y, width, height) => {
-                setBellAnchor({ x, y, width, height });
-                setNotificationsVisible(true);
-            });
-        } else {
-            setNotificationsVisible(true);
-        }
+        if (!notificationsVisible) scrollRef.current?.scrollTo({ y: 0, animated: false });
+        setNotificationsVisible((visible) => !visible);
     };
 
     const goToTrack = () => navigation.navigate(ROUTES.TRACK);
@@ -112,6 +110,11 @@ const CustomerDashboard = ({ navigation, route }) => {
     const activeItems = activeRepair
         ? [{ id: activeRepair.requestId ?? 'active-repair', title: activeRepair.statusLabel ?? activeRepair.requestStatus, summary: '' }]
         : [];
+
+    const notificationItems = notifications.slice(0, PREVIEW_LIMIT).map((item) => {
+        const { heading, detail } = splitNotification(item);
+        return { id: item.id, title: heading, summary: detail || formatTimeAgo(item.createdAt) };
+    });
 
     const historyItems = recentHistory.map((item) => ({
         id: item.id,
@@ -123,7 +126,7 @@ const CustomerDashboard = ({ navigation, route }) => {
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+            <ScrollView ref={scrollRef} contentContainerStyle={styles.scrollContent}>
                 <View style={styles.headerRow}>
                     <View style={styles.headerTextWrap}>
                         <Text style={styles.welcomeText} numberOfLines={1} adjustsFontSizeToFit>
@@ -137,9 +140,7 @@ const CustomerDashboard = ({ navigation, route }) => {
                         accessibilityRole="button"
                         accessibilityLabel="Notifications"
                     >
-                        <View ref={bellRef} collapsable={false}>
-                            <Image source={require('../assets/icon_ringbell.png')} style={styles.bellIcon} />
-                        </View>
+                        <Image source={require('../assets/icon_ringbell.png')} style={styles.bellIcon} />
                     </TouchableOpacity>
                 </View>
 
@@ -164,7 +165,27 @@ const CustomerDashboard = ({ navigation, route }) => {
 
                 <View style={styles.divider} />
 
-                <DashboardSection title="Active Repair" onActionPress={goToTrack} style={styles.firstSection}>
+                <DashboardSection title="Notifications" style={[styles.firstSection, styles.sectionHeight]}>
+                    {notificationItems.length === 0 ? (
+                        <DashboardEmpty
+                            loading={isLoading}
+                            message={notificationsFailed ? "Couldn't load. Tap to retry." : 'No notifications yet'}
+                            onPress={notificationsFailed ? loadDashboardData : undefined}
+                        />
+                    ) : (
+                        notificationItems.map((item, index) => (
+                            <DashboardItem
+                                key={item.id}
+                                isFirst={index === 0}
+                                title={item.title}
+                                summary={item.summary}
+                                onPress={handleNotificationsPress}
+                            />
+                        ))
+                    )}
+                </DashboardSection>
+
+                <DashboardSection title="Active Repair" onActionPress={goToTrack} style={[styles.nextSection, styles.sectionHeight]}>
                     {isLoading || activeItems.length === 0 ? (
                         <DashboardEmpty
                             loading={isLoading}
@@ -184,7 +205,7 @@ const CustomerDashboard = ({ navigation, route }) => {
                     )}
                 </DashboardSection>
 
-                <DashboardSection title="History" onActionPress={goToHistory} style={styles.nextSection}>
+                <DashboardSection title="History" onActionPress={goToHistory} style={[styles.nextSection, styles.sectionHeight]}>
                     {isLoading || historyItems.length === 0 ? (
                         <DashboardEmpty
                             loading={isLoading}
@@ -205,7 +226,7 @@ const CustomerDashboard = ({ navigation, route }) => {
                 </DashboardSection>
             </ScrollView>
 
-            <NotificationsModal visible={notificationsVisible} onClose={() => setNotificationsVisible(false)} anchor={bellAnchor} />
+            <NotificationsModal visible={notificationsVisible} onClose={() => setNotificationsVisible(false)} />
         </SafeAreaView>
     );
 };
@@ -284,13 +305,14 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0, 0, 0, 0.4)',
         marginTop: 23,
     },
-    firstSection: {
+    sectionHeight: {
         minHeight: 148,
-        marginTop: 28,
+    },
+    firstSection: {
+        marginTop: 32,
     },
     nextSection: {
-        minHeight: 149,
-        marginTop: 27,
+        marginTop: 10,
     },
 });
 
