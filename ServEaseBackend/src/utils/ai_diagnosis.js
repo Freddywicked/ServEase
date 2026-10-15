@@ -80,15 +80,14 @@ async function geminiDiagnosis({ category, description }) {
         systemInstruction: {
           parts: [{
             text:
-          'You help ServEase customers figure out what is probably wrong before they book a technician. ' +
-          'ServEase is a service marketplace in the Philippines, so expect descriptions in English, Filipino, or Taglish. ' +
+          'Help the ServEase customers to figure out what is probably wrong before they book a technician or service provider. ' +
+          'For context, ServEase is a service marketplace in the Philippines, so expect descriptions in English, Filipino, or Taglish. ' +
           'Based on the given category and problem description, answer with a JSON object only, no explanation and no markdown: ' +
           '{"probableCause": "your best short guess", "confidencePercent": number from 0 to 100, ' +
           '"relatedChecks": ["3 short things a technician should look at"], ' +
           '"troubleshootingSuggestions": [{"title": "...", "description": "..."}]}. ' +
-          'Rules: only suggest things an ordinary person can safely try, like turning the device off or checking if it is plugged in. ' +
-          'Never tell the customer to open up a device or touch wiring. ' +
-          'If the description is vague or missing details, just lower the confidence instead of guessing.',
+          'Rules: only suggest things or procedures that an ordinary person can safely try. ' +
+          'If the description cannot be understood or there are missing details, just lower the confidence instead of guessing.',
           }],
         },
         contents: [{ role: 'user', parts: [{ text: `Category: ${category}\nProblem: ${description}` }] }],

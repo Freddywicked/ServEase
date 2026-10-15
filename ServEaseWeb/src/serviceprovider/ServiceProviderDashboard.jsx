@@ -26,9 +26,6 @@ const getInitials = (name = '') => {
   return (first + last).toUpperCase();
 };
 
-const SECTION_LABEL =
-  'm-0 mb-3 mt-5 font-[Lato] text-[16px] font-bold uppercase leading-[19px] text-black/50';
-
 const MONTH_NAMES = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
@@ -77,18 +74,69 @@ function StatCard({ value, label }) {
   );
 }
 
-function EmptyBox({ sizeClass, message, children }) {
+// "Roof Leakage | #SR-0000"
+const rowTitle = (category, requestId) => {
+  const ref = requestId ? `#${String(requestId).replace(/^#/, '')}` : '';
+  return [category, ref].filter(Boolean).join(' | ');
+};
+
+// 8150 -> "₱8,150"
+const formatPeso = (amount) => `₱${Number(amount || 0).toLocaleString('en-PH')}`;
+
+// White card with a bold title (Figma: Pending Request / Active Repair / Earnings).
+function DashboardCard({ title, minHeightClass, children }) {
   return (
-    <div
-      className={`box-border flex w-full flex-col rounded-lg border-[0.5px] border-[#1F1D1D]/45 ${sizeClass} ${
-        children ? 'justify-start overflow-y-auto p-4' : 'items-center justify-center'
-      }`}
+    <section
+      className={`box-border flex w-full flex-col rounded-[14px] border border-[#C9C2C2] bg-white px-[21px] pb-[21px] pt-[11px] ${minHeightClass}`}
     >
-      {children || (
+      <h2 className="m-0 font-[SF_Pro,system-ui,sans-serif] text-[15px] font-bold leading-[26px] text-[#414141]">
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+// Card body for a list of requests; shows a centered message when the list is empty.
+function RequestList({ items, emptyMessage }) {
+  if (items.length === 0) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
         <p className="m-0 text-center font-[Roboto] text-[14px] font-medium leading-[23px] text-[#817C7C]">
-          {message}
+          {emptyMessage}
         </p>
-      )}
+      </div>
+    );
+  }
+  return (
+    <div className="mt-[6px] flex flex-col gap-[12px]">
+      {items.map((r) => (
+        <div
+          key={r.id}
+          className="box-border flex h-[54px] w-full flex-none flex-col overflow-hidden rounded-[14px] border border-[#C9C2C2] bg-white px-[15px] pt-[8px]"
+        >
+          <p className="m-0 truncate font-[SF_Pro,system-ui,sans-serif] text-[12px] font-bold leading-[20px] text-[#3D3D3D]">
+            {r.title}
+          </p>
+          <p className="m-0 truncate font-[SF_Pro,system-ui,sans-serif] text-[11px] font-normal leading-[19px] text-[#484040]">
+            {r.summary}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// One amount + caption in the Earnings card (e.g. "₱8,150" / "This week").
+function EarningsFigure({ amount, label }) {
+  return (
+    <div className="flex flex-col items-center text-center">
+      <p className="m-0 font-[SF_Pro,system-ui,sans-serif] text-[20px] font-bold leading-[34px] text-[#3D3D3D]">
+        {formatPeso(amount)}
+      </p>
+      <p className="m-0 font-[SF_Pro,system-ui,sans-serif] text-[11px] font-normal leading-[19px] text-[#484040]">
+        {label}
+      </p>
     </div>
   );
 }
@@ -321,11 +369,11 @@ export default function ServiceProviderDashboard() {
   const [loadError, setLoadError] = useState('');
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
-  // GET /api/provider/dashboard — stat cards, pending requests, notifications, active repair.
+  // GET /api/provider/dashboard — stat cards, pending requests, active repair, earnings.
   const [stats, setStats] = useState(null); // { activeJobs, thisMonth, rating }
-  const [pendingRequests, setPendingRequests] = useState([]); // [{ id, title }]
-  const [notifications, setNotifications] = useState([]); // [{ id, message }]
-  const [activeRepairs, setActiveRepairs] = useState([]); // [{ id, title, status, customer }]
+  const [pendingRequests, setPendingRequests] = useState([]); // [{ id, title, summary }]
+  const [activeRepairs, setActiveRepairs] = useState([]); // [{ id, title, summary }]
+  const [earnings, setEarnings] = useState({ thisWeek: 0, pendingPayment: 0 });
 
   useEffect(() => {
     if (!user) return undefined;
@@ -339,14 +387,29 @@ export default function ServiceProviderDashboard() {
           rating: data?.stats?.rating ?? 0,
         });
         setPendingRequests(
-          (data?.pendingRequests ?? []).map((r) => ({ id: r.id, title: `Request #${r.requestNumber} — ${r.customerName}` }))
+          (data?.pendingRequests ?? []).map((r) => ({
+            id: r.id,
+            title: rowTitle(r.category, r.requestNumber),
+            summary: r.description || r.customerName || '',
+          }))
         );
-        setNotifications(data?.notifications ?? []);
+        const a = data?.activeRepair;
         setActiveRepairs(
-          data?.activeRepair
-            ? [{ id: data.activeRepair.requestId, title: data.activeRepair.statusLabel, customer: data.activeRepair.customerName }]
+          a
+            ? [
+                {
+                  id: a.requestId,
+                  title: rowTitle(a.category, a.requestNumber ?? a.requestId),
+                  summary: a.description || [a.customerName, a.statusLabel].filter(Boolean).join(' - '),
+                },
+              ]
             : []
         );
+        // TODO (BACKEND): match these field names to what GET /api/provider/dashboard sends.
+        setEarnings({
+          thisWeek: data?.earnings?.thisWeek ?? 0,
+          pendingPayment: data?.earnings?.pendingPayment ?? 0,
+        });
       })
       .catch((err) => console.error('Failed to load the provider dashboard', err));
     return () => {
@@ -411,50 +474,25 @@ export default function ServiceProviderDashboard() {
           Manage your Calendar
         </button>
 
-        <div className="mt-5 flex flex-col gap-x-8 gap-y-5 sm:flex-row">
-          <div className="flex-1">
-            <h2 className={SECTION_LABEL}>Pending Request</h2>
-            <EmptyBox sizeClass="min-h-[110px] sm:h-[132px]" message="None">
-              {pendingRequests.length > 0 &&
-                pendingRequests.map((r) => (
-                  <p
-                    key={r.id}
-                    className="m-0 border-b border-black/10 py-2 font-[Roboto] text-[14px] text-[#292727] last:border-b-0"
-                  >
-                    {r.title}
-                  </p>
-                ))}
-            </EmptyBox>
-          </div>
+        {/* Figma: Pending Request + Active Repair side by side, then the Earnings card */}
+        <div className="mt-8 grid grid-cols-1 gap-6 md:mt-[52px] md:grid-cols-2 md:gap-[48px]">
+          <DashboardCard title="Pending Request" minHeightClass="min-h-[185px]">
+            <RequestList items={pendingRequests} emptyMessage="No Pending Request" />
+          </DashboardCard>
 
-          <div className="flex-1">
-            <h2 className={SECTION_LABEL}>Notifications</h2>
-            <EmptyBox sizeClass="min-h-[110px] sm:h-[132px]" message="No Notifications">
-              {notifications.length > 0 &&
-                notifications.map((n) => (
-                  <p
-                    key={n.id}
-                    className="m-0 border-b border-black/10 py-2 font-[Roboto] text-[14px] text-[#292727] last:border-b-0"
-                  >
-                    {n.message}
-                  </p>
-                ))}
-            </EmptyBox>
-          </div>
+          <DashboardCard title="Active Repair" minHeightClass="min-h-[185px]">
+            <RequestList items={activeRepairs} emptyMessage="No Active Repair" />
+          </DashboardCard>
         </div>
 
-        <h2 className={SECTION_LABEL}>Active Repair</h2>
-        <EmptyBox sizeClass="min-h-[160px] sm:h-[212px]" message="No Active Repair">
-          {activeRepairs.length > 0 &&
-            activeRepairs.map((r) => (
-              <div key={r.id} className="border-b border-black/10 py-3 last:border-b-0">
-                <p className="m-0 font-[Quicksand] text-[16px] font-bold text-black">{r.title}</p>
-                <p className="m-0 font-[Roboto] text-[14px] text-[#817C7C]">
-                  {[r.customer, r.status].filter(Boolean).join(' - ')}
-                </p>
-              </div>
-            ))}
-        </EmptyBox>
+        <div className="mt-6 md:mt-[45px]">
+          <DashboardCard title="Earnings" minHeightClass="min-h-[143px]">
+            <div className="mt-[3px] grid grid-cols-1 gap-4 sm:grid-cols-2 sm:px-[10%]">
+              <EarningsFigure amount={earnings.thisWeek} label="This week" />
+              <EarningsFigure amount={earnings.pendingPayment} label="Pending Payment" />
+            </div>
+          </DashboardCard>
+        </div>
       </div>
 
       {isCalendarOpen && <CalendarModal onClose={() => setIsCalendarOpen(false)} />}
