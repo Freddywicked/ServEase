@@ -6,9 +6,9 @@ import LinearGradient from 'react-native-linear-gradient';
 import { useAuth } from '../context/auth_context';
 import { ROUTES } from '../navigation/routes';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
-import { getActiveRepair, getMyServiceRequests, getNotifications } from '../api/servicerequest_api';
+import { getActiveRepair, getMyServiceRequests } from '../api/servicerequest_api';
 import { formatTimeAgo } from '../utils/formatters';
-import NotificationsModal, { splitNotification } from '../components/NotificationsModal';
+import NotificationsModal from '../components/NotificationsModal';
 import { DashboardSection, DashboardItem, DashboardEmpty } from '../components/DashboardSection';
 
 const PREVIEW_LIMIT = 2; // each container previews two rows, like the design
@@ -30,23 +30,19 @@ const CustomerDashboard = ({ navigation, route }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [loadFailed, setLoadFailed] = useState(false);
     const [notificationsVisible, setNotificationsVisible] = useState(false);
-    const [notifications, setNotifications] = useState([]); // latest few, for the Notifications container
-    const [notificationsFailed, setNotificationsFailed] = useState(false);
     const scrollRef = useRef(null);
 
     // Loads the active repair + a short preview of the customer's history from the backend.
     // Runs every time the dashboard regains focus, so a request just sent from the
     // Create Service Request flow shows up as soon as the customer lands back here.
-    // (Notifications are fetched by NotificationsModal when it opens.)
+    // (Notifications are NOT shown on the dashboard — NotificationsModal fetches and
+    // displays them only when the bell is pressed.)
     const loadDashboardData = useCallback(async () => {
         setLoadFailed(false);
-        const [repairResult, historyResult, notificationsResult] = await Promise.allSettled([
+        const [repairResult, historyResult] = await Promise.allSettled([
             getActiveRepair(),
             getMyServiceRequests(), // newest first
-            getNotifications({ limit: PREVIEW_LIMIT }),
         ]);
-        if (notificationsResult.status === 'fulfilled') setNotifications(notificationsResult.value);
-        setNotificationsFailed(notificationsResult.status === 'rejected');
         if (repairResult.status === 'fulfilled') setActiveRepair(repairResult.value);
         if (historyResult.status === 'fulfilled') setRecentHistory(historyResult.value.slice(0, PREVIEW_LIMIT));
         if (repairResult.status === 'rejected' || historyResult.status === 'rejected') setLoadFailed(true);
@@ -111,11 +107,6 @@ const CustomerDashboard = ({ navigation, route }) => {
         ? [{ id: activeRepair.requestId ?? 'active-repair', title: activeRepair.statusLabel ?? activeRepair.requestStatus, summary: '' }]
         : [];
 
-    const notificationItems = notifications.slice(0, PREVIEW_LIMIT).map((item) => {
-        const { heading, detail } = splitNotification(item);
-        return { id: item.id, title: heading, summary: detail || formatTimeAgo(item.createdAt) };
-    });
-
     const historyItems = recentHistory.map((item) => ({
         id: item.id,
         title: historyTitle(item),
@@ -165,27 +156,7 @@ const CustomerDashboard = ({ navigation, route }) => {
 
                 <View style={styles.divider} />
 
-                <DashboardSection title="Notifications" style={[styles.firstSection, styles.sectionHeight]}>
-                    {notificationItems.length === 0 ? (
-                        <DashboardEmpty
-                            loading={isLoading}
-                            message={notificationsFailed ? "Couldn't load. Tap to retry." : 'No notifications yet'}
-                            onPress={notificationsFailed ? loadDashboardData : undefined}
-                        />
-                    ) : (
-                        notificationItems.map((item, index) => (
-                            <DashboardItem
-                                key={item.id}
-                                isFirst={index === 0}
-                                title={item.title}
-                                summary={item.summary}
-                                onPress={handleNotificationsPress}
-                            />
-                        ))
-                    )}
-                </DashboardSection>
-
-                <DashboardSection title="Active Repair" onActionPress={goToTrack} style={[styles.nextSection, styles.sectionHeight]}>
+                <DashboardSection title="Active Repair" onActionPress={goToTrack} style={[styles.firstSection, styles.sectionHeight]}>
                     {isLoading || activeItems.length === 0 ? (
                         <DashboardEmpty
                             loading={isLoading}

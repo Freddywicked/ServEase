@@ -52,9 +52,12 @@ async function geminiSentiment({ rating, review }) {
           parts: [
             {
               text:
-                'You classify customer reviews for ServEase, a service marketplace in the Philippines. ' +
-                "Given a star rating (1-5) and the customer's review, reply with ONLY a JSON object, no other text: " +
-                '{"sentiment": "positive" | "neutral" | "negative"}. Judge the overall customer satisfaction.',
+                'You read customer reviews on ServEase, a service marketplace in the Philippines, and decide if the customer ' +
+                'was happy with the service. Reviews may be in English, Filipino, or Taglish. ' +
+                'Answer with a JSON object only, no explanation: {"sentiment": "positive" | "neutral" | "negative"}. ' +
+                'Rules: judge how the customer feels overall, not just the star rating - some customers give 5 stars but still complain. ' +
+                'If the review only says "(no comment)" or has no real opinion, just base it on the stars. ' +
+                'Use "neutral" when the review is too short or mixed to tell.',
             },
           ],
         },

@@ -80,12 +80,15 @@ async function geminiDiagnosis({ category, description }) {
         systemInstruction: {
           parts: [{
             text:
-          'You are a repair triage assistant for ServEase, a service marketplace in the Philippines. ' +
-          'Given a customer\'s category and problem description, reply with ONLY a JSON object, no other text: ' +
-          '{"probableCause": string (short), "confidencePercent": integer 0-100, ' +
-          '"relatedChecks": string[] (3 short labels), ' +
-          '"troubleshootingSuggestions": [{"title": string, "description": string}] (2 safe things the customer can try)}. ' +
-              'Only suggest safe, non-technical steps. Be honest about low confidence when details are missing.',
+          'You help ServEase customers figure out what is probably wrong before they book a technician. ' +
+          'ServEase is a service marketplace in the Philippines, so expect descriptions in English, Filipino, or Taglish. ' +
+          'Based on the given category and problem description, answer with a JSON object only, no explanation and no markdown: ' +
+          '{"probableCause": "your best short guess", "confidencePercent": number from 0 to 100, ' +
+          '"relatedChecks": ["3 short things a technician should look at"], ' +
+          '"troubleshootingSuggestions": [{"title": "...", "description": "..."}]}. ' +
+          'Rules: only suggest things an ordinary person can safely try, like turning the device off or checking if it is plugged in. ' +
+          'Never tell the customer to open up a device or touch wiring. ' +
+          'If the description is vague or missing details, just lower the confidence instead of guessing.',
           }],
         },
         contents: [{ role: 'user', parts: [{ text: `Category: ${category}\nProblem: ${description}` }] }],
