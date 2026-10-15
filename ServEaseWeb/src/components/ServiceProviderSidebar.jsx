@@ -77,8 +77,6 @@ export default function ServiceProviderSidebar({ children, initials }) {
   const shownInitials = initials || getInitials(user?.name);
   const firstName = user?.name?.trim().split(/\s+/)[0] || '';
   const width = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH;
-  // The bell is hidden on the dashboard (notifications are shown inside its container).
-  const onDashboard = location.pathname.startsWith('/serviceprovider/dashboard');
 
   // Collapsed state lives in useSidebarCollapsed, so it survives tab changes (remounts).
 
@@ -132,9 +130,9 @@ export default function ServiceProviderSidebar({ children, initials }) {
           />
         </div>
 
-        {/* Upper right: notification bell (hidden on the dashboard), user avatar, name + role, dropdown */}
+        {/* Upper right: notification bell, user avatar, name + role, dropdown */}
         <div className="mr-4 flex flex-none items-center gap-4 sm:mr-[46px] sm:gap-[33px]">
-          {!onDashboard && <Notifications viewer="provider" />}
+          <Notifications viewer="provider" />
 
           <div ref={menuRef} className="relative">
             <button
