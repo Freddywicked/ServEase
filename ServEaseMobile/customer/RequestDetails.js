@@ -166,14 +166,14 @@ const RequestDetails = ({ navigation, route }) => {
 
                 <View style={styles.actionRow}>
                     <TouchableOpacity style={styles.actionButtonHalf} onPress={handleApprove} disabled={acting}>
-                        <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.actionButton}>
+                        <View style={[styles.actionButton, styles.approveButton]}>
                             <Text style={styles.actionButtonText}>{acting ? 'Please wait…' : 'Approve'}</Text>
-                        </LinearGradient>
+                        </View>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.actionButtonHalf} onPress={handleDecline} disabled={acting}>
-                        <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.actionButton}>
+                        <View style={[styles.actionButton, styles.declineButton]}>
                             <Text style={styles.actionButtonText}>Decline</Text>
-                        </LinearGradient>
+                        </View>
                     </TouchableOpacity>
                 </View>
                     </>
@@ -296,6 +296,12 @@ const styles = StyleSheet.create({
         paddingVertical: 13,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    approveButton: {
+        backgroundColor: '#167713',
+    },
+    declineButton: {
+        backgroundColor: '#C62828',
     },
     actionButtonText: {
         fontSize: 14,

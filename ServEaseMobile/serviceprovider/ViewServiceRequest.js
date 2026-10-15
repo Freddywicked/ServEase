@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, Modal, StyleSheet, ActivityIndicator, Alert, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import LinearGradient from 'react-native-linear-gradient';
 import { getProviderServiceRequest, submitQuotation, declineServiceRequest } from '../api/servicerequest_api';
 
 const ViewServiceRequest = ({ navigation, route }) => {
@@ -174,15 +173,8 @@ const ViewServiceRequest = ({ navigation, route }) => {
                     <TouchableOpacity style={styles.declineButton} onPress={handleDecline} disabled={acting}>
                         <Text style={styles.declineButtonText}>Decline</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={handleAccept} activeOpacity={0.85} disabled={acting}>
-                        <LinearGradient
-                            colors={['#0255AF', '#04A5A5']}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 0 }}
-                            style={styles.acceptButton}
-                        >
-                            <Text style={styles.acceptButtonText}>{acting ? 'Please wait…' : 'Accept'}</Text>
-                        </LinearGradient>
+                    <TouchableOpacity style={styles.acceptButton} onPress={handleAccept} activeOpacity={0.85} disabled={acting}>
+                        <Text style={styles.acceptButtonText}>{acting ? 'Please wait…' : 'Accept'}</Text>
                     </TouchableOpacity>
                 </View>
                     </>
@@ -432,19 +424,20 @@ const styles = StyleSheet.create({
     },
     declineButton: {
         borderWidth: 1,
-        borderColor: '#CCCCCC',
+        borderColor: '#C62828',
         borderRadius: 20,
         paddingVertical: 12,
         paddingHorizontal: 26,
         marginRight: 10,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: '#C62828',
     },
     declineButtonText: {
         fontSize: 14,
-        fontWeight: '600',
-        color: '#333333',
+        fontWeight: '700',
+        color: '#FFFFFF',
     },
     acceptButton: {
+        backgroundColor: '#167713',
         borderRadius: 20,
         paddingVertical: 12,
         paddingHorizontal: 30,
