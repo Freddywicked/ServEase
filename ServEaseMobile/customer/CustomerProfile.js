@@ -12,10 +12,12 @@ const CustomerProfile = ({ navigation }) => {
     const name = user?.name || 'Your Name';
     const contactText = [user?.email, user?.phone_number].filter(Boolean).join(' | ');
 
-    // "Switch Account" only appears once the service provider application has been
-    // approved. Until then (no application yet, or still pending), the customer
-    // sees "Apply as Service Provider" instead.
+    // Service provider application states (the only way to become a provider):
+    //   no application / rejected -> "Apply as Service Provider"
+    //   pending                   -> "Application Under Review" (not tappable, so they can't re-apply)
+    //   verified                  -> "Switch Account"
     const hasProviderAccount = provider?.verification_status === VERIFIED_STATUS;
+    const isApplicationPending = provider?.verification_status === 'pending';
 
     const handleEditProfile = () => {
         // TODO: point this to the actual edit-profile screen once it exists
@@ -77,6 +79,11 @@ const CustomerProfile = ({ navigation }) => {
                             <Image source={require('../assets/icon_switch_account.png')} style={styles.menuIcon} />
                             <Text style={styles.menuLabel}>Switch Account</Text>
                         </TouchableOpacity>
+                    ) : isApplicationPending ? (
+                        <View style={[styles.menuItem, styles.menuItemPending]}>
+                            <Image source={require('../assets/icon_form.png')} style={styles.menuIcon} />
+                            <Text style={styles.menuLabel}>Application Under Review</Text>
+                        </View>
                     ) : (
                         <TouchableOpacity style={styles.menuItem} onPress={handleApplyAsServiceProvider}>
                             <Image source={require('../assets/icon_form.png')} style={styles.menuIcon} />
@@ -138,6 +145,9 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingVertical: 14,
+    },
+    menuItemPending: {
+        opacity: 0.5,
     },
     menuIcon: {
         width: 22,

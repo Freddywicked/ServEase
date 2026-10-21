@@ -65,7 +65,8 @@ const LoginScreen = ({ navigation }) => {
                 // Non-fatal.
             }
 
-            // Returning users skip RoleSelectionScreen (only for brand-new accounts).
+            // New accounts go straight to the customer dashboard after OTP; this is the
+            // sign-in path for returning users.
             // Verified providers -> provider dashboard; everyone else -> customer dashboard.
             navigation.reset({ index: 0, routes: [{ name: homeRouteFor(provider) }] });
         } catch (err) {

@@ -133,7 +133,9 @@ const OTPVerification = ({ navigation, route }) => {
             } catch (storageError) {
                 // Non-fatal: the splash will fall back to the Get Started flow.
             }
-            navigation.reset({ index: 0, routes: [{ name: 'RoleSelectionScreen' }] });
+            // Every new account starts as a customer (BR-02). Becoming a service provider
+            // is done later from CustomerProfile -> "Apply as Service Provider".
+            navigation.reset({ index: 0, routes: [{ name: 'CustomerDashboard' }] });
         } catch (err) {
             if (isMountedRef.current) {
                 setError(err.message || 'Verification failed. Please try again.');

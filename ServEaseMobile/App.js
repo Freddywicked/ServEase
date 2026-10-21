@@ -10,7 +10,6 @@ import SplashScreen from './screens/SplashScreen';
 import SignupScreen from './screens/SignupScreen';
 import OTPVerification from './screens/OTPVerification';
 import LoginScreen from './screens/LoginScreen';
-import RoleSelectionScreen from './screens/RoleSelectionScreen';
 import ServiceProviderServiceCategory from './serviceprovider/ServiceProviderServiceCategory';
 import ServiceProviderVerificationRequirements from './serviceprovider/ServiceProviderVerificationRequirements';
 import CustomerDashboard from './customer/CustomerDashboard';
@@ -75,7 +74,6 @@ const App = () => {
         <Stack.Screen name="SignupScreen" component={SignupScreen}/>
         <Stack.Screen name="OTPVerification" component={OTPVerification}/>
         <Stack.Screen name="LoginScreen" component={LoginScreen}/>
-        <Stack.Screen name="RoleSelectionScreen" component={RoleSelectionScreen}/>
         <Stack.Screen name="ServiceProviderServiceCategory" component={ServiceProviderServiceCategory}/>
         <Stack.Screen name="ServiceProviderVerificationRequirements" component={ServiceProviderVerificationRequirements}/>
         <Stack.Screen name="CustomerDashboard" component={CustomerDashboard}/>
