@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import TermsAndPrivacy from '../components/TermsandPrivacy';
 
 // Field definitions drive the form. `type` decides how each field is rendered.
 const INPUT_FIELDS = [
@@ -79,6 +80,7 @@ const SignupScreen = ({ navigation, route }) => {
     const [showIosDatePicker, setShowIosDatePicker] = useState(false);
     const [iosTempDate, setIosTempDate] = useState(DEFAULT_PICKER_DATE);
     const [showGenderPicker, setShowGenderPicker] = useState(false);
+    const [showTerms, setShowTerms] = useState(false);
 
     // Used to scroll to the first invalid field.
     const scrollRef = useRef(null);
@@ -169,6 +171,11 @@ const SignupScreen = ({ navigation, route }) => {
 
         // OTPVerification sends the code (requestOtp) and finishes registration (register).
         navigation.navigate('OTPVerification', { fromSignup: true, form });
+    };
+
+    const openTerms = () => {
+        Keyboard.dismiss();
+        setShowTerms(true);
     };
 
     const handleLoginPress = () => {
@@ -297,8 +304,8 @@ const SignupScreen = ({ navigation, route }) => {
                         {form.agreedToTerms && <Text style={styles.checkmark}>✓</Text>}
                     </TouchableOpacity>
                     <Text style={styles.termsText}>
-                        I agree to ServEase's <Text style={styles.link}>Terms of Service</Text> and{' '}
-                        <Text style={styles.link}>Privacy Policy</Text>
+                        I agree to ServEase's{' '}
+                        <Text style={styles.link} onPress={openTerms}>Terms of Service and Privacy Policy</Text>
                     </Text>
                 </View>
                 {errors.agreedToTerms ? <Text style={styles.termsError}>{errors.agreedToTerms}</Text> : null}
@@ -367,6 +374,9 @@ const SignupScreen = ({ navigation, route }) => {
                     </View>
                 </Pressable>
             </Modal>
+
+            {/* Terms of Service and Privacy Policy */}
+            <TermsAndPrivacy visible={showTerms} onClose={() => setShowTerms(false)} />
         </SafeAreaView>
     );
 };

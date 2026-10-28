@@ -83,7 +83,7 @@ const LoginScreen = ({ navigation }) => {
     };
 
     const handleForgotPassword = () => {
-        // TODO: navigate to the Forgot Password screen once it is available.
+        navigation.navigate('ForgotPassword');
     };
 
     const handleGoogleSignIn = () => {
