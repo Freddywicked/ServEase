@@ -17,6 +17,12 @@ const Request = require('../models/servicerequest_model');
 const Workflow = require('../models/workflow_model');
 const { diagnose } = require('../utils/ai_diagnosis');
 const { getProviderFileUrl } = require('../utils/storage');
+const {
+  MAX_RADIUS_KM,
+  DEFAULT_PROVIDER_RADIUS_KM,
+  DEFAULT_CUSTOMER_RADIUS_KM,
+  clampRadiusKm,
+} = require('../utils/radius');
 
 // Same labels as CATEGORIES in CreateServiceRequest.jsx.
 const CATEGORIES = ['Home Repair', 'Automotive', 'IT-Related Devices', 'Phone Device'];
@@ -79,6 +85,9 @@ const toNumberOrNull = (value) => {
 
 // Display name for the "new_request" notification the provider receives
 // (same lookup as customerNameOf in workflow_controllers.js).
+// Where the repair happens, from the mobile CreateServiceRequest dropdown: 'home' | 'shop'.
+const toLocationTypeOrNull = (value) => (value === 'home' || value === 'shop' ? value : null);
+
 const customerNameOf = async (row) => {
   const users = await Request.findUsersByIds([row.customer_id]);
   return users[row.customer_id]?.name || 'Customer';
@@ -148,7 +157,7 @@ const toCustomerDto = (row, recipients = [], users = {}, photoUrls = [], quotes 
 });
 
 // Shape expected by IncomingServiceRequest.jsx (one entry per request sent to this provider)
-const toIncomingDto = (row, recipient, customer, quote) => {
+const toIncomingDto = (row, recipient, customer, quote, distanceKm = null) => {
   const ai = aiOf(row);
   return {
     id: Request.formatRequestId(row.request_number),
@@ -156,7 +165,8 @@ const toIncomingDto = (row, recipient, customer, quote) => {
     createdAt: String(recipient.sent_at || row.created_at || '').slice(0, 10), // "2026-06-27"
     aiDiagnosis: ai?.probableCause ?? null,
     aiConfidence: ai?.confidencePercent ?? null,
-    distanceKm: null, // TODO: compute from the provider's and the request's coordinates
+    distanceKm, // provider's geocoded company_address -> the request's pin (null if either is unknown)
+    serviceLocationType: row.service_location_type ?? null, // 'home' | 'shop'
     status: recipient.status === 'quoted' ? 'quoted' : 'new',
     quote:
       recipient.status === 'quoted' && quote
@@ -166,7 +176,7 @@ const toIncomingDto = (row, recipient, customer, quote) => {
 };
 
 // Shape expected by ServiceRequestDetails.jsx
-const toDetailsDto = (row, recipient, customer, photoUrls = []) => {
+const toDetailsDto = (row, recipient, customer, photoUrls = [], distanceKm = null) => {
   const ai = aiOf(row);
   return {
     id: Request.formatRequestId(row.request_number),
@@ -179,9 +189,10 @@ const toDetailsDto = (row, recipient, customer, photoUrls = []) => {
         (row.latitude != null && row.longitude != null
           ? `${Number(row.latitude).toFixed(5)}, ${Number(row.longitude).toFixed(5)}`
           : ''),
-      distanceKm: null,
+      distanceKm,
       avatarUrl: null,
     },
+    serviceLocationType: row.service_location_type ?? null,
     concern: row.description,
     photos: photoUrls,
     appointment: { date: row.date, time: row.time },
@@ -274,6 +285,7 @@ const create = asyncHandler(async (req, res) => {
     time: req.body.appointmentTime || req.body.preferredTime || null, // "10:00 AM"
     latitude: toNumberOrNull(req.body.latitude),
     longitude: toNumberOrNull(req.body.longitude),
+    service_location_type: toLocationTypeOrNull(req.body.serviceLocationType),
     // The mobile app reverse-geocodes the pin and sends the readable address too
     // (migration 002 adds the column); the provider sees it on ViewServiceRequest.
     address: req.body.address ? String(req.body.address).trim() : null,
@@ -491,6 +503,10 @@ const recommendedForDraft = asyncHandler(async (req, res) => {
   // The draft's preferred schedule: providers who can't take it are excluded below.
   const preferredDate = toIsoDateOrNull(req.query.preferredDate);
   const preferredSlot = to24hSlot(req.query.preferredTime);
+  // Radius feature: how far the customer is willing to look (?radiusKm=, else their saved
+  // default from the profile) and where the repair happens ('home' | 'shop').
+  const radiusKm = clampRadiusKm(req.query.radiusKm, req.user.search_radius_km ?? DEFAULT_CUSTOMER_RADIUS_KM);
+  const locationType = toLocationTypeOrNull(req.query.serviceLocationType);
   // `exclude` arrives as repeated params and/or comma-separated ids, depending on the client.
   const exclude = new Set(
     (Array.isArray(req.query.exclude) ? req.query.exclude : [req.query.exclude])
@@ -533,6 +549,8 @@ const recommendedForDraft = asyncHandler(async (req, res) => {
         reviewCount: rating?.reviewCount || 0,
         experienceYears: p.years_of_experience ?? null,
         offersHomeServices: Boolean(p.offers_home_service),
+        // How far this provider travels for home service; null when they don't offer it.
+        homeServiceRadiusKm: p.offers_home_service ? p.home_service_radius_km ?? DEFAULT_PROVIDER_RADIUS_KM : null,
         // profile_photo is a private storage path; sign it so the app can render it.
         photoUrl: await getProviderFileUrl(p.profile_photo),
         locationName: address,
@@ -546,15 +564,34 @@ const recommendedForDraft = asyncHandler(async (req, res) => {
   // answers with its "No Service Provider Available" state when nobody is left).
   const availableList = preferredDate ? list.filter((p) => p.available) : list;
 
+  // Radius rule. A provider is shown when the distance is within the customer's radius and,
+  // for a HOME-based request, they offer home service and the distance is also within THEIR
+  // own home-service range. Shop-based: only the customer's radius matters (they travel).
+  // A provider whose address could not be geocoded (distanceKm null) is still listed, as before.
+  const offersRequestedService = (p) => locationType !== 'home' || p.offersHomeServices;
+  const withinReach = (p, limitKm) =>
+    p.distanceKm === null ||
+    (p.distanceKm <= limitKm &&
+      (locationType !== 'home' || p.distanceKm <= (p.homeServiceRadiusKm ?? DEFAULT_PROVIDER_RADIUS_KM)));
+  const inRangeList = availableList.filter((p) => offersRequestedService(p) && withinReach(p, radiusKm));
+
   // Filter by the service category; if nobody matches, fall back to all verified
   // providers so the screen never dead-ends. Rank by rating, then distance.
-  const matching = availableList.filter((p) => p.matchesCategory);
-  const pool = wanted && matching.length > 0 ? matching : availableList;
+  const matching = inRangeList.filter((p) => p.matchesCategory);
+  const pool = wanted && matching.length > 0 ? matching : inRangeList;
   pool.sort(
     (a, b) => (b.rating ?? -1) - (a.rating ?? -1) || (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity)
   );
 
-  res.json({ providers: pool });
+  // Nobody in range: tell the app how far the nearest provider who WOULD appear after widening is,
+  // so it can say "Nearest provider is 38 km away. Widen your search?".
+  const reachableIfWidened = availableList.filter(
+    (p) => offersRequestedService(p) && p.distanceKm !== null && !withinReach(p, radiusKm) && withinReach(p, MAX_RADIUS_KM)
+  );
+  const nearestProviderKm =
+    pool.length === 0 && reachableIfWidened.length > 0 ? Math.min(...reachableIfWidened.map((p) => p.distanceKm)) : null;
+
+  res.json({ providers: pool, radiusKm, nearestProviderKm });
 });
 
 // POST /api/service-requests/:requestId/submit   body: { providerIds: [user_id, ...] }
@@ -592,6 +629,17 @@ const getIncomingPair = async (req) => {
   return { row, recipient };
 };
 
+// Returns (row) => km from this provider's workplace to the request's pin, or null when unknown.
+// The provider's company_address is geocoded (cached) like in recommendedForDraft.
+const providerDistanceTo = async (providerUserId) => {
+  const profile = await Provider.findProfile(providerUserId);
+  const point = profile?.company_address ? await geocodeAddress(profile.company_address) : null;
+  return (row) =>
+    point && row.latitude != null && row.longitude != null
+      ? Math.round(haversineKm(Number(row.latitude), Number(row.longitude), point.lat, point.lng) * 10) / 10
+      : null;
+};
+
 // GET /api/providers/requests -> { requests: [...] } (shape of IncomingServiceRequest.jsx)
 const listIncoming = asyncHandler(async (req, res) => {
   const recipients = await Request.listRecipientsForProvider(req.user.user_id, ['sent', 'quoted']);
@@ -603,22 +651,29 @@ const listIncoming = asyncHandler(async (req, res) => {
     recipients.map((r) => r.request_id)
   );
   const quoteByRequest = Object.fromEntries(quoteRows.map((q) => [q.request_id, q]));
+  const distanceTo = await providerDistanceTo(req.user.user_id);
 
   res.json({
     requests: recipients
       .filter((r) => byId[r.request_id])
-      .map((r) => toIncomingDto(byId[r.request_id], r, customers[byId[r.request_id].customer_id], quoteByRequest[r.request_id])),
+      .map((r) => {
+        const row = byId[r.request_id];
+        return toIncomingDto(row, r, customers[row.customer_id], quoteByRequest[r.request_id], distanceTo(row));
+      }),
   });
 });
 
 // GET /api/providers/requests/:requestId -> { request: {...} } (shape of ServiceRequestDetails.jsx)
 const getIncoming = asyncHandler(async (req, res) => {
   const { row, recipient } = await getIncomingPair(req);
-  const [customers, photoMap] = await Promise.all([
+  const [customers, photoMap, distanceTo] = await Promise.all([
     Request.findUsersByIds([row.customer_id]),
     Request.photoUrlsFor([row.request_id]),
+    providerDistanceTo(req.user.user_id),
   ]);
-  res.json({ request: toDetailsDto(row, recipient, customers[row.customer_id], photoMap[row.request_id] || []) });
+  res.json({
+    request: toDetailsDto(row, recipient, customers[row.customer_id], photoMap[row.request_id] || [], distanceTo(row)),
+  });
 });
 
 // POST /api/providers/requests/:requestId/quote   body: { laborPrice, itemPrice, notes }

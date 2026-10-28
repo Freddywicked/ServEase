@@ -217,9 +217,16 @@ export const diagnoseServiceRequest = (draft, { signal } = {}) =>
  * Sorting/matching (specialization, ratings/sentiment, distance, and the customer's
  * preferred date/time) is the backend's job. `exclude` = ids already shown.
  */
-export const getRecommendedProviders = ({ categoryKey, latitude, longitude, preferredDate, preferredTime, exclude }) =>
+// `radiusKm` (5-100) is the customer's search radius and `serviceLocationType` is 'home' | 'shop'.
+// Backend rule: a provider is returned when distance <= radiusKm and, for 'home', they also
+// offer home service and distance <= their own home_service_radius_km.
+export const getRecommendedProviders = ({
+    categoryKey, latitude, longitude, preferredDate, preferredTime, radiusKm, serviceLocationType, exclude,
+}) =>
     request('/service-providers/recommended', {
-        query: { category: categoryKey, latitude, longitude, preferredDate, preferredTime, exclude },
+        query: {
+            category: categoryKey, latitude, longitude, preferredDate, preferredTime, radiusKm, serviceLocationType, exclude,
+        },
     }).then(pick('providers'));
 
 /* --------------------------- Steps 3/2: create the request --------------------------- */
@@ -250,6 +257,7 @@ export const createServiceRequest = (draft, extra = {}) =>
             address: draft.location?.address ?? null,
             preferredDate: draft.preferredDate,
             preferredTime: draft.preferredTime,
+            serviceLocationType: draft.serviceLocationType ?? null, // 'home' | 'shop'
             aiDiagnosis: draft.aiDiagnosis,
             providerId: extra.providerId ?? draft.providerId ?? null,
             resolvedByAi: Boolean(extra.resolvedByAi),

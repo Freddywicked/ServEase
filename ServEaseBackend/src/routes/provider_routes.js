@@ -2,6 +2,10 @@ const router = require('express').Router();
 const multer = require('multer');
 const providers = require('../controllers/provider_controllers');
 const { authenticate } = require('../middleware/auth');
+const asyncHandler = require('../utils/async_handler');
+const ApiError = require('../utils/api_error');
+const Provider = require('../models/provider_model');
+const { parseRadiusKm } = require('../utils/radius');
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB per image, same as the form
 
@@ -33,6 +37,23 @@ const uploadFields = (req, res, next) =>
 
 router.get('/me', authenticate, providers.me);
 router.post('/apply', authenticate, uploadFields, providers.apply);
+
+// PATCH /api/providers/me  body: { homeServiceRadiusKm: 5-100 }
+// The provider changes how far they will travel for home service. Only providers who
+// offered home service in their application have a range to edit.
+router.patch(
+  '/me',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const profile = await Provider.findProfile(req.user.user_id);
+    if (!profile) throw new ApiError(403, 'Provider account required');
+    if (!profile.offers_home_services) throw new ApiError(400, 'You do not offer home service');
+    if (req.body.homeServiceRadiusKm === undefined) throw new ApiError(400, 'homeServiceRadiusKm is required');
+    const km = parseRadiusKm(req.body.homeServiceRadiusKm);
+    await Provider.updateHomeServiceRadius(req.user.user_id, km);
+    res.json({ homeServiceRadiusKm: km });
+  })
+);
 
 // "Manage Calendar" on the provider dashboards (mobile + web): which date/slot
 // pairs the provider marked unavailable. Serves both payload shapes.

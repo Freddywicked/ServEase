@@ -148,7 +148,7 @@ const listVerifiedProviders = async () => {
   const providers = unwrap(
     await supabase
       .from('service_providers')
-      .select('user_id, years_of_experience, profile_photo, availability, company_name, company_address')
+      .select('user_id, years_of_experience, profile_photo, availability, company_name, company_address, home_service_radius_km')
       .eq('verification_status', 'verified')
   );
   if (providers.length === 0) return [];
@@ -200,7 +200,7 @@ const findVerifiedProviderById = async (userId) => {
   const provider = unwrap(
     await supabase
       .from('service_providers')
-      .select('user_id, years_of_experience, profile_photo, availability, company_name, company_address')
+      .select('user_id, years_of_experience, profile_photo, availability, company_name, company_address, home_service_radius_km')
       .eq('user_id', userId)
       .eq('verification_status', 'verified')
       .maybeSingle()

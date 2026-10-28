@@ -5,6 +5,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { ROUTES } from '../navigation/routes';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
+import { useAuth } from '../context/auth_context';
 import ProgressBar from '../components/ProgressBar';
 import {
     getCategories,
@@ -110,6 +111,16 @@ const CreateServiceRequest = ({ navigation }) => {
     // The draft lives in the shared store, so going back from a later step keeps what was typed.
     const draft = useServiceRequestDraftStore((state) => state);
     const setDraft = useServiceRequestDraftStore((state) => state.setDraft);
+    const { user } = useAuth();
+
+    // Start the Service Location Type from the customer's saved "Home Service" preference
+    // (CustomerProfile). Only fills an empty choice, so it never overrides what they picked.
+    useEffect(() => {
+        if (!draft.serviceLocationType && user?.prefers_home_service != null) {
+            setDraft({ serviceLocationType: user.prefers_home_service ? 'home' : 'shop' });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.prefers_home_service]);
 
     const [categories, setCategories] = useState([]);
     const [optionsStatus, setOptionsStatus] = useState('loading'); // 'loading' | 'ready' | 'error'

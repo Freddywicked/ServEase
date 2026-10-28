@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
+import RadiusSlider, { DEFAULT_PROVIDER_RADIUS_KM } from '../components/RadiusSlider';
 
 const SERVICE_CATEGORIES = [
     'IT-Related Device Repair',
@@ -34,6 +35,8 @@ const ServiceProviderServiceCategory = ({ navigation, route }) => {
     const [otherServices, setOtherServices] = useState([]);
     const [yearsOfExperience, setYearsOfExperience] = useState('');
     const [offersHomeServices, setOffersHomeServices] = useState(null); // 'yes' | 'no'
+    // How far (km) the provider will travel for home service. Only asked, and only sent, when YES.
+    const [homeServiceRadiusKm, setHomeServiceRadiusKm] = useState(DEFAULT_PROVIDER_RADIUS_KM);
 
     const isHomeRepairSelected = selectedCategories.includes(HOME_REPAIR_CATEGORY);
 
@@ -121,6 +124,8 @@ const ServiceProviderServiceCategory = ({ navigation, route }) => {
                 otherServices: finalOtherServices,
                 yearsOfExperience, // string, as before
                 offersHomeServices, // 'yes' | 'no', as before
+                // null unless offersHomeServices === 'yes'.
+                homeServiceRadiusKm: offersHomeServices === 'yes' ? homeServiceRadiusKm : null,
             },
         });
     };
@@ -273,6 +278,17 @@ const ServiceProviderServiceCategory = ({ navigation, route }) => {
                 <Text style={styles.subLabel}>DO YOU OFFER HOME SERVICES?</Text>
                 {renderCheckbox('home-yes', 'Yes', offersHomeServices === 'yes', () => setOffersHomeServices('yes'))}
                 {renderCheckbox('home-no', 'No', offersHomeServices === 'no', () => setOffersHomeServices('no'))}
+
+                {offersHomeServices === 'yes' && (
+                    <View style={{ marginTop: 8, marginBottom: 8 }}>
+                        <Text style={styles.subLabel}>HOW FAR WILL YOU TRAVEL FOR HOME SERVICE?</Text>
+                        <RadiusSlider
+                            label="Home service range"
+                            value={homeServiceRadiusKm}
+                            onChange={setHomeServiceRadiusKm}
+                        />
+                    </View>
+                )}
 
                 <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
                     <LinearGradient

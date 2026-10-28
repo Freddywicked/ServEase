@@ -219,3 +219,20 @@ export const registerDeviceToken = (fcmToken, platform = 'android') =>
 
 export const unregisterDeviceToken = (fcmToken) =>
   request('/devices', { method: 'DELETE', body: { fcmToken } });
+
+// --- Service radius (km) ---
+// Provider: how far they will travel for home-service jobs (5-100). Also sent once at
+// application time (see ServiceProviderVerificationRequirements). BACKEND: PATCH /providers/me
+// must accept { homeServiceRadiusKm } and store it in service_providers.home_service_radius_km.
+export const updateProviderHomeRadius = (homeServiceRadiusKm) =>
+  request('/providers/me', { method: 'PATCH', body: { homeServiceRadiusKm } });
+
+// Customer defaults: the "Home Service" preference and the provider search radius (5-100).
+// BACKEND: PATCH /users/me must accept { prefersHomeService, searchRadiusKm } and /auth/me
+// must return them as prefers_home_service / search_radius_km.
+export const updateCustomerPreferences = ({ prefersHomeService, searchRadiusKm }) => {
+  const body = {};
+  if (prefersHomeService !== undefined) body.prefersHomeService = prefersHomeService;
+  if (searchRadiusKm !== undefined) body.searchRadiusKm = searchRadiusKm;
+  return request('/users/me', { method: 'PATCH', body });
+};

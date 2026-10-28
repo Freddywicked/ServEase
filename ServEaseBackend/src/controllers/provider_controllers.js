@@ -2,6 +2,7 @@ const ApiError = require('../utils/api_error');
 const asyncHandler = require('../utils/async_handler');
 const Provider = require('../models/provider_model');
 const { uploadProviderFile } = require('../utils/storage');
+const { DEFAULT_PROVIDER_RADIUS_KM, parseRadiusKm } = require('../utils/radius');
 
 const HOME_REPAIR_CATEGORY = 'Home Repair Services';
 
@@ -30,11 +31,30 @@ const parseBody = (body) => {
   // The app sends 'yes' / 'no' (also tolerate true / 'true').
   const offersHomeServices = ['yes', 'true', '1'].includes(String(body.offersHomeServices).toLowerCase());
 
+  // How far (km) the provider will travel for home service. Only asked when they offer it.
+  // Older app builds don't send it, so a missing value falls back to the default instead of failing;
+  // a value that IS sent must be 5-100 (parseRadiusKm throws a 400 otherwise).
+  const rawRadius = body.homeServiceRadiusKm;
+  const homeServiceRadiusKm = offersHomeServices
+    ? rawRadius === undefined || rawRadius === '' || rawRadius === null
+      ? DEFAULT_PROVIDER_RADIUS_KM
+      : parseRadiusKm(rawRadius)
+    : null;
+
   // Work/company details — service_providers.company_name / company_address.
   const companyName = body.companyName ? String(body.companyName).trim() : '';
   const companyAddress = body.companyAddress ? String(body.companyAddress).trim() : '';
 
-  return { selectedCategories, homeRepairServices, otherServices, yearsOfExperience, offersHomeServices, companyName, companyAddress };
+  return {
+    selectedCategories,
+    homeRepairServices,
+    otherServices,
+    yearsOfExperience,
+    offersHomeServices,
+    homeServiceRadiusKm,
+    companyName,
+    companyAddress,
+  };
 };
 
 // GET /api/providers/me — the logged-in user's own provider profile.
@@ -48,8 +68,16 @@ const me = asyncHandler(async (req, res) => {
 // middleware, never from the request body, so no one can submit an
 // application on someone else's behalf.
 const apply = asyncHandler(async (req, res) => {
-  const { selectedCategories, homeRepairServices, otherServices, yearsOfExperience, offersHomeServices, companyName, companyAddress } =
-    parseBody(req.body);
+  const {
+    selectedCategories,
+    homeRepairServices,
+    otherServices,
+    yearsOfExperience,
+    offersHomeServices,
+    homeServiceRadiusKm,
+    companyName,
+    companyAddress,
+  } = parseBody(req.body);
 
   if (!req.files?.validId?.[0]) throw new ApiError(400, 'A valid ID is required');
   if (!req.files?.selfie?.[0]) throw new ApiError(400, 'A selfie is required');
@@ -92,6 +120,7 @@ const apply = asyncHandler(async (req, res) => {
     profile_photo,
     certification,
     offers_home_service: offersHomeServices,
+    home_service_radius_km: homeServiceRadiusKm,
     specializations,
   });
 

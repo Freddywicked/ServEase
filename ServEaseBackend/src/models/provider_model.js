@@ -16,7 +16,7 @@ const findProfile = async (userId) => {
   const row = unwrap(
     await supabase
       .from('service_providers')
-      .select('user_id, years_of_experience, profile_photo, verification_status, availability, company_name, company_address')
+      .select('user_id, years_of_experience, profile_photo, verification_status, availability, company_name, company_address, home_service_radius_km')
       .eq('user_id', userId)
       .maybeSingle()
   );
@@ -41,6 +41,8 @@ const findProfile = async (userId) => {
     availability: row.availability,
     company_name: row.company_name,
     company_address: row.company_address,
+    // How far (km) the provider travels for home service (5-100); null when not set.
+    home_service_radius_km: row.home_service_radius_km ?? null,
     specializations: (specs || []).map((s) => s.specialization_name),
   };
 };
@@ -61,6 +63,7 @@ const create = async ({
   profile_photo,
   certification,
   offers_home_service,
+  home_service_radius_km,
   specializations,
 }) => {
   const provider = unwrap(
@@ -74,6 +77,8 @@ const create = async ({
         government_id,
         profile_photo,
         certification,
+        // Only meaningful when the provider offers home service.
+        home_service_radius_km: offers_home_service ? home_service_radius_km ?? null : null,
         // availability is left null until the provider sets a schedule;
         // the column is text, not boolean.
         verification_status: 'pending',
@@ -100,4 +105,15 @@ const create = async ({
   return provider;
 };
 
-module.exports = { findByUserId, findProfile, create };
+// Provider changes how far they travel for home service (already validated 5-100 by the caller).
+const updateHomeServiceRadius = async (userId, km) =>
+  unwrap(
+    await supabase
+      .from('service_providers')
+      .update({ home_service_radius_km: km })
+      .eq('user_id', userId)
+      .select('user_id, home_service_radius_km')
+      .single()
+  );
+
+module.exports = { findByUserId, findProfile, create, updateHomeServiceRadius };

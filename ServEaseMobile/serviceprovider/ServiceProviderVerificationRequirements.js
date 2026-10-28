@@ -125,6 +125,7 @@ const ServiceProviderVerification = ({ navigation, route }) => {
                 otherService,
                 yearsOfExperience,
                 offersHomeServices,
+                homeServiceRadiusKm,
             } = route.params?.serviceCategory || {};
 
             const formData = new FormData();
@@ -137,6 +138,10 @@ const ServiceProviderVerification = ({ navigation, route }) => {
             if (otherService) formData.append('otherService', otherService);
             formData.append('yearsOfExperience', String(yearsOfExperience ?? ''));
             formData.append('offersHomeServices', offersHomeServices === 'yes' ? 'yes' : 'no');
+            // How far (km) this provider travels for home service; only meaningful when YES.
+            if (offersHomeServices === 'yes' && homeServiceRadiusKm) {
+                formData.append('homeServiceRadiusKm', String(homeServiceRadiusKm));
+            }
             formData.append('validId', toFormDataFile(validId, 'valid_id.jpg'));
             formData.append('selfie', toFormDataFile(selfie, 'selfie.jpg'));
             supportingDocs.forEach((doc, index) => {

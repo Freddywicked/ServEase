@@ -2,7 +2,8 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth, VERIFIED_STATUS } from '../context/auth_context';
-import { getProviderProfile, setActiveMode } from '../api/client';
+import { getProviderProfile, setActiveMode, updateProviderHomeRadius } from '../api/client';
+import RadiusSlider, { DEFAULT_PROVIDER_RADIUS_KM } from '../components/RadiusSlider';
 import { getServiceProviderDetails } from '../api/servicerequest_api';
 
 // Specializations are saved as one list (categories + chosen services); these
@@ -25,6 +26,7 @@ const ServiceProviderProfile = ({ navigation }) => {
     const { user, provider, refreshUser, signOut } = useAuth();
     const [profile, setProfile] = useState(null);
     const [switching, setSwitching] = useState(false);
+    const [radiusOverrideKm, setRadiusOverrideKm] = useState(null); // set while/after the provider edits it
     // Ratings / reviews / AI sentiment summary for THIS provider:
     //   { positiveFeedbackPercent, rating, reviewCount, aiSummaryTags: [],
     //     reviews: [{ id, reviewerName (masked), rating, serviceAvailed, comment }] }
@@ -42,6 +44,19 @@ const ServiceProviderProfile = ({ navigation }) => {
     const companyAddress = profile?.company_address;
     const availability = profile?.availability;
     const photoUri = /^https?:\/\//.test(profile?.profile_photo || '') ? profile.profile_photo : null;
+
+    const homeRadiusKm = radiusOverrideKm ?? profile?.home_service_radius_km ?? DEFAULT_PROVIDER_RADIUS_KM;
+
+    const handleHomeRadiusChange = async (km) => {
+        const previous = radiusOverrideKm;
+        setRadiusOverrideKm(km);
+        try {
+            await updateProviderHomeRadius(km);
+        } catch (error) {
+            setRadiusOverrideKm(previous);
+            Alert.alert('Could not save your home service range', error.message);
+        }
+    };
 
     const loadProfile = useCallback(async () => {
         try {
@@ -201,6 +216,15 @@ const ServiceProviderProfile = ({ navigation }) => {
                             {profile.offers_home_services ? 'Yes' : 'No'}
                         </Text>
                     )}
+                    {profile?.offers_home_services ? (
+                        <View style={{ marginTop: 8 }}>
+                            <RadiusSlider
+                                label="Home service range"
+                                value={homeRadiusKm}
+                                onChange={handleHomeRadiusChange}
+                            />
+                        </View>
+                    ) : null}
                 </View>
 
                 <View style={styles.aiSection}>
@@ -261,7 +285,7 @@ const ServiceProviderProfile = ({ navigation }) => {
                         disabled={switching}
                     >
                         <Image source={require('../assets/icon_switch_account.png')} style={styles.menuIcon} />
-                        <Text style={styles.menuLabel}>Switch Account</Text>
+                        <Text style={styles.menuLabel}>Switch as Customer</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.menuItem} onPress={handleLogout}>

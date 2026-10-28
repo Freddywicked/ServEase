@@ -26,6 +26,7 @@ const ICON_CHECK = require('../assets/icon_check.png');
  *     experienceYears,             // 5
  *     specialities,                // 'IT and Phone Repair'
  *     locationName, distanceKm,    // 'Naga City', 2.5
+ *     homeServiceRadiusKm,         // 50 | null — how far they travel for home service (null = none)
  *     availabilitySchedule,        // 'Mon-Fri, 8AM-6PM'
  *     workplace,                   // 'Malamaya Studio'
  *     positiveFeedbackPercent,     // 92
@@ -156,6 +157,7 @@ const ProviderDetails = ({ navigation, route }) => {
                 <View style={styles.infoBlock}>
                     {renderInfoLine('Specialities', provider.specialities || provider.specialty)}
                     {renderInfoLine('Location', locationText)}
+                    {renderInfoLine('Home service', provider.homeServiceRadiusKm ? `Up to ${provider.homeServiceRadiusKm} km` : null)}
                     {renderInfoLine('Available', provider.availabilitySchedule)}
                     {renderInfoLine('Workplace', provider.workplace)}
                 </View>

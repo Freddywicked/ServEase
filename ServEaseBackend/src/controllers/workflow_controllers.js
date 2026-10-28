@@ -1453,6 +1453,8 @@ const browseProviders = asyncHandler(async (req, res) => {
       locationName: p.company_address || '',
       availabilitySchedule: p.availability || '',
       offersHomeServices: Boolean(p.offers_home_service),
+      // How far (km) this provider travels for home service; null = not offered / not set.
+      homeServiceRadiusKm: p.offers_home_service ? p.home_service_radius_km ?? null : null,
       photoUrl: await getProviderFileUrl(p.profile_photo),
     });
   }
@@ -1512,6 +1514,7 @@ const getProviderDetails = asyncHandler(async (req, res) => {
       availabilitySchedule: p.availability || '',
       workplace: p.company_name || '',
       offersHomeServices: Boolean(p.offers_home_service),
+      homeServiceRadiusKm: p.offers_home_service ? p.home_service_radius_km ?? null : null,
       rating,
       reviewCount,
       positiveFeedbackPercent,

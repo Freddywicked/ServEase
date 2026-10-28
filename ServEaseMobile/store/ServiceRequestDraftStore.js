@@ -18,6 +18,8 @@ const emptyDraft = () => ({
     location: null,           // { latitude, longitude, address, mapImageUri }
     preferredDate: null,      // 'YYYY-MM-DD' -> SERVICE_REQUEST.preferred_date
     preferredTime: null,      // 'HH:mm' (slot value from the backend) -> SERVICE_REQUEST.preferred_time
+    serviceLocationType: null, // 'home' | 'shop' (CreateServiceRequest dropdown) -> SERVICE_REQUEST.service_location_type
+    searchRadiusKm: null,     // this request's provider search radius (km); null = use the customer's saved default
     aiDiagnosis: null,        // { probableCause, confidence, tags[], troubleshootingSteps[] }
     providerId: null,
     providerName: null,       // display only (confirmation screen)

@@ -148,6 +148,13 @@ const IncomingServiceRequest = ({ navigation }) => {
         return requests.map((item) => {
             const aiSuggestion = formatAiSuggestion(item.aiDiagnosis);
             const hasDistance = item.distanceKm !== null && item.distanceKm !== undefined;
+            // BACKEND: send serviceLocationType ('home' | 'shop') on each incoming request.
+            const locationTypeLabel =
+                item.serviceLocationType === 'home' ? 'Home-based' : item.serviceLocationType === 'shop' ? 'Shop-based' : null;
+            const locationLine = [
+                locationTypeLabel,
+                hasDistance ? `${Number(item.distanceKm).toFixed(1)} km away` : null,
+            ].filter(Boolean).join(' · ');
             const isApproving = approvingId === item.id;
             return (
                 <View key={item.id} style={styles.requestCard}>
@@ -161,10 +168,10 @@ const IncomingServiceRequest = ({ navigation }) => {
                         </View>
                     ) : null}
 
-                    {hasDistance ? (
+                    {locationLine ? (
                         <View style={styles.locationRow}>
                             <Image source={require('../assets/icon_pinloc.png')} style={styles.pinIcon} />
-                            <Text style={styles.locationText}>{Number(item.distanceKm).toFixed(1)} km away</Text>
+                            <Text style={styles.locationText}>{locationLine}</Text>
                         </View>
                     ) : null}
 

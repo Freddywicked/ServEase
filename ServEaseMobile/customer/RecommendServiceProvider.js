@@ -5,6 +5,8 @@ import LinearGradient from 'react-native-linear-gradient';
 import { ROUTES } from '../navigation/routes';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
 import ProgressBar from '../components/ProgressBar';
+import RadiusSlider, { DEFAULT_CUSTOMER_RADIUS_KM } from '../components/RadiusSlider';
+import { useAuth } from '../context/auth_context';
 import { getRecommendedProviders, createServiceRequest } from '../api/servicerequest_api';
 
 /* ============================================================================
@@ -127,6 +129,15 @@ const RecommendServiceProvider = ({ navigation }) => {
     const [notice, setNotice] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // Search radius. This request's own value (draft.searchRadiusKm, set by the slider below)
+    // wins; otherwise the customer's saved default from their profile.
+    const { user } = useAuth();
+    const savedRadiusRef = useRef(DEFAULT_CUSTOMER_RADIUS_KM);
+    savedRadiusRef.current = user?.search_radius_km ?? DEFAULT_CUSTOMER_RADIUS_KM;
+    const [searchRadiusKm, setSearchRadiusKm] = useState(
+        useServiceRequestDraftStore.getState().searchRadiusKm ?? savedRadiusRef.current,
+    );
+
     // Appointment picker. `viewed*` is the month the grid shows; `draftAppointment*` is the
     // in-progress pick, so closing without confirming never changes the saved preference.
     const today = new Date();
@@ -176,6 +187,9 @@ const RecommendServiceProvider = ({ navigation }) => {
             longitude: draft.location?.longitude,
             preferredDate: draft.preferredDate,
             preferredTime: draft.preferredTime,
+            // BACKEND: matches providers within this many km (and, for 'home', who offer home service).
+            radiusKm: draft.searchRadiusKm ?? savedRadiusRef.current,
+            serviceLocationType: draft.serviceLocationType,
             exclude,
         });
         list.forEach((provider) => seenProviderIdsRef.current.add(provider.id));
@@ -237,6 +251,13 @@ const RecommendServiceProvider = ({ navigation }) => {
 
     const handleFindAnother = () => {
         loadProviders({ findAnother: true });
+    };
+
+    // "Widen search area": remember the new radius on this request and search again.
+    const handleRadiusChange = (km) => {
+        setSearchRadiusKm(km);
+        setDraft({ searchRadiusKm: km });
+        loadProviders();
     };
 
     // --- Preferred appointment picker -------------------------------------------------------
@@ -463,6 +484,10 @@ const RecommendServiceProvider = ({ navigation }) => {
                         <TouchableOpacity onPress={handleOpenAppointmentPicker} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                             <Text style={styles.emptyLinkText}>Please choose another date and time.</Text>
                         </TouchableOpacity>
+                        <View style={styles.widenWrap}>
+                            <Text style={styles.widenHint}>Or look farther out:</Text>
+                            <RadiusSlider label="Widen search area" value={searchRadiusKm} onChange={handleRadiusChange} />
+                        </View>
                     </View>
 
                     {/* Nothing to request yet, so the button is shown disabled (matches the design). */}
@@ -719,6 +744,16 @@ const styles = StyleSheet.create({
         color: '#111111',
         textAlign: 'center',
         marginBottom: 2,
+    },
+    widenWrap: {
+        width: '100%',
+        marginTop: 28,
+    },
+    widenHint: {
+        fontSize: 12,
+        color: '#666666',
+        textAlign: 'center',
+        marginBottom: 6,
     },
     emptyLinkText: {
         fontSize: 13,
