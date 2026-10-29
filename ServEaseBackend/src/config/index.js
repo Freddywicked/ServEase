@@ -55,6 +55,22 @@ const config = {
     allowFallback: nodeEnv !== 'production',
   },
 
+  resend: {
+    // Transactional email (password reset codes). Empty means "not configured":
+    // services/email.js prints the code in the terminal outside production.
+    apiKey: (env.RESEND_API_KEY || '').trim(),
+    // e.g. ServEase <no-reply@yourdomain.com>
+    fromEmail: (env.RESEND_FROM_EMAIL || '').trim(),
+  },
+
+  passwordReset: {
+    // How long the reset token (issued after the code is verified) stays valid.
+    resetTokenTtlMinutes: Number(env.RESET_TOKEN_TTL_MINUTES) || 10,
+    // Secret used to hash reset codes/tokens. Falls back to JWT_SECRET so it works
+    // without extra setup; set OTP_HASH_SECRET to use a dedicated one.
+    hashSecret: env.OTP_HASH_SECRET || env.JWT_SECRET,
+  },
+
   googleMaps: {
     // Server-side Google Maps Platform key, used for reverse geocoding and the
     // Static Maps snapshot the apps show instead of a live map. Empty means

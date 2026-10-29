@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import {
     View, Text, Image, TextInput, TouchableOpacity, Pressable, Keyboard,
-    StyleSheet, useWindowDimensions,
+    ActivityIndicator, StyleSheet, useWindowDimensions,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import { requestPasswordReset } from '../api/passwordReset';
 
 // The Figma frame is 402 x 874. Every size and position below is the Figma value times `s`,
 // so the screen keeps the same proportions on any phone.
@@ -20,14 +21,16 @@ const ForgotPassword = ({ navigation }) => {
 
     const [email, setEmail] = useState('');
     const [error, setError] = useState('');
+    const [submitting, setSubmitting] = useState(false);
 
     const handleChangeEmail = (text) => {
         setEmail(text);
         if (error) setError('');
     };
 
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
         Keyboard.dismiss();
+        if (submitting) return;
 
         if (!email.trim()) {
             setError('Email address is required.');
@@ -38,7 +41,19 @@ const ForgotPassword = ({ navigation }) => {
             return;
         }
 
-        // TODO: request the password reset from the backend, then go to NewPassword.
+        setSubmitting(true);
+        try {
+            // The backend emails a one-time code (and answers the same for unknown emails).
+            const res = await requestPasswordReset(email);
+            navigation.navigate('OTPForgotPassword', {
+                email: email.trim().toLowerCase(),
+                resendAfter: res.resendAfter,
+            });
+        } catch (err) {
+            setError((err.fieldErrors && err.fieldErrors.email) || err.message || 'Something went wrong. Please try again.');
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     return (
@@ -99,9 +114,11 @@ const ForgotPassword = ({ navigation }) => {
                 <TouchableOpacity
                     activeOpacity={0.85}
                     onPress={handleSubmit}
+                    disabled={submitting}
                     style={[
                         styles.button,
                         { left: px(33), top: px(414), width: px(325), height: px(46), borderRadius: px(8) },
+                        submitting && styles.buttonDisabled,
                     ]}
                 >
                     <LinearGradient
@@ -110,7 +127,11 @@ const ForgotPassword = ({ navigation }) => {
                         end={{ x: 1, y: 0 }}
                         style={styles.buttonGradient}
                     >
-                        <Text style={styles.buttonText}>Submit</Text>
+                        {submitting ? (
+                            <ActivityIndicator color="#FFFFFF" />
+                        ) : (
+                            <Text style={styles.buttonText}>Submit</Text>
+                        )}
                     </LinearGradient>
                 </TouchableOpacity>
             </View>
@@ -162,6 +183,7 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(0,0,0,0.3)',
     },
+    buttonDisabled: { opacity: 0.7 },
     buttonGradient: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     buttonText: { color: '#FFFFFF', fontSize: 16, lineHeight: 23, fontWeight: '700' },
 });

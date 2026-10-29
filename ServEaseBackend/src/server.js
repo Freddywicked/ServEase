@@ -7,6 +7,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 
 const apiRoutes = require('./routes/api_routes');
+const passwordResetRoutes = require('./routes/passwordreset_routes');
 const ApiError = require('./utils/api_error');
 const { errorHandler } = require('./middleware/errorHandler');
 
@@ -42,6 +43,9 @@ app.use(
 );
 if (config.nodeEnv !== 'production') app.use(morgan('dev'));
 
+// Password reset (forgot-password) endpoints: /api/auth/forgot-password, /verify-reset-otp,
+// /reset-password. Mounted before the general API router per the route file's own note.
+app.use('/api/auth', passwordResetRoutes);
 app.use('/api', apiRoutes); // /auth, /users, /providers (+ /requests), /service-requests
 app.use('/api/admin', require('./routes/admin_routes'));
 

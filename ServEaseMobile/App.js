@@ -10,6 +10,9 @@ import SplashScreen from './screens/SplashScreen';
 import SignupScreen from './screens/SignupScreen';
 import OTPVerification from './screens/OTPVerification';
 import LoginScreen from './screens/LoginScreen';
+import ForgotPassword from './screens/ForgotPassword';
+import OTPForgotPassword from './screens/OTPForgotPassword';
+import NewPassword from './screens/NewPassword';
 import ServiceProviderServiceCategory from './serviceprovider/ServiceProviderServiceCategory';
 import ServiceProviderVerificationRequirements from './serviceprovider/ServiceProviderVerificationRequirements';
 import CustomerDashboard from './customer/CustomerDashboard';
@@ -74,6 +77,9 @@ const App = () => {
         <Stack.Screen name="SignupScreen" component={SignupScreen}/>
         <Stack.Screen name="OTPVerification" component={OTPVerification}/>
         <Stack.Screen name="LoginScreen" component={LoginScreen}/>
+        <Stack.Screen name="ForgotPassword" component={ForgotPassword}/>
+        <Stack.Screen name="OTPForgotPassword" component={OTPForgotPassword}/>
+        <Stack.Screen name="NewPassword" component={NewPassword}/>
         <Stack.Screen name="ServiceProviderServiceCategory" component={ServiceProviderServiceCategory}/>
         <Stack.Screen name="ServiceProviderVerificationRequirements" component={ServiceProviderVerificationRequirements}/>
         <Stack.Screen name="CustomerDashboard" component={CustomerDashboard}/>
