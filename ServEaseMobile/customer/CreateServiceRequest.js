@@ -1,17 +1,18 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, Image, Text, TouchableOpacity, Pressable, ScrollView, TextInput, Modal, ActivityIndicator, Alert, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { ROUTES } from '../navigation/routes';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
-import { useAuth } from '../context/auth_context';
 import ProgressBar from '../components/ProgressBar';
+import RadiusSlider, { DEFAULT_CUSTOMER_RADIUS_KM } from '../components/RadiusSlider';
 import {
     getCategories,
     uploadServiceRequestPhoto,
     uploadServiceRequestVideo,
     reverseGeocode,
+    getRadiusMap,
 } from '../api/servicerequest_api';
 import { getCurrentCoordinates } from '../utils/deviceLocation';
 
@@ -70,6 +71,7 @@ const APPOINTMENT_TIME_SLOTS = Array.from(
 );
 
 // Where the repair takes place. `value` is what travels in the draft / to the backend.
+const LOCATION_OPTION_HEIGHT = 44;
 const SERVICE_LOCATION_TYPES = [
     { value: 'home', label: 'Home-based' },
     { value: 'shop', label: 'Shop-based' },
@@ -111,22 +113,25 @@ const CreateServiceRequest = ({ navigation }) => {
     // The draft lives in the shared store, so going back from a later step keeps what was typed.
     const draft = useServiceRequestDraftStore((state) => state);
     const setDraft = useServiceRequestDraftStore((state) => state.setDraft);
-    const { user } = useAuth();
 
-    // Start the Service Location Type from the customer's saved "Home Service" preference
-    // (CustomerProfile). Only fills an empty choice, so it never overrides what they picked.
-    useEffect(() => {
-        if (!draft.serviceLocationType && user?.prefers_home_service != null) {
-            setDraft({ serviceLocationType: user.prefers_home_service ? 'home' : 'shop' });
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user?.prefers_home_service]);
+    // Search area: tapping the map opens a modal where the customer slides how far (km) from
+    // their location to look for providers. The map redraws the circle on release, and the
+    // choice is saved on the draft (draft.searchRadiusKm) when they confirm.
+    const [isRadiusModalVisible, setIsRadiusModalVisible] = useState(false);
+    const [radiusPreviewKm, setRadiusPreviewKm] = useState(DEFAULT_CUSTOMER_RADIUS_KM);
+    const [radiusMapUri, setRadiusMapUri] = useState(null);
+    const [isRadiusMapLoading, setIsRadiusMapLoading] = useState(false);
+    const radiusMapRequestRef = useRef(0);
+    const searchRadiusKm = draft.searchRadiusKm ?? DEFAULT_CUSTOMER_RADIUS_KM;
 
     const [categories, setCategories] = useState([]);
     const [optionsStatus, setOptionsStatus] = useState('loading'); // 'loading' | 'ready' | 'error'
     const [optionsError, setOptionsError] = useState(''); // why loading failed (shown under the retry hint)
     const [isLocating, setIsLocating] = useState(false);
     const [isLocationTypeOpen, setIsLocationTypeOpen] = useState(false);
+    // Measured sizes of the row and the dropdown box, so the menu can float right under the box.
+    const [typeRowLayout, setTypeRowLayout] = useState(null);
+    const [typeBoxLayout, setTypeBoxLayout] = useState(null);
 
     // Preferred appointment picker.
     // `viewed*` is which month the grid is showing (moves as the customer taps ‹ ›).
@@ -142,6 +147,9 @@ const CreateServiceRequest = ({ navigation }) => {
 
     const confirmedDate = parseIsoDate(draft.preferredDate);
     const confirmedTimeLabel = APPOINTMENT_TIME_SLOTS.find((slot) => slot.value === draft.preferredTime)?.label ?? draft.preferredTime;
+    // Room the floating menu needs below the row (option height x options + gap). Only applied while
+    // it is open, and only matters when there is no map yet (the map already makes the area taller).
+    const dropdownMinHeight = (typeRowLayout?.height ?? 62) + 4 + SERVICE_LOCATION_TYPES.length * LOCATION_OPTION_HEIGHT + 4;
     const selectedLocationType = SERVICE_LOCATION_TYPES.find((type) => type.value === draft.serviceLocationType) ?? null;
     const mediaItems = draft.mediaItems ?? [];
     const photoCount = mediaItems.filter((item) => item.type === 'photo').length;
@@ -282,6 +290,44 @@ const CreateServiceRequest = ({ navigation }) => {
                 }
             }),
         );
+    };
+
+    const loadRadiusMap = async (km) => {
+        if (!draft.location) return;
+        // Ignore a slow response if the slider has moved on since.
+        radiusMapRequestRef.current += 1;
+        const requestId = radiusMapRequestRef.current;
+        setIsRadiusMapLoading(true);
+        try {
+            const uri = await getRadiusMap({
+                latitude: draft.location.latitude,
+                longitude: draft.location.longitude,
+                radiusKm: km,
+            });
+            if (requestId === radiusMapRequestRef.current) setRadiusMapUri(uri);
+        } catch (error) {
+            // Non-fatal: the slider still works; the circle just doesn't redraw.
+        } finally {
+            if (requestId === radiusMapRequestRef.current) setIsRadiusMapLoading(false);
+        }
+    };
+
+    const handleOpenRadiusModal = () => {
+        if (!draft.location) return;
+        setRadiusPreviewKm(searchRadiusKm);
+        setRadiusMapUri(null);
+        setIsRadiusModalVisible(true);
+        loadRadiusMap(searchRadiusKm);
+    };
+
+    const handleRadiusPreviewChange = (km) => {
+        setRadiusPreviewKm(km);
+        loadRadiusMap(km);
+    };
+
+    const handleConfirmRadius = () => {
+        setDraft({ searchRadiusKm: radiusPreviewKm });
+        setIsRadiusModalVisible(false);
     };
 
     const handleTurnOnLocation = async () => {
@@ -547,7 +593,11 @@ const CreateServiceRequest = ({ navigation }) => {
                     </View>
                 )}
 
-                <View style={[styles.appointmentRow, isLocationTypeOpen && styles.appointmentRowOpen]}>
+                {/* One wrapper around the row and the Location section: the dropdown menu floats over the
+                    map inside it (absolute), so opening it moves nothing. Keeping the menu inside this
+                    wrapper's bounds is also what keeps its options tappable on Android. */}
+                <View style={[styles.locationAreaWrap, isLocationTypeOpen && { minHeight: dropdownMinHeight }]}>
+                <View style={styles.appointmentRow} onLayout={(event) => setTypeRowLayout(event.nativeEvent.layout)}>
                     <TouchableOpacity
                         style={styles.appointmentBox}
                         onPress={handleOpenAppointmentPicker}
@@ -566,6 +616,7 @@ const CreateServiceRequest = ({ navigation }) => {
 
                     <TouchableOpacity
                         style={styles.locationTypeBox}
+                        onLayout={(event) => setTypeBoxLayout(event.nativeEvent.layout)}
                         onPress={() => setIsLocationTypeOpen((open) => !open)}
                         activeOpacity={0.85}
                         accessibilityRole="button"
@@ -581,35 +632,27 @@ const CreateServiceRequest = ({ navigation }) => {
                     </TouchableOpacity>
                 </View>
 
-                {isLocationTypeOpen && (
-                    // Rendered in the normal flow (not absolutely positioned) so the options stay
-                    // tappable on Android, which ignores touches outside a parent's bounds.
-                    <View style={styles.locationTypeMenu}>
-                        {SERVICE_LOCATION_TYPES.map((type, index) => (
-                            <TouchableOpacity
-                                key={type.value}
-                                style={[styles.locationTypeOption, index > 0 && styles.locationTypeOptionDivider]}
-                                onPress={() => handleSelectLocationType(type.value)}
-                            >
-                                <Text
-                                    style={[
-                                        styles.locationTypeOptionText,
-                                        type.value === draft.serviceLocationType && styles.locationTypeOptionTextSelected,
-                                    ]}
-                                >
-                                    {type.label}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-                )}
-
                 <Text style={styles.sectionLabel}>Location</Text>
                 {draft.location ? (
                     <View>
-                        {draft.location.mapImageUri ? (
-                            <Image source={{ uri: draft.location.mapImageUri }} style={styles.locationImage} />
-                        ) : null}
+                        {/* Tap the map to set the search radius. */}
+                        <TouchableOpacity
+                            activeOpacity={0.85}
+                            onPress={handleOpenRadiusModal}
+                            accessibilityRole="button"
+                            accessibilityLabel="Set search radius on the map"
+                        >
+                            {draft.location.mapImageUri ? (
+                                <Image source={{ uri: draft.location.mapImageUri }} style={styles.locationImage} />
+                            ) : (
+                                <View style={[styles.locationImage, styles.locationImagePlaceholder]}>
+                                    <Text style={styles.locationImagePlaceholderText}>Tap to set your search area</Text>
+                                </View>
+                            )}
+                            <View style={styles.radiusBadge}>
+                                <Text style={styles.radiusBadgeText}>Search radius: {searchRadiusKm} km · Tap to change</Text>
+                            </View>
+                        </TouchableOpacity>
                         {draft.location.address ? (
                             <Text style={styles.locationAddressText}>{draft.location.address}</Text>
                         ) : null}
@@ -626,6 +669,37 @@ const CreateServiceRequest = ({ navigation }) => {
                         )}
                     </TouchableOpacity>
                 )}
+
+                {isLocationTypeOpen && typeRowLayout && typeBoxLayout ? (
+                    <>
+                        {/* Tapping anywhere else in this area closes the menu. */}
+                        <Pressable style={styles.locationTypeBackdrop} onPress={() => setIsLocationTypeOpen(false)} />
+                        <View
+                            style={[
+                                styles.locationTypeMenu,
+                                { left: typeBoxLayout.x, width: typeBoxLayout.width, top: typeRowLayout.height + 4 },
+                            ]}
+                        >
+                            {SERVICE_LOCATION_TYPES.map((type, index) => (
+                                <TouchableOpacity
+                                    key={type.value}
+                                    style={[styles.locationTypeOption, index > 0 && styles.locationTypeOptionDivider]}
+                                    onPress={() => handleSelectLocationType(type.value)}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.locationTypeOptionText,
+                                            type.value === draft.serviceLocationType && styles.locationTypeOptionTextSelected,
+                                        ]}
+                                    >
+                                        {type.label}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    </>
+                ) : null}
+                </View>
             </ScrollView>
 
             <View style={styles.footer}>
@@ -640,6 +714,57 @@ const CreateServiceRequest = ({ navigation }) => {
                     </LinearGradient>
                 </TouchableOpacity>
             </View>
+
+            <Modal
+                visible={isRadiusModalVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setIsRadiusModalVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalCard}>
+                        <TouchableOpacity onPress={() => setIsRadiusModalVisible(false)} style={styles.modalCloseButton}>
+                            <Image source={require('../assets/icon_close.png')} style={styles.modalCloseIcon} />
+                        </TouchableOpacity>
+
+                        <Text style={styles.modalTitle}>Search Area</Text>
+                        <Text style={styles.radiusModalHint}>
+                            We'll recommend service providers within this distance from your location.
+                        </Text>
+
+                        <View style={styles.radiusMapWrap}>
+                            {radiusMapUri || draft.location?.mapImageUri ? (
+                                <Image
+                                    source={{ uri: radiusMapUri || draft.location?.mapImageUri }}
+                                    style={styles.radiusMapImage}
+                                />
+                            ) : (
+                                <View style={[styles.radiusMapImage, styles.locationImagePlaceholder]}>
+                                    <Text style={styles.locationImagePlaceholderText}>Map preview unavailable</Text>
+                                </View>
+                            )}
+                            {isRadiusMapLoading ? (
+                                <View style={styles.radiusMapLoading}>
+                                    <ActivityIndicator color="#0255AF" />
+                                </View>
+                            ) : null}
+                        </View>
+
+                        <RadiusSlider label="Search radius" value={radiusPreviewKm} onChange={handleRadiusPreviewChange} />
+
+                        <TouchableOpacity onPress={handleConfirmRadius} style={styles.confirmButtonWrap}>
+                            <LinearGradient
+                                colors={['#0255AF', '#04A5A5']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 0 }}
+                                style={styles.confirmButton}
+                            >
+                                <Text style={styles.confirmButtonText}>Confirm</Text>
+                            </LinearGradient>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
 
             <Modal
                 visible={isAppointmentModalVisible}
@@ -976,6 +1101,55 @@ const styles = StyleSheet.create({
         borderRadius: 10,
         resizeMode: 'cover',
     },
+    locationImagePlaceholder: {
+        backgroundColor: '#EEF2F7',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    locationImagePlaceholderText: {
+        fontSize: 12,
+        color: '#777777',
+    },
+    radiusBadge: {
+        position: 'absolute',
+        left: 8,
+        bottom: 8,
+        backgroundColor: 'rgba(255, 255, 255, 0.92)',
+        borderRadius: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+    },
+    radiusBadgeText: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: '#0255AF',
+    },
+    radiusModalHint: {
+        fontSize: 12,
+        color: '#666666',
+        textAlign: 'center',
+        marginBottom: 12,
+    },
+    radiusMapWrap: {
+        marginBottom: 12,
+    },
+    radiusMapImage: {
+        width: '100%',
+        height: 220,
+        borderRadius: 10,
+        resizeMode: 'cover',
+    },
+    radiusMapLoading: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        borderRadius: 10,
+        backgroundColor: 'rgba(255, 255, 255, 0.45)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     turnOnLocationText: {
         fontSize: 14,
         color: '#0255AF',
@@ -987,8 +1161,16 @@ const styles = StyleSheet.create({
         alignItems: 'stretch',
         marginBottom: 20,
     },
-    appointmentRowOpen: {
-        marginBottom: 6,
+    locationAreaWrap: {
+        position: 'relative',
+    },
+    locationTypeBackdrop: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 10,
     },
     appointmentBox: {
         flex: 1,
@@ -1038,18 +1220,23 @@ const styles = StyleSheet.create({
         transform: [{ rotate: '-90deg' }],
     },
     locationTypeMenu: {
-        // Sits under the dropdown, i.e. the right-hand half of the row above.
-        alignSelf: 'flex-end',
-        width: '50%',
+        // Floats over the map under the dropdown box (left/top/width are set from its measured layout).
+        position: 'absolute',
+        zIndex: 20,
+        elevation: 8,
+        shadowColor: '#000000',
+        shadowOpacity: 0.12,
+        shadowRadius: 6,
+        shadowOffset: { width: 0, height: 2 },
         borderWidth: 1,
         borderColor: '#E0E0E0',
         borderRadius: 10,
         backgroundColor: '#FFFFFF',
-        marginBottom: 20,
         overflow: 'hidden',
     },
     locationTypeOption: {
-        paddingVertical: 12,
+        minHeight: LOCATION_OPTION_HEIGHT,
+        justifyContent: 'center',
         paddingHorizontal: 12,
     },
     locationTypeOptionDivider: {

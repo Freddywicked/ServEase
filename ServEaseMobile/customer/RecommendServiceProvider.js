@@ -6,7 +6,6 @@ import { ROUTES } from '../navigation/routes';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
 import ProgressBar from '../components/ProgressBar';
 import RadiusSlider, { DEFAULT_CUSTOMER_RADIUS_KM } from '../components/RadiusSlider';
-import { useAuth } from '../context/auth_context';
 import { getRecommendedProviders, createServiceRequest } from '../api/servicerequest_api';
 
 /* ============================================================================
@@ -129,13 +128,10 @@ const RecommendServiceProvider = ({ navigation }) => {
     const [notice, setNotice] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // Search radius. This request's own value (draft.searchRadiusKm, set by the slider below)
-    // wins; otherwise the customer's saved default from their profile.
-    const { user } = useAuth();
-    const savedRadiusRef = useRef(DEFAULT_CUSTOMER_RADIUS_KM);
-    savedRadiusRef.current = user?.search_radius_km ?? DEFAULT_CUSTOMER_RADIUS_KM;
+    // Search radius for this request: what the customer set on the map in CreateServiceRequest
+    // (draft.searchRadiusKm), else the default. The slider below can widen it.
     const [searchRadiusKm, setSearchRadiusKm] = useState(
-        useServiceRequestDraftStore.getState().searchRadiusKm ?? savedRadiusRef.current,
+        useServiceRequestDraftStore.getState().searchRadiusKm ?? DEFAULT_CUSTOMER_RADIUS_KM,
     );
 
     // Appointment picker. `viewed*` is the month the grid shows; `draftAppointment*` is the
@@ -188,7 +184,7 @@ const RecommendServiceProvider = ({ navigation }) => {
             preferredDate: draft.preferredDate,
             preferredTime: draft.preferredTime,
             // BACKEND: matches providers within this many km (and, for 'home', who offer home service).
-            radiusKm: draft.searchRadiusKm ?? savedRadiusRef.current,
+            radiusKm: draft.searchRadiusKm ?? DEFAULT_CUSTOMER_RADIUS_KM,
             serviceLocationType: draft.serviceLocationType,
             exclude,
         });

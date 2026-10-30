@@ -5,8 +5,13 @@ import {
 } from 'react-native';
 import { TERMS_BLOCKS } from './TermsContent';
 
-// The Figma frame is 402 x 1026. Every measurement below is the Figma value times `s`,
-// so the modal keeps the same proportions on any phone.
+// The Figma frame is 402 x 1026 (see the "Sign Up" frame with the terms card). Sizes below are the
+// Figma value times `s`, so the modal keeps the same proportions on any phone. Same picture as
+// Figma: the Sign Up screen under a 50% white wash, the logo ABOVE the card, and a white card that
+// floats over the middle of the form (soft border + shadow, so it reads as lifted instead of
+// blending into the page) with the title, text and Done button inside it. The rest of the Sign Up
+// screen (checkbox, Next, Log in) stays visible below the card. Flexbox lays the card out, so the
+// logo, title, text and Done button can never overlap.
 const DESIGN_W = 402;
 const DESIGN_H = 1026;
 
@@ -42,15 +47,20 @@ const TermsBody = ({ onClose }) => {
 
     const scrollRef = useRef(null);
     const [thumbTop, setThumbTop] = useState(0);
+    // Height of the text area (measured), which is also the height of the scrollbar track.
+    const [trackH, setTrackH] = useState(px(401));
 
-    // Scrollbar geometry (Figma: track 15 x 401, thumb 8 x 25 with 1px inset).
-    const trackH = px(401);
+    // Scrollbar geometry (Figma: track 15 wide, thumb 8 x 25 with 1px inset).
     const thumbH = px(25);
-    const travel = trackH - thumbH - 2; // distance the thumb can move
+    const travel = Math.max(trackH - thumbH - 2, 0); // distance the thumb can move
 
     // Latest numbers for the PanResponder, which is created only once.
-    const m = useRef({ maxScroll: 0, thumbTop: 0, travel });
+    const m = useRef({ maxScroll: 0, contentH: 0, viewH: 0, thumbTop: 0, travel });
     m.current.travel = travel;
+
+    const updateMaxScroll = () => {
+        m.current.maxScroll = Math.max(m.current.contentH - m.current.viewH, 0);
+    };
 
     const setThumb = (top) => {
         m.current.thumbTop = top;
@@ -60,9 +70,10 @@ const TermsBody = ({ onClose }) => {
     // Keep the thumb in step with the text (finger scroll, momentum, or scrollTo).
     const handleScroll = (e) => {
         const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-        const maxScroll = Math.max(contentSize.height - layoutMeasurement.height, 0);
-        m.current.maxScroll = maxScroll;
-        const ratio = maxScroll > 0 ? Math.min(Math.max(contentOffset.y / maxScroll, 0), 1) : 0;
+        m.current.contentH = contentSize.height;
+        m.current.viewH = layoutMeasurement.height;
+        updateMaxScroll();
+        const ratio = m.current.maxScroll > 0 ? Math.min(Math.max(contentOffset.y / m.current.maxScroll, 0), 1) : 0;
         setThumb(ratio * m.current.travel);
     };
 
@@ -86,36 +97,41 @@ const TermsBody = ({ onClose }) => {
         })
     ).current;
 
+    // Card sides sit 23/402 of the screen width in from the edges, like Figma.
+    const sideMargin = (width * 23) / DESIGN_W;
+
     return (
-        <View style={styles.backdrop}>
-            <View style={{ width: px(DESIGN_W), height: px(DESIGN_H), alignSelf: 'center' }}>
-                {/* Rectangle 23898: white card */}
-                <View
-                    style={{
-                        position: 'absolute', left: px(23), top: px(181),
-                        width: px(356), height: px(632), borderRadius: px(20), backgroundColor: '#FFFFFF',
-                    }}
-                />
+        // 50% white wash over the Sign Up screen (Figma "Rectangle 3518").
+        <View style={[styles.backdrop, { paddingTop: px(55) }]}>
+            {/* Logo, above the card (it ends before the card begins) */}
+            <Image
+                source={require('../assets/logo_servease.png')}
+                style={{ width: px(116), height: px(116), resizeMode: 'contain' }}
+            />
 
-                {/* Logo */}
-                <Image
-                    source={require('../assets/logo_servease.png')}
-                    style={{ position: 'absolute', left: px(102), top: px(51), width: px(198), height: px(198), resizeMode: 'contain' }}
-                />
-
+            {/* The floating card (Figma: top 181, height 632, radius 20) */}
+            <View
+                style={[
+                    styles.card,
+                    { marginTop: px(10), marginHorizontal: sideMargin, height: px(632), borderRadius: px(20) },
+                ]}
+            >
                 {/* Title */}
-                <Text
-                    style={[styles.title, { left: px(28), top: px(199), width: px(345), paddingLeft: px(11) }]}
-                    numberOfLines={1}
-                >
+                <Text style={[styles.title, { marginTop: px(18), marginBottom: px(18) }]}>
                     Terms of Service and Privacy Policy
                 </Text>
 
-                {/* Terms text */}
-                <View style={{ position: 'absolute', left: px(57), top: px(234), width: px(287), height: px(519) }}>
+                {/* Terms text + scrollbar */}
+                <View
+                    style={[styles.bodyRow, { marginLeft: px(34), marginRight: px(8) }]}
+                    onLayout={(e) => setTrackH(e.nativeEvent.layout.height)}
+                >
                     <ScrollView
                         ref={scrollRef}
+                        style={{ flex: 1, marginRight: px(12) }}
                         onScroll={handleScroll}
+                        onContentSizeChange={(_, h) => { m.current.contentH = h; updateMaxScroll(); }}
+                        onLayout={(e) => { m.current.viewH = e.nativeEvent.layout.height; updateMaxScroll(); }}
                         scrollEventThrottle={16}
                         showsVerticalScrollIndicator={false}
                         nestedScrollEnabled
@@ -124,26 +140,29 @@ const TermsBody = ({ onClose }) => {
                             <TermsBlock key={i} block={block} />
                         ))}
                     </ScrollView>
+
+                    {/* Scrollbar: tap the track to jump, drag the thumb to scroll */}
+                    <Pressable
+                        style={[styles.track, { width: px(15), height: trackH }]}
+                        onPress={(e) => moveThumbTo(e.nativeEvent.locationY - thumbH / 2)}
+                    >
+                        <View
+                            {...panResponder.panHandlers}
+                            style={{ position: 'absolute', left: 0, right: 0, top: 1 + thumbTop, height: thumbH, alignItems: 'center' }}
+                        >
+                            <View style={{ width: px(8), height: thumbH, borderRadius: 4, backgroundColor: '#C1C1C1' }} />
+                        </View>
+                    </Pressable>
                 </View>
 
-                {/* Scrollbar: tap the track to jump, drag the thumb to scroll */}
-                <Pressable
-                    style={[styles.track, { left: px(356), top: px(270), width: px(15), height: trackH }]}
-                    onPress={(e) => moveThumbTo(e.nativeEvent.locationY - thumbH / 2)}
-                >
-                    <View
-                        {...panResponder.panHandlers}
-                        style={{ position: 'absolute', left: 0, right: 0, top: 1 + thumbTop, height: thumbH, alignItems: 'center' }}
-                    >
-                        <View style={{ width: px(8), height: thumbH, borderRadius: 4, backgroundColor: '#C1C1C1' }} />
-                    </View>
-                </Pressable>
-
-                {/* Done button */}
+                {/* Done button (Figma: 262 x 31) */}
                 <TouchableOpacity
                     activeOpacity={0.85}
                     onPress={onClose}
-                    style={[styles.doneButton, { left: px(71), top: px(763), width: px(262), height: px(31) }]}
+                    style={[
+                        styles.doneButton,
+                        { marginTop: px(10), marginBottom: px(19), marginHorizontal: px(48), height: Math.max(px(31), 34) },
+                    ]}
                 >
                     <Text style={styles.doneText}>Done</Text>
                 </TouchableOpacity>
@@ -166,16 +185,31 @@ const TermsAndPrivacy = ({ visible, onClose }) => (
 
 const styles = StyleSheet.create({
     // Rectangle 3518: white at 50% over the Sign Up screen
-    backdrop: { flex: 1, backgroundColor: 'rgba(255,255,255,0.5)' },
+    backdrop: { flex: 1, backgroundColor: 'rgba(255,255,255,0.5)', alignItems: 'center' },
+
+    card: {
+        alignSelf: 'stretch',
+        backgroundColor: '#FFFFFF',
+        // A white card on a white wash has no edge of its own, so give it one: a hairline border
+        // and a soft shadow make it read as floating above the Sign Up screen.
+        borderWidth: 1,
+        borderColor: '#E1E5EA',
+        elevation: 12,
+        shadowColor: '#000000',
+        shadowOpacity: 0.18,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 4 },
+    },
 
     title: {
-        position: 'absolute',
         textAlign: 'center',
-        fontSize: 12,
-        lineHeight: 14,
+        fontSize: 13,
+        lineHeight: 17,
         fontWeight: '700',
         color: '#18315B',
     },
+
+    bodyRow: { flex: 1, flexDirection: 'row' },
 
     text: { fontSize: 10, lineHeight: 12, color: '#000000' },
     gap: { height: 12 },
@@ -186,7 +220,6 @@ const styles = StyleSheet.create({
 
     // Scrollbar track
     track: {
-        position: 'absolute',
         backgroundColor: '#FAFAFA',
         borderLeftWidth: 1,
         borderLeftColor: '#E8E8E8',
@@ -195,7 +228,6 @@ const styles = StyleSheet.create({
     },
 
     doneButton: {
-        position: 'absolute',
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: '#0255AF', // fallback where the gradient isn't supported
@@ -204,7 +236,7 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(0,0,0,0.3)',
         borderRadius: 8,
     },
-    doneText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+    doneText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
 });
 
 export default TermsAndPrivacy;

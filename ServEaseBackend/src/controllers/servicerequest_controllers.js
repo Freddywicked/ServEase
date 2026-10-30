@@ -503,9 +503,9 @@ const recommendedForDraft = asyncHandler(async (req, res) => {
   // The draft's preferred schedule: providers who can't take it are excluded below.
   const preferredDate = toIsoDateOrNull(req.query.preferredDate);
   const preferredSlot = to24hSlot(req.query.preferredTime);
-  // Radius feature: how far the customer is willing to look (?radiusKm=, else their saved
-  // default from the profile) and where the repair happens ('home' | 'shop').
-  const radiusKm = clampRadiusKm(req.query.radiusKm, req.user.search_radius_km ?? DEFAULT_CUSTOMER_RADIUS_KM);
+  // Radius feature: how far the customer chose to look on the map in CreateServiceRequest
+  // (?radiusKm=, else the default) and where the repair happens ('home' | 'shop').
+  const radiusKm = clampRadiusKm(req.query.radiusKm, DEFAULT_CUSTOMER_RADIUS_KM);
   const locationType = toLocationTypeOrNull(req.query.serviceLocationType);
   // `exclude` arrives as repeated params and/or comma-separated ids, depending on the client.
   const exclude = new Set(
@@ -777,6 +777,55 @@ const diagnoseDraft = asyncHandler(async (req, res) => {
   });
 });
 
+// Points on a circle of `radiusKm` around (lat, lon), as "lat,lon" strings. The ring is closed
+// (last point = first) so Google Static Maps can fill it.
+const circlePoints = (lat, lon, radiusKm, steps = 48) => {
+  const angular = radiusKm / 6371;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const toDeg = (rad) => (rad * 180) / Math.PI;
+  const lat1 = toRad(lat);
+  const lon1 = toRad(lon);
+  const points = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const bearing = (2 * Math.PI * i) / steps;
+    const lat2 = Math.asin(
+      Math.sin(lat1) * Math.cos(angular) + Math.cos(lat1) * Math.sin(angular) * Math.cos(bearing)
+    );
+    const lon2 =
+      lon1 +
+      Math.atan2(
+        Math.sin(bearing) * Math.sin(angular) * Math.cos(lat1),
+        Math.cos(angular) - Math.sin(lat1) * Math.sin(lat2)
+      );
+    points.push(`${toDeg(lat2).toFixed(5)},${toDeg(lon2).toFixed(5)}`);
+  }
+  return points;
+};
+
+// GET /api/location/radius-map?latitude&longitude&radiusKm -> { mapImageUri }
+// The "search area" picture shown when the customer taps the map on CreateServiceRequest: the
+// customer's pin plus a translucent circle of radiusKm. center/zoom are left out on purpose, so
+// Google fits the map to the circle. mapImageUri is null when no Maps key is configured.
+const radiusMap = asyncHandler(async (req, res) => {
+  const lat = Number(req.query.latitude);
+  const lon = Number(req.query.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    throw new ApiError(400, 'latitude and longitude are required');
+  }
+  const radiusKm = clampRadiusKm(req.query.radiusKm, DEFAULT_CUSTOMER_RADIUS_KM);
+
+  const mapsKey = config.googleMaps.apiKey;
+  if (!mapsKey) return res.json({ mapImageUri: null, radiusKm });
+
+  const ring = circlePoints(lat, lon, radiusKm).join('%7C');
+  const mapImageUri =
+    'https://maps.googleapis.com/maps/api/staticmap?size=600x400&scale=2&maptype=roadmap' +
+    `&markers=color:0x0255AF%7C${lat},${lon}` +
+    `&path=color:0x0255AFff%7Cfillcolor:0x0255AF33%7Cweight:2%7C${ring}` +
+    `&key=${mapsKey}`;
+  return res.json({ mapImageUri, radiusKm });
+});
+
 // GET /api/location/reverse-geocode?latitude&longitude -> { location: { address, mapImageUri } }
 // Proxied through the backend so the Google Maps key is applied here, not hardcoded in the
 // apps. With GOOGLE_MAPS_API_KEY set, the address comes from Google's Geocoding API and
@@ -863,4 +912,5 @@ module.exports = {
   uploadPhoto,
   diagnoseDraft,
   reverseGeocode,
+  radiusMap,
 };

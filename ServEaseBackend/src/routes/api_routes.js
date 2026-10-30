@@ -26,6 +26,8 @@ router.get('/categories', serviceRequestController.listCategories);
 router.get('/appointment-time-slots', serviceRequestController.listTimeSlots);
 // Authenticated: it proxies an external geocoding service.
 router.get('/location/reverse-geocode', authenticate, serviceRequestController.reverseGeocode);
+// Static map with the customer's search-radius circle (tap the map on CreateServiceRequest).
+router.get('/location/radius-map', authenticate, serviceRequestController.radiusMap);
 // Mobile step 3: recommended providers for a draft (no request row exists yet).
 router.get('/service-providers/recommended', authenticate, serviceRequestController.recommendedForDraft);
 // Customer Find screen: browse all verified providers (optionally filtered).

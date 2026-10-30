@@ -179,6 +179,13 @@ export const uploadServiceRequestPhoto = (asset) => {
 export const reverseGeocode = ({ latitude, longitude }) =>
     request('/location/reverse-geocode', { query: { latitude, longitude } }).then(pick('location'));
 
+// Static map with a circle of `radiusKm` drawn around the customer's pin, shown when the
+// customer taps the map on CreateServiceRequest to set how far to look for providers.
+// Built on the backend for the same reason as reverseGeocode (the Maps key stays there).
+// Resolves to null when the server has no Maps key.
+export const getRadiusMap = ({ latitude, longitude, radiusKm }) =>
+    request('/location/radius-map', { query: { latitude, longitude, radiusKm } }).then(pick('mapImageUri'));
+
 /* ---------------------------- Step 2: AI diagnosis ---------------------------- */
 
 // No SERVICE_REQUEST row is created by this call — it is persisted later, on submit.
