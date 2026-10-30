@@ -14,8 +14,9 @@ const { supabase } = require('../config/supabase');
 const { unwrap } = require('../utils/db');
 const { sendPasswordResetEmail } = require('../services/email');
 
-// CHECK THESE AGAINST YOUR REGISTER/LOGIN CODE (see the grep in the instructions).
+// The users table's primary key is user_id (migration 001 renamed id -> user_id).
 const USERS_TABLE = 'users';
+const ID_COLUMN = 'user_id';
 const PASSWORD_COLUMN = 'password_hash';
 const BCRYPT_ROUNDS = 10;
 
@@ -59,7 +60,7 @@ router.post('/forgot-password', limiter, async (req, res) => {
     res.json({ message: 'If this email is registered, we sent a verification code.', resendAfter });
 
   try {
-    const user = unwrap(await supabase.from(USERS_TABLE).select('id').eq('email', email).maybeSingle());
+    const user = unwrap(await supabase.from(USERS_TABLE).select(ID_COLUMN).eq('email', email).maybeSingle());
     if (!user) return generic(cooldown);
 
     const existing = unwrap(
