@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, Modal, StyleSheet, Alert, Linking } from 'react-native';
+import { View, Image, Text, TouchableOpacity, ScrollView, Modal, StyleSheet, Alert, Linking, Share } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { payForServiceRequest, getPaymentStatus, getPaymentDue } from '../api/servicerequest_api';
 
@@ -18,6 +18,116 @@ const PAYMENT_METHODS = [
     { id: 'cash', label: 'Cash', icon: null },
 ];
 
+// ServEase logo shown on the receipt header (same asset the other mobile screens use).
+const RECEIPT_LOGO = require('../assets/logo_servease.png');
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+const METHOD_LABELS = { gcash: 'GCash', qrph: 'QRPh', card: 'Debit/Credit Card', cash: 'Cash' };
+
+// Per payment stage: what the receipt calls it, the line item, and the modal subtitle.
+const STAGE_COPY = {
+    initial: {
+        type: 'Initial Fee',
+        lineItem: 'Initial repair payment',
+        subtitle: 'Your 20% initial payment has been processed.',
+    },
+    additional: {
+        type: 'Additional payment fee',
+        lineItem: 'Additional payment',
+        subtitle: 'The payment for additional parts has been processed.',
+    },
+    final: {
+        type: 'Final Fee',
+        lineItem: 'Final repair payment',
+        subtitle: 'Your final payment has been processed.',
+    },
+};
+
+// "26 October 2026, 10:30 AM"
+const formatReceiptDate = (value) => {
+    const d = value ? new Date(value) : new Date();
+    if (Number.isNaN(d.getTime())) return '';
+    const hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${hours % 12 || 12}:${minutes} ${hours >= 12 ? 'PM' : 'AM'}`;
+};
+
+// ₱2,000 for whole amounts, ₱2,000.50 when there are centavos (matches the Figma).
+const formatPeso = (value) => {
+    const n = Number(value) || 0;
+    return `₱${n.toLocaleString('en-PH', {
+        minimumFractionDigits: Number.isInteger(n) ? 0 : 2,
+        maximumFractionDigits: 2,
+    })}`;
+};
+
+const ReceiptRow = ({ label, value }) => (
+    <Text style={styles.receiptMeta}>
+        <Text style={styles.receiptMetaLabel}>{label}: </Text>
+        {value}
+    </Text>
+);
+
+// The receipt card shown inside the Payment Processed modal.
+const ReceiptCard = ({ receipt }) => (
+    <View style={styles.receiptCard}>
+        <View style={styles.receiptHeader}>
+            <Image source={RECEIPT_LOGO} style={styles.receiptLogo} resizeMode="contain" />
+            <Text style={styles.receiptTitle}>PAYMENT RECEIPT</Text>
+        </View>
+
+        <View style={styles.receiptMetaBlock}>
+            <ReceiptRow label="Receipt no." value={receipt.receiptNo || '—'} />
+            <ReceiptRow label="Service Request" value={receipt.requestNumber ? `#${String(receipt.requestNumber).replace(/^#/, '')}` : '—'} />
+            <ReceiptRow label="Date Paid" value={receipt.datePaid} />
+            <ReceiptRow label="Payment Type" value={receipt.paymentType} />
+        </View>
+
+        <View style={styles.receiptDivider} />
+
+        <View style={styles.partiesRow}>
+            <View style={styles.partyCol}>
+                <Text style={styles.partyName} numberOfLines={1}>{receipt.customerName || '—'}</Text>
+                <Text style={styles.partyCaption}>Received from</Text>
+            </View>
+            <View style={styles.partyCol}>
+                <Text style={styles.partyName} numberOfLines={1}>{receipt.providerName || '—'}</Text>
+                <Text style={styles.partyCaption}>Sent to</Text>
+            </View>
+        </View>
+
+        <View style={styles.receiptDivider} />
+
+        <View style={styles.tableRow}>
+            <Text style={[styles.tableHead, { flex: 1 }]}>Description</Text>
+            <Text style={styles.tableHead}>Amount</Text>
+        </View>
+        <View style={styles.tableRow}>
+            <Text style={[styles.tableCell, { flex: 1 }]}>{receipt.lineItem}</Text>
+            <Text style={styles.tableCell}>{formatPeso(receipt.subtotal)}</Text>
+        </View>
+        {receipt.serviceFee > 0 ? (
+            <View style={styles.tableRow}>
+                <Text style={[styles.tableCell, { flex: 1 }]}>Service Fee</Text>
+                <Text style={styles.tableCell}>{formatPeso(receipt.serviceFee)}</Text>
+            </View>
+        ) : null}
+
+        <View style={[styles.receiptDivider, { marginTop: 8 }]} />
+
+        <View style={styles.tableRow}>
+            <Text style={[styles.totalText, { flex: 1 }]}>TOTAL</Text>
+            <Text style={styles.totalText}>{formatPeso(receipt.total)}</Text>
+        </View>
+
+        <View style={styles.receiptFooter}>
+            <ReceiptRow label="Payment Method" value={receipt.methodLabel} />
+            {receipt.reference ? <ReceiptRow label="Payment Reference" value={receipt.reference} /> : null}
+        </View>
+    </View>
+);
+
 const Payment = ({ navigation, route }) => {
     const requestId = route?.params?.requestId;
     const requestNumber = route?.params?.requestNumber || requestId || '';
@@ -28,6 +138,11 @@ const Payment = ({ navigation, route }) => {
     // Only for 'additional': which payment request is being paid.
     const paymentRequestId = route?.params?.paymentRequestId;
     const amount = route?.params?.amount ?? 0;
+    // Receipt details. Names/fee fall back to route params until the backend returns them
+    // (see buildReceipt).
+    const customerName = route?.params?.customerName;
+    const providerName = route?.params?.providerName;
+    const stageCopy = STAGE_COPY[paymentStage] || STAGE_COPY.initial;
 
     const [selectedMethod, setSelectedMethod] = useState(null);
     const [showProcessedModal, setShowProcessedModal] = useState(false);
@@ -36,6 +151,8 @@ const Payment = ({ navigation, route }) => {
     // polling the backend for the confirmation.
     const [waitingForCheckout, setWaitingForCheckout] = useState(false);
     const pollTimerRef = useRef(null);
+    // Data for the receipt shown in the Payment Processed modal.
+    const [receipt, setReceipt] = useState(null);
 
     // The amount is read from the backend (payment-due); the route-param amount is
     // only a preview until the server answers. This is what makes the deductions
@@ -68,6 +185,64 @@ const Payment = ({ navigation, route }) => {
         maximumFractionDigits: 2,
     })}`;
 
+    // Builds the receipt from whatever the backend returned for the payment (payment
+    // status / payment response). BACKEND: ideally return a `receipt` object, e.g.
+    //   { receiptNo, requestNumber, paidAt, customerName, providerName,
+    //     subtotal, serviceFee, total, method, reference }
+    // Anything missing falls back to what this screen already knows.
+    // NOTE: this assumes `dueAmount` is the TOTAL charged (repair amount + service fee).
+    const buildReceipt = (payment, methodId) => {
+        const src = payment?.receipt ?? payment ?? {};
+        const total = Number(src.total ?? src.amount ?? dueAmount) || 0;
+        const serviceFee = Number(src.serviceFee ?? src.service_fee ?? route?.params?.serviceFee ?? 0) || 0;
+        return {
+            receiptNo: src.receiptNo ?? src.receipt_number ?? '',
+            requestNumber: src.requestNumber ?? src.request_number ?? requestNumber,
+            datePaid: formatReceiptDate(src.paidAt ?? src.paid_at),
+            paymentType: stageCopy.type,
+            customerName: src.customerName ?? src.customer_name ?? customerName,
+            providerName: src.providerName ?? src.provider_name ?? providerName,
+            lineItem: stageCopy.lineItem,
+            subtotal: Number(src.subtotal ?? total - serviceFee) || 0,
+            serviceFee,
+            total,
+            methodLabel: METHOD_LABELS[src.method ?? methodId] || METHOD_LABELS[methodId] || '—',
+            reference: src.reference ?? src.paymentReference ?? src.payment_reference ?? '',
+        };
+    };
+
+    const openReceipt = (payment, methodId) => {
+        setReceipt(buildReceipt(payment, methodId));
+        setShowProcessedModal(true);
+    };
+
+    // Shares the receipt as text via the system share sheet (no extra packages needed).
+    // To save it as an image/PDF instead, capture <ReceiptCard /> with react-native-view-shot.
+    const handleDownloadReceipt = async () => {
+        if (!receipt) return;
+        const lines = [
+            'ServEase - PAYMENT RECEIPT',
+            `Receipt no.: ${receipt.receiptNo || '—'}`,
+            `Service Request: #${String(receipt.requestNumber).replace(/^#/, '')}`,
+            `Date Paid: ${receipt.datePaid}`,
+            `Payment Type: ${receipt.paymentType}`,
+            `Received from: ${receipt.customerName || '—'}`,
+            `Sent to: ${receipt.providerName || '—'}`,
+            '',
+            `${receipt.lineItem}: ${formatPeso(receipt.subtotal)}`,
+            ...(receipt.serviceFee > 0 ? [`Service Fee: ${formatPeso(receipt.serviceFee)}`] : []),
+            `TOTAL: ${formatPeso(receipt.total)}`,
+            '',
+            `Payment Method: ${receipt.methodLabel}`,
+            ...(receipt.reference ? [`Payment Reference: ${receipt.reference}`] : []),
+        ];
+        try {
+            await Share.share({ title: `ServEase Receipt ${receipt.receiptNo || ''}`.trim(), message: lines.join('\n') });
+        } catch (error) {
+            // Share sheet dismissed/unavailable — nothing to do.
+        }
+    };
+
     const handleBack = () => {
         navigation.goBack();
     };
@@ -89,7 +264,7 @@ const Payment = ({ navigation, route }) => {
                     clearInterval(pollTimerRef.current);
                     setWaitingForCheckout(false);
                     setIsPaying(false);
-                    setShowProcessedModal(true);
+                    openReceipt(payment, selectedMethod);
                 } else if (payment?.status === 'failed' || Date.now() - startedAt > POLL_TIMEOUT_MS) {
                     clearInterval(pollTimerRef.current);
                     setWaitingForCheckout(false);
@@ -123,8 +298,8 @@ const Payment = ({ navigation, route }) => {
             }
             setIsPaying(true);
             try {
-                await payForServiceRequest(requestId, { amount: dueAmount, method: 'cash', stage: 'final' });
-                setShowProcessedModal(true);
+                const cashResult = await payForServiceRequest(requestId, { amount: dueAmount, method: 'cash', stage: 'final' });
+                openReceipt(cashResult, 'cash');
             } catch (error) {
                 Alert.alert('Could not complete the request', error.message);
             } finally {
@@ -144,7 +319,7 @@ const Payment = ({ navigation, route }) => {
                 Linking.openURL(result.checkoutUrl);
             } else {
                 // No PayMongo keys on the backend: payment recorded directly (dev mode).
-                setShowProcessedModal(true);
+                openReceipt(result, selectedMethod);
             }
         } catch (error) {
             Alert.alert('Payment failed', error.message);
@@ -226,24 +401,31 @@ const Payment = ({ navigation, route }) => {
                     <View style={styles.modalCard}>
                         <View style={styles.modalHeaderRow}>
                             <Text style={styles.modalTitle}>{isCashFinal ? 'Payment Completed' : 'Payment Processed'}</Text>
-                            <TouchableOpacity onPress={handleCloseProcessedModal}>
+                            <TouchableOpacity onPress={handleCloseProcessedModal} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                                 <Image source={require('../assets/icon_close.png')} style={styles.modalCloseIcon} />
                             </TouchableOpacity>
                         </View>
 
                         <Text style={styles.modalSubtitle}>
-                            {isCashFinal
-                                ? 'Payment completed.'
-                                : paymentStage === 'additional'
-                                  ? 'The payment for additional parts has been processed.'
-                                  : 'The money was sent to the service provider.'}
+                            {isCashFinal ? 'Payment completed.' : stageCopy.subtitle}
                         </Text>
 
-                        <TouchableOpacity style={styles.primaryCtaButton} onPress={handlePrimaryCta}>
-                            <Text style={styles.primaryCtaText}>
-                                {paymentStage === 'final' ? 'Rate and Review' : 'Go back'}
-                            </Text>
-                        </TouchableOpacity>
+                        {receipt ? (
+                            <ScrollView style={styles.receiptScroll} showsVerticalScrollIndicator={false}>
+                                <ReceiptCard receipt={receipt} />
+                            </ScrollView>
+                        ) : null}
+
+                        <View style={styles.modalButtonRow}>
+                            <TouchableOpacity style={styles.downloadButton} onPress={handleDownloadReceipt} activeOpacity={0.85}>
+                                <Text style={styles.downloadButtonText}>Download Receipt</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.primaryCtaButton} onPress={handlePrimaryCta} activeOpacity={0.85}>
+                                <Text style={styles.primaryCtaText}>
+                                    {paymentStage === 'final' ? 'Rate and Review' : 'Done'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </View>
             </Modal>
@@ -337,26 +519,25 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.45)',
         justifyContent: 'center',
-        paddingHorizontal: 28,
+        paddingHorizontal: 20,
     },
     modalCard: {
         backgroundColor: '#FFFFFF',
         borderRadius: 16,
-        padding: 20,
+        padding: 18,
+        maxHeight: '90%',
     },
     modalHeaderRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        marginBottom: 8,
+        alignItems: 'center',
+        marginBottom: 4,
     },
     modalTitle: {
-        fontSize: 16,
+        fontSize: 15,
         fontWeight: '700',
         color: '#111111',
         flex: 1,
-        textAlign: 'center',
-        marginLeft: 20,
     },
     modalCloseIcon: {
         width: 16,
@@ -366,21 +547,126 @@ const styles = StyleSheet.create({
     modalSubtitle: {
         fontSize: 12,
         color: '#666666',
-        textAlign: 'center',
-        marginBottom: 16,
+        marginBottom: 14,
+    },
+    receiptScroll: {
+        flexGrow: 0,
+        flexShrink: 1,
+    },
+    modalButtonRow: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        marginTop: 16,
+    },
+    downloadButton: {
+        borderRadius: 20,
+        paddingVertical: 10,
+        paddingHorizontal: 18,
+        backgroundColor: '#0255AF', // Figma uses a blue→teal gradient; swap for a LinearGradient if the project has one
+        marginRight: 10,
+    },
+    downloadButtonText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#FFFFFF',
     },
     primaryCtaButton: {
         borderWidth: 1,
-        borderColor: '#DDDDDD',
+        borderColor: '#CFCFCF',
         borderRadius: 20,
-        paddingVertical: 12,
+        paddingVertical: 10,
+        paddingHorizontal: 20,
         alignItems: 'center',
         backgroundColor: '#FFFFFF',
     },
     primaryCtaText: {
-        fontSize: 13,
+        fontSize: 12,
         fontWeight: '700',
         color: '#111111',
+    },
+
+    // ---- Receipt card ----
+    receiptCard: {
+        borderWidth: 3,
+        borderColor: '#14295F',
+        borderRadius: 10,
+        backgroundColor: '#FFFFFF',
+        paddingHorizontal: 14,
+        paddingVertical: 14,
+    },
+    receiptHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 10,
+    },
+    receiptLogo: {
+        width: 44,
+        height: 44,
+        marginRight: 14,
+    },
+    receiptTitle: {
+        fontSize: 15,
+        fontWeight: '800',
+        color: '#14295F',
+        letterSpacing: 0.4,
+    },
+    receiptMetaBlock: {
+        marginBottom: 10,
+    },
+    receiptMeta: {
+        fontSize: 10.5,
+        color: '#111111',
+        lineHeight: 17,
+    },
+    receiptMetaLabel: {
+        fontWeight: '700',
+    },
+    receiptDivider: {
+        height: 1,
+        backgroundColor: '#1A1A1A',
+        marginVertical: 8,
+    },
+    partiesRow: {
+        flexDirection: 'row',
+        paddingVertical: 2,
+    },
+    partyCol: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    partyName: {
+        fontSize: 10.5,
+        fontWeight: '700',
+        color: '#111111',
+    },
+    partyCaption: {
+        fontSize: 8.5,
+        fontStyle: 'italic',
+        color: '#444444',
+        marginTop: 1,
+    },
+    tableRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 3,
+    },
+    tableHead: {
+        fontSize: 10.5,
+        fontWeight: '700',
+        color: '#111111',
+    },
+    tableCell: {
+        fontSize: 10.5,
+        color: '#111111',
+    },
+    totalText: {
+        fontSize: 10.5,
+        fontWeight: '700',
+        color: '#111111',
+    },
+    receiptFooter: {
+        marginTop: 10,
     },
 });
 
