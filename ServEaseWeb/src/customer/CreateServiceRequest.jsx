@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronLeft, ChevronRight, X, MapPin } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
 import { createServiceRequest, setDraftRequestId } from '../api/client';
 import calendarIcon from '../assets/icon_calendar.png';
@@ -308,6 +308,57 @@ function LocationTypeSelect({ value, onChange }) {
   );
 }
 
+// Keyless fallback used when the Maps JavaScript API can't load (no/invalid key): a regular Google
+// map (same look as the mobile app: roads, landmarks, labels) with the search radius drawn on top.
+// The zoom level is picked so the circle fits the box, and the circle's pixel size is computed
+// from that zoom so it matches the real distance. It is not draggable; use "Update location".
+const METERS_PER_PIXEL_AT_ZOOM_0 = 156543.03392;
+
+function EmbedMap({ coords, radiusKm }) {
+  const wrapRef = useRef(null);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return undefined;
+    const update = () => setSize({ w: el.clientWidth, h: el.clientHeight });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const center = coords || DEFAULT_MAP_CENTER;
+  const cosLat = Math.cos((center.lat * Math.PI) / 180);
+  const radiusM = radiusKm * 1000;
+  const targetDiameter = 0.7 * Math.min(size.w || 400, size.h || 300);
+  const zoom = coords
+    ? Math.max(
+        3,
+        Math.min(20, Math.floor(Math.log2((METERS_PER_PIXEL_AT_ZOOM_0 * cosLat * targetDiameter) / (2 * radiusM))))
+      )
+    : 14;
+  const diameter = (2 * radiusM * 2 ** zoom) / (METERS_PER_PIXEL_AT_ZOOM_0 * cosLat);
+
+  return (
+    <div ref={wrapRef} className="absolute inset-0 z-10 bg-[#EDF2F8]">
+      <iframe
+        title="Service location map"
+        src={`https://maps.google.com/maps?q=${center.lat},${center.lng}&z=${zoom}&output=embed`}
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+        className="pointer-events-none absolute inset-0 h-full w-full border-0"
+      />
+      {coords && (
+        <div
+          className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#0255AF] bg-[#0255AF]/10"
+          style={{ width: diameter, height: diameter }}
+        />
+      )}
+    </div>
+  );
+}
+
 // Google map showing the customer's location pin and a circle for the search radius.
 // The pin can be dragged (or the map clicked) to correct the location — also the way to set it
 // when device geolocation is denied. Falls back to a plain placeholder if the map can't load
@@ -381,29 +432,14 @@ function LocationMap({ coords, status, radiusKm, onPick }) {
     coords
       ? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`
       : status === 'denied' || status === 'unsupported'
-      ? 'Location access denied — click the map to set your location'
+      ? 'Location access denied — allow location access, then press Update location'
       : 'Detecting your location…';
 
   return (
     <div className="relative box-border h-[300px] w-full overflow-hidden rounded-[20px] border border-[#818080]/30 bg-[#EDF2F8] sm:h-[360px]">
       <div ref={containerRef} className="absolute inset-0" />
 
-      {mapState === 'error' && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-gradient-to-br from-[#DCE7F5] to-[#EDF2F8]">
-          <div
-            className="absolute inset-0 opacity-40"
-            style={{
-              backgroundImage:
-                'linear-gradient(#C7D6E8 1px, transparent 1px), linear-gradient(90deg, #C7D6E8 1px, transparent 1px)',
-              backgroundSize: '28px 28px',
-            }}
-          />
-          <div className="relative flex flex-col items-center gap-1">
-            <MapPin size={34} color="#D9483C" fill="#D9483C" />
-            <span className="font-[Roboto] text-[12px] text-[#414141]">Map unavailable</span>
-          </div>
-        </div>
-      )}
+      {mapState === 'error' && <EmbedMap coords={coords} radiusKm={radiusKm} />}
 
       <span className="absolute bottom-3 left-3 z-20 rounded-md bg-white/90 px-2 py-1 font-[Roboto] text-[12px] text-[#414141] shadow-sm">
         {caption}
@@ -462,11 +498,12 @@ export default function CreateServiceRequest() {
   const [coords, setCoords] = useState(null);
   const [locationStatus, setLocationStatus] = useState('loading'); // 'loading' | 'ready' | 'denied' | 'unsupported'
 
-  useEffect(() => {
+  const requestLocation = () => {
     if (!('geolocation' in navigator)) {
       setLocationStatus('unsupported');
       return;
     }
+    setLocationStatus('loading');
     navigator.geolocation.getCurrentPosition(
       (position) => {
         setCoords({ lat: position.coords.latitude, lng: position.coords.longitude });
@@ -475,7 +512,28 @@ export default function CreateServiceRequest() {
       () => setLocationStatus('denied'),
       { enableHighAccuracy: true, timeout: 10000 }
     );
+  };
+
+  useEffect(() => {
+    requestLocation();
   }, []);
+
+  // Human-readable address under the map (OpenStreetMap Nominatim reverse geocoding, no key needed).
+  // TODO: swap for the backend's GET /location/reverse-geocode if you want the same address text as mobile.
+  const [address, setAddress] = useState('');
+  useEffect(() => {
+    if (!coords) return undefined;
+    const controller = new AbortController();
+    setAddress('');
+    fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coords.lat}&lon=${coords.lng}&accept-language=en`,
+      { signal: controller.signal }
+    )
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setAddress(data?.display_name || ''))
+      .catch(() => {});
+    return () => controller.abort();
+  }, [coords]);
 
   const appointmentLabel = formatAppointment(appointment?.date, appointment?.time);
 
@@ -627,7 +685,7 @@ export default function CreateServiceRequest() {
         </div>
 
         <h3 className={SECTION_HEADING}>Location</h3>
-        <div className="mb-4">
+        <div className="mb-3">
           <LocationMap
             coords={coords}
             status={locationStatus}
@@ -635,6 +693,16 @@ export default function CreateServiceRequest() {
             onPick={handlePickLocation}
           />
         </div>
+        <p className="m-0 mb-1 font-[Roboto] text-[15px] text-[#414141]">
+          {address || (coords ? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}` : 'Location not set yet')}
+        </p>
+        <button
+          type="button"
+          onClick={requestLocation}
+          className="mb-5 cursor-pointer border-none bg-transparent p-0 font-[Roboto] text-[15px] font-medium text-[#0255AF] underline"
+        >
+          Update location
+        </button>
         <div className="mb-10">
           <RadiusSlider value={searchRadiusKm} onChange={setSearchRadiusKm} />
         </div>
