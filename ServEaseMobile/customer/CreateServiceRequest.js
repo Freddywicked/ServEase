@@ -3,6 +3,7 @@ import { View, Image, Text, TouchableOpacity, Pressable, ScrollView, TextInput, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { launchImageLibrary } from 'react-native-image-picker';
+import MapView, { Circle, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { ROUTES } from '../navigation/routes';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
 import ProgressBar from '../components/ProgressBar';
@@ -12,7 +13,6 @@ import {
     uploadServiceRequestPhoto,
     uploadServiceRequestVideo,
     reverseGeocode,
-    getRadiusMap,
 } from '../api/servicerequest_api';
 import { getCurrentCoordinates } from '../utils/deviceLocation';
 
@@ -77,6 +77,17 @@ const SERVICE_LOCATION_TYPES = [
     { value: 'shop', label: 'Shop-based' },
 ];
 
+// Where the maps open until the device location resolves (Naga City) — same fallback as
+// DEFAULT_MAP_CENTER in the web CreateServiceRequest.jsx.
+const DEFAULT_MAP_CENTER = { latitude: 13.6218, longitude: 123.1948 };
+
+// A map region framing the pin plus its whole search circle: 1 degree of latitude is
+// ~111 km, padded so the circle isn't flush with the edge.
+const regionForRadius = ({ latitude, longitude }, radiusKm) => {
+    const delta = Math.max((radiusKm * 2.4) / 111, 0.01);
+    return { latitude, longitude, latitudeDelta: delta, longitudeDelta: delta };
+};
+
 // 75 -> "1:15"
 const formatDuration = (seconds) => {
     if (!seconds) return '';
@@ -114,14 +125,15 @@ const CreateServiceRequest = ({ navigation }) => {
     const draft = useServiceRequestDraftStore((state) => state);
     const setDraft = useServiceRequestDraftStore((state) => state.setDraft);
 
-    // Search area: tapping the map opens a modal where the customer slides how far (km) from
-    // their location to look for providers. The map redraws the circle on release, and the
-    // choice is saved on the draft (draft.searchRadiusKm) when they confirm.
+    // Search area: the radius badge on the map opens a modal where the customer slides how far
+    // (km) from their location to look for providers. Both maps draw the circle live as the
+    // slider moves, and the choice is saved on the draft (draft.searchRadiusKm) on confirm.
     const [isRadiusModalVisible, setIsRadiusModalVisible] = useState(false);
     const [radiusPreviewKm, setRadiusPreviewKm] = useState(DEFAULT_CUSTOMER_RADIUS_KM);
-    const [radiusMapUri, setRadiusMapUri] = useState(null);
-    const [isRadiusMapLoading, setIsRadiusMapLoading] = useState(false);
-    const radiusMapRequestRef = useRef(0);
+    // Map refs: the inline preview map and the search-area modal map, animated to keep the
+    // pin and its circle in view.
+    const mapRef = useRef(null);
+    const radiusMapRef = useRef(null);
     const searchRadiusKm = draft.searchRadiusKm ?? DEFAULT_CUSTOMER_RADIUS_KM;
 
     const [categories, setCategories] = useState([]);
@@ -292,37 +304,37 @@ const CreateServiceRequest = ({ navigation }) => {
         );
     };
 
-    const loadRadiusMap = async (km) => {
-        if (!draft.location) return;
-        // Ignore a slow response if the slider has moved on since.
-        radiusMapRequestRef.current += 1;
-        const requestId = radiusMapRequestRef.current;
-        setIsRadiusMapLoading(true);
+    // Tap or pin-drag on either map re-picks the location — same role as `onPick` in the web
+    // LocationMap (CreateServiceRequest.jsx). The address is resolved through the backend,
+    // so the geocoding key stays there.
+    const handlePickLocation = async ({ latitude, longitude }) => {
+        let address = null;
+        let mapImageUri = null;
         try {
-            const uri = await getRadiusMap({
-                latitude: draft.location.latitude,
-                longitude: draft.location.longitude,
-                radiusKm: km,
-            });
-            if (requestId === radiusMapRequestRef.current) setRadiusMapUri(uri);
-        } catch (error) {
-            // Non-fatal: the slider still works; the circle just doesn't redraw.
-        } finally {
-            if (requestId === radiusMapRequestRef.current) setIsRadiusMapLoading(false);
+            ({ address, mapImageUri } = await reverseGeocode({ latitude, longitude }));
+        } catch (geocodeError) {
+            // Non-fatal: coordinates alone are enough to continue.
         }
+        setDraft({ location: { latitude, longitude, address, mapImageUri } });
     };
+
+    // Keep the inline map framed on the pin and its confirmed search circle.
+    const location = draft.location;
+    useEffect(() => {
+        if (!location) return;
+        mapRef.current?.animateToRegion(regionForRadius(location, searchRadiusKm), 300);
+    }, [location, searchRadiusKm]);
+
+    // The modal map re-frames as the slider moves so the preview circle stays visible.
+    useEffect(() => {
+        if (!location || !isRadiusModalVisible) return;
+        radiusMapRef.current?.animateToRegion(regionForRadius(location, radiusPreviewKm), 200);
+    }, [location, radiusPreviewKm, isRadiusModalVisible]);
 
     const handleOpenRadiusModal = () => {
         if (!draft.location) return;
         setRadiusPreviewKm(searchRadiusKm);
-        setRadiusMapUri(null);
         setIsRadiusModalVisible(true);
-        loadRadiusMap(searchRadiusKm);
-    };
-
-    const handleRadiusPreviewChange = (km) => {
-        setRadiusPreviewKm(km);
-        loadRadiusMap(km);
     };
 
     const handleConfirmRadius = () => {
@@ -635,24 +647,45 @@ const CreateServiceRequest = ({ navigation }) => {
                 <Text style={styles.sectionLabel}>Location</Text>
                 {draft.location ? (
                     <View>
-                        {/* Tap the map to set the search radius. */}
-                        <TouchableOpacity
-                            activeOpacity={0.85}
-                            onPress={handleOpenRadiusModal}
-                            accessibilityRole="button"
-                            accessibilityLabel="Set search radius on the map"
-                        >
-                            {draft.location.mapImageUri ? (
-                                <Image source={{ uri: draft.location.mapImageUri }} style={styles.locationImage} />
-                            ) : (
-                                <View style={[styles.locationImage, styles.locationImagePlaceholder]}>
-                                    <Text style={styles.locationImagePlaceholderText}>Tap to set your search area</Text>
-                                </View>
-                            )}
-                            <View style={styles.radiusBadge}>
+                        {/* Interactive map (react-native-maps): tap it or drag the pin to correct
+                            the location — same as the web CreateServiceRequest. Pan/zoom stay off
+                            here so the map doesn't fight the screen's ScrollView; the badge opens
+                            the search-area modal, whose map is fully pannable. */}
+                        <View style={styles.locationMapWrap}>
+                            <MapView
+                                ref={mapRef}
+                                provider={PROVIDER_GOOGLE}
+                                style={styles.locationMap}
+                                initialRegion={regionForRadius(draft.location, searchRadiusKm)}
+                                scrollEnabled={false}
+                                zoomEnabled={false}
+                                pitchEnabled={false}
+                                rotateEnabled={false}
+                                onPress={(event) => handlePickLocation(event.nativeEvent.coordinate)}
+                            >
+                                <Marker
+                                    coordinate={{ latitude: draft.location.latitude, longitude: draft.location.longitude }}
+                                    draggable
+                                    onDragEnd={(event) => handlePickLocation(event.nativeEvent.coordinate)}
+                                />
+                                <Circle
+                                    center={{ latitude: draft.location.latitude, longitude: draft.location.longitude }}
+                                    radius={searchRadiusKm * 1000}
+                                    strokeColor="#0255AF"
+                                    strokeWidth={2}
+                                    fillColor="rgba(2, 85, 175, 0.12)"
+                                />
+                            </MapView>
+                            <TouchableOpacity
+                                style={styles.radiusBadge}
+                                activeOpacity={0.85}
+                                onPress={handleOpenRadiusModal}
+                                accessibilityRole="button"
+                                accessibilityLabel="Set search radius on the map"
+                            >
                                 <Text style={styles.radiusBadgeText}>Search radius: {searchRadiusKm} km · Tap to change</Text>
-                            </View>
-                        </TouchableOpacity>
+                            </TouchableOpacity>
+                        </View>
                         {draft.location.address ? (
                             <Text style={styles.locationAddressText}>{draft.location.address}</Text>
                         ) : null}
@@ -733,24 +766,41 @@ const CreateServiceRequest = ({ navigation }) => {
                         </Text>
 
                         <View style={styles.radiusMapWrap}>
-                            {radiusMapUri || draft.location?.mapImageUri ? (
-                                <Image
-                                    source={{ uri: radiusMapUri || draft.location?.mapImageUri }}
-                                    style={styles.radiusMapImage}
-                                />
-                            ) : (
-                                <View style={[styles.radiusMapImage, styles.locationImagePlaceholder]}>
-                                    <Text style={styles.locationImagePlaceholderText}>Map preview unavailable</Text>
-                                </View>
-                            )}
-                            {isRadiusMapLoading ? (
-                                <View style={styles.radiusMapLoading}>
-                                    <ActivityIndicator color="#0255AF" />
-                                </View>
-                            ) : null}
+                            {/* Fully interactive here (no parent ScrollView): pan/zoom work, and
+                                tapping or dragging the pin moves the location too. */}
+                            <MapView
+                                ref={radiusMapRef}
+                                provider={PROVIDER_GOOGLE}
+                                style={styles.radiusMap}
+                                initialRegion={regionForRadius(draft.location ?? DEFAULT_MAP_CENTER, radiusPreviewKm)}
+                                onPress={(event) => handlePickLocation(event.nativeEvent.coordinate)}
+                            >
+                                {draft.location ? (
+                                    <>
+                                        <Marker
+                                            coordinate={{ latitude: draft.location.latitude, longitude: draft.location.longitude }}
+                                            draggable
+                                            onDragEnd={(event) => handlePickLocation(event.nativeEvent.coordinate)}
+                                        />
+                                        <Circle
+                                            center={{ latitude: draft.location.latitude, longitude: draft.location.longitude }}
+                                            radius={radiusPreviewKm * 1000}
+                                            strokeColor="#0255AF"
+                                            strokeWidth={2}
+                                            fillColor="rgba(2, 85, 175, 0.12)"
+                                        />
+                                    </>
+                                ) : null}
+                            </MapView>
                         </View>
 
-                        <RadiusSlider label="Search radius" value={radiusPreviewKm} onChange={handleRadiusPreviewChange} />
+                        {/* onValueChange keeps the circle redrawing live while the slider moves. */}
+                        <RadiusSlider
+                            label="Search radius"
+                            value={radiusPreviewKm}
+                            onChange={setRadiusPreviewKm}
+                            onValueChange={setRadiusPreviewKm}
+                        />
 
                         <TouchableOpacity onPress={handleConfirmRadius} style={styles.confirmButtonWrap}>
                             <LinearGradient
@@ -1095,20 +1145,15 @@ const styles = StyleSheet.create({
         borderRadius: 10,
         resizeMode: 'cover',
     },
-    locationImage: {
+    locationMapWrap: {
         width: '100%',
-        height: 110,
+        height: 220,
         borderRadius: 10,
-        resizeMode: 'cover',
+        // Rounded corners only clip the map on Android when the wrapper hides overflow.
+        overflow: 'hidden',
     },
-    locationImagePlaceholder: {
-        backgroundColor: '#EEF2F7',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    locationImagePlaceholderText: {
-        fontSize: 12,
-        color: '#777777',
+    locationMap: {
+        ...StyleSheet.absoluteFillObject,
     },
     radiusBadge: {
         position: 'absolute',
@@ -1132,23 +1177,12 @@ const styles = StyleSheet.create({
     },
     radiusMapWrap: {
         marginBottom: 12,
+        borderRadius: 10,
+        overflow: 'hidden',
     },
-    radiusMapImage: {
+    radiusMap: {
         width: '100%',
         height: 220,
-        borderRadius: 10,
-        resizeMode: 'cover',
-    },
-    radiusMapLoading: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        borderRadius: 10,
-        backgroundColor: 'rgba(255, 255, 255, 0.45)',
-        alignItems: 'center',
-        justifyContent: 'center',
     },
     turnOnLocationText: {
         fontSize: 14,

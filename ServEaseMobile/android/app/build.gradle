@@ -70,6 +70,19 @@ react {
  */
 def enableProguardInReleaseBuilds = false
 
+// Google Maps Android SDK key (react-native-maps). Read from android/local.properties
+// (git-ignored, so the key is never committed) and injected into AndroidManifest.xml as
+// ${MAPS_API_KEY}. Without it the interactive map on CreateServiceRequest stays blank.
+def localProps = new Properties()
+def localPropsFile = rootProject.file('local.properties')
+if (localPropsFile.exists()) {
+    localPropsFile.withInputStream { localProps.load(it) }
+}
+def mapsApiKey = localProps.getProperty('MAPS_API_KEY', '')
+if (!mapsApiKey || mapsApiKey == 'PASTE_YOUR_ANDROID_MAPS_KEY_HERE') {
+    logger.warn('ServEase: MAPS_API_KEY missing in android/local.properties — the interactive map will not load.')
+}
+
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
  *
@@ -95,6 +108,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        manifestPlaceholders = [MAPS_API_KEY: mapsApiKey]
     }
     signingConfigs {
         debug {

@@ -14,8 +14,9 @@ export const DEFAULT_CUSTOMER_RADIUS_KM = 15;
 //
 // `onChange(km)` fires when the user LETS GO of the slider, not on every tick, so a
 // screen can save or re-search in it without sending a request per step. The label
-// still updates live while dragging.
-const RadiusSlider = ({ label, value, onChange, disabled = false }) => {
+// still updates live while dragging; pass `onValueChange(km)` to also follow every
+// tick (e.g. the live radius circle on the CreateServiceRequest map).
+const RadiusSlider = ({ label, value, onChange, onValueChange, disabled = false }) => {
     const [liveValue, setLiveValue] = useState(value);
 
     // Follow the parent when it changes the value (e.g. after the saved profile loads).
@@ -39,7 +40,10 @@ const RadiusSlider = ({ label, value, onChange, disabled = false }) => {
                 minimumTrackTintColor="#0255AF"
                 maximumTrackTintColor="#E0E0E0"
                 thumbTintColor="#0255AF"
-                onValueChange={setLiveValue}
+                onValueChange={(km) => {
+                    setLiveValue(km);
+                    onValueChange?.(km);
+                }}
                 onSlidingComplete={(km) => onChange?.(km)}
             />
             <View style={styles.scaleRow}>
