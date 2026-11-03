@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, X, MapPin } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, X, MapPin } from 'lucide-react';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
 import { createServiceRequest, setDraftRequestId } from '../api/client';
 import calendarIcon from '../assets/icon_calendar.png';
@@ -11,10 +11,49 @@ import photoIcon from '../assets/icon_photo.png';
 // (e.g. GET /api/categories) if categories become admin-configurable.
 const CATEGORIES = ['Home Repair', 'Automotive', 'IT-Related Devices', 'Phone Device'];
 
+// Where the repair takes place. `value` is what travels to the backend
+// (e.g. SERVICE_REQUEST.service_location_type), `label` is what the customer sees.
+const SERVICE_LOCATION_TYPES = [
+  { value: 'home', label: 'Home-based' },
+  { value: 'shop', label: 'Shop-based' },
+];
+
 // Appointment time options offered at this step, before a provider has been matched.
 // TODO: once providers can set their own working hours, this could instead come from
 // GET /api/service-request/preferred-slots (or similar) rather than being a fixed list.
 const TIME_SLOTS = ['10:00 AM', '11:00 AM', '01:00 PM', '02:00 PM'];
+
+// Search area: how far (km) from the customer's location to look for providers.
+// Keep these in step with RadiusSlider / DEFAULT_CUSTOMER_RADIUS_KM in the mobile app.
+const MIN_RADIUS_KM = 1;
+const MAX_RADIUS_KM = 20;
+const DEFAULT_RADIUS_KM = 5;
+
+// Google Maps JavaScript API key. Add VITE_GOOGLE_MAPS_API_KEY=... to your .env (Maps JavaScript API enabled).
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+// Where the map opens until the device location resolves (Naga City).
+const DEFAULT_MAP_CENTER = { lat: 13.6218, lng: 123.1948 };
+
+// Loads the Google Maps script once and resolves with `google.maps`.
+let googleMapsPromise = null;
+function loadGoogleMaps() {
+  if (window.google?.maps) return Promise.resolve(window.google.maps);
+  if (!GOOGLE_MAPS_API_KEY) return Promise.reject(new Error('Missing VITE_GOOGLE_MAPS_API_KEY'));
+  if (!googleMapsPromise) {
+    googleMapsPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&v=weekly`;
+      script.async = true;
+      script.onload = () => resolve(window.google.maps);
+      script.onerror = () => {
+        googleMapsPromise = null;
+        reject(new Error('Google Maps failed to load'));
+      };
+      document.head.appendChild(script);
+    });
+  }
+  return googleMapsPromise;
+}
 
 const MONTH_NAMES = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -50,7 +89,7 @@ function formatAppointment(date, time) {
 // `activeStep` is 1-indexed; this screen is step 1 of 4.
 function StepProgress({ activeStep, totalSteps = 4 }) {
   return (
-    <div className="mb-6 flex gap-2">
+    <div className="mb-8 flex w-full max-w-[579px] gap-[6px]">
       {Array.from({ length: totalSteps }, (_, i) => (
         <div
           key={i}
@@ -196,32 +235,213 @@ function AppointmentModal({ initialDate, onClose, onConfirm }) {
   );
 }
 
-// Shows the device's location on a stylized placeholder map. The actual pin position and
-// address should be resolved on the backend once the coordinates are sent up.
-function LocationField({ coords, status }) {
+// Service Location Type dropdown (Home-based / Shop-based). The menu floats over the content
+// below it (the map), like the Figma open state, and closes on outside click or Escape.
+function LocationTypeSelect({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const selected = SERVICE_LOCATION_TYPES.find((t) => t.value === value) || null;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handlePointerDown = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
+
   return (
-    <div className="relative box-border flex h-[140px] w-full items-center justify-center overflow-hidden rounded-[20px] bg-gradient-to-br from-[#DCE7F5] to-[#EDF2F8]">
-      <div
-        className="absolute inset-0 opacity-40"
-        style={{
-          backgroundImage:
-            'linear-gradient(#C7D6E8 1px, transparent 1px), linear-gradient(90deg, #C7D6E8 1px, transparent 1px)',
-          backgroundSize: '28px 28px',
-        }}
-      />
-      <div className="relative flex flex-col items-center gap-1">
-        <MapPin size={30} color="#D9483C" fill="#D9483C" />
-        <span className="rounded-md bg-white/90 px-2 py-1 font-[Roboto] text-[12px] text-[#414141]">
-          {status === 'ready' && coords
-            ? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`
-            : status === 'denied'
-            ? 'Location access denied — enter your address manually'
-            : 'Detecting your location…'}
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="box-border flex h-[65px] w-full cursor-pointer items-center justify-between rounded-[10px] border border-[#818080] bg-white px-6 text-left"
+      >
+        <span
+          className={`font-[SF_Pro,system-ui,sans-serif] text-[14px] ${
+            selected ? 'text-black' : 'text-[#484040]'
+          }`}
+        >
+          {selected ? selected.label : 'Service Location Type'}
         </span>
-      </div>
+        <ChevronDown
+          size={22}
+          color="#7C7979"
+          className={`flex-none transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {open && (
+        <ul
+          role="listbox"
+          className="absolute left-0 right-0 top-full z-30 m-0 mt-1 list-none overflow-hidden rounded-[10px] border border-[#818080] bg-white p-0 shadow-[0_4px_10px_rgba(0,0,0,0.15)]"
+        >
+          {SERVICE_LOCATION_TYPES.map((type, index) => (
+            <li key={type.value} role="option" aria-selected={type.value === value}>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(type.value);
+                  setOpen(false);
+                }}
+                className={`box-border flex h-[48px] w-full cursor-pointer items-center border-none bg-white px-6 text-left font-[SF_Pro,system-ui,sans-serif] text-[14px] text-black hover:bg-[#EEF4FB] ${
+                  index > 0 ? 'border-t border-solid border-t-[#E5E5E5]' : ''
+                } ${type.value === value ? 'font-bold' : ''}`}
+              >
+                {type.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
+
+// Google map showing the customer's location pin and a circle for the search radius.
+// The pin can be dragged (or the map clicked) to correct the location — also the way to set it
+// when device geolocation is denied. Falls back to a plain placeholder if the map can't load
+// (missing/invalid VITE_GOOGLE_MAPS_API_KEY, offline, etc.).
+function LocationMap({ coords, status, radiusKm, onPick }) {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
+  const circleRef = useRef(null);
+  const onPickRef = useRef(onPick);
+  onPickRef.current = onPick;
+  const [mapState, setMapState] = useState('loading'); // 'loading' | 'ready' | 'error'
+
+  // Create the map once.
+  useEffect(() => {
+    let cancelled = false;
+    let map = null;
+    loadGoogleMaps()
+      .then((maps) => {
+        if (cancelled || !containerRef.current) return;
+        map = new maps.Map(containerRef.current, {
+          center: DEFAULT_MAP_CENTER,
+          zoom: 14,
+          disableDefaultUI: true,
+          zoomControl: true,
+          clickableIcons: false,
+          gestureHandling: 'cooperative',
+        });
+        const marker = new maps.Marker({ map, position: DEFAULT_MAP_CENTER, draggable: true, visible: false });
+        const circle = new maps.Circle({
+          map,
+          center: DEFAULT_MAP_CENTER,
+          radius: DEFAULT_RADIUS_KM * 1000,
+          strokeColor: '#0255AF',
+          strokeOpacity: 0.9,
+          strokeWeight: 2,
+          fillColor: '#0255AF',
+          fillOpacity: 0.12,
+          clickable: false,
+          visible: false,
+        });
+        const pick = (latLng) => onPickRef.current({ lat: latLng.lat(), lng: latLng.lng() });
+        map.addListener('click', (e) => pick(e.latLng));
+        marker.addListener('dragend', (e) => pick(e.latLng));
+        mapRef.current = map;
+        markerRef.current = marker;
+        circleRef.current = circle;
+        setMapState('ready');
+      })
+      .catch(() => {
+        if (!cancelled) setMapState('error');
+      });
+    return () => {
+      cancelled = true;
+      if (map && window.google?.maps) window.google.maps.event.clearInstanceListeners(map);
+    };
+  }, []);
+
+  // Keep the pin, the radius circle and the viewport in step with the coordinates and slider.
+  useEffect(() => {
+    if (mapState !== 'ready' || !coords) return;
+    markerRef.current.setPosition(coords);
+    markerRef.current.setVisible(true);
+    circleRef.current.setCenter(coords);
+    circleRef.current.setRadius(radiusKm * 1000);
+    circleRef.current.setVisible(true);
+    mapRef.current.fitBounds(circleRef.current.getBounds(), 24);
+  }, [mapState, coords, radiusKm]);
+
+  const caption =
+    coords
+      ? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`
+      : status === 'denied' || status === 'unsupported'
+      ? 'Location access denied — click the map to set your location'
+      : 'Detecting your location…';
+
+  return (
+    <div className="relative box-border h-[300px] w-full overflow-hidden rounded-[20px] border border-[#818080]/30 bg-[#EDF2F8] sm:h-[360px]">
+      <div ref={containerRef} className="absolute inset-0" />
+
+      {mapState === 'error' && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-gradient-to-br from-[#DCE7F5] to-[#EDF2F8]">
+          <div
+            className="absolute inset-0 opacity-40"
+            style={{
+              backgroundImage:
+                'linear-gradient(#C7D6E8 1px, transparent 1px), linear-gradient(90deg, #C7D6E8 1px, transparent 1px)',
+              backgroundSize: '28px 28px',
+            }}
+          />
+          <div className="relative flex flex-col items-center gap-1">
+            <MapPin size={34} color="#D9483C" fill="#D9483C" />
+            <span className="font-[Roboto] text-[12px] text-[#414141]">Map unavailable</span>
+          </div>
+        </div>
+      )}
+
+      <span className="absolute bottom-3 left-3 z-20 rounded-md bg-white/90 px-2 py-1 font-[Roboto] text-[12px] text-[#414141] shadow-sm">
+        {caption}
+      </span>
+    </div>
+  );
+}
+
+// Slider for how far from the customer's location providers are searched (km).
+function RadiusSlider({ value, onChange }) {
+  return (
+    <div className="box-border w-full rounded-[10px] border border-[#818080] bg-white px-6 py-4">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="font-[SF_Pro,system-ui,sans-serif] text-[14px] font-bold text-[#484040]">Search radius</span>
+        <span className="font-[SF_Pro,system-ui,sans-serif] text-[14px] font-bold text-[#0255AF]">{value} km</span>
+      </div>
+      <input
+        type="range"
+        min={MIN_RADIUS_KM}
+        max={MAX_RADIUS_KM}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        aria-label="Search radius in kilometers"
+        className="h-2 w-full cursor-pointer accent-[#0255AF]"
+      />
+      <div className="mt-1 flex justify-between font-[SF_Pro,system-ui,sans-serif] text-[11px] text-[#7C7979]">
+        <span>{MIN_RADIUS_KM} km</span>
+        <span>{MAX_RADIUS_KM} km</span>
+      </div>
+      <p className="m-0 mt-2 font-[SF_Pro,system-ui,sans-serif] text-[12px] text-[#484040]">
+        We&apos;ll recommend service providers within this distance from your location.
+      </p>
+    </div>
+  );
+}
+
+const SECTION_HEADING = 'm-0 mb-3 font-[Roboto] text-[18px] font-semibold text-[#292727] sm:text-[20px]';
 
 export default function CreateServiceRequest() {
   const navigate = useNavigate();
@@ -231,11 +451,14 @@ export default function CreateServiceRequest() {
   const [description, setDescription] = useState('');
   const [photo, setPhoto] = useState(null); // File object, TODO uploaded to backend on submit
   const [appointment, setAppointment] = useState(null); // { date: Date, time: string }
+  const [serviceLocationType, setServiceLocationType] = useState(''); // 'home' | 'shop'
+  const [searchRadiusKm, setSearchRadiusKm] = useState(DEFAULT_RADIUS_KM);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  // Device geolocation. The coordinates are sent with the request when the customer presses Next.
+  // Device geolocation (the customer can then fine-tune it on the map). The coordinates and the
+  // search radius are sent with the request when the customer presses Next.
   const [coords, setCoords] = useState(null);
   const [locationStatus, setLocationStatus] = useState('loading'); // 'loading' | 'ready' | 'denied' | 'unsupported'
 
@@ -266,6 +489,11 @@ export default function CreateServiceRequest() {
     setIsCalendarOpen(false);
   };
 
+  const handlePickLocation = (picked) => {
+    setCoords(picked);
+    setLocationStatus('ready');
+  };
+
   // Creates the draft request on the backend (POST /api/service-requests), remembers its id for the
   // next steps of the flow (AI diagnosis -> choose provider -> submit), then continues.
   const handleNext = async () => {
@@ -277,6 +505,14 @@ export default function CreateServiceRequest() {
       setError('Please describe the problem.');
       return;
     }
+    if (!serviceLocationType) {
+      setError('Please choose a service location type (home-based or shop-based).');
+      return;
+    }
+    if (!coords) {
+      setError('We need your location to find service providers near you.');
+      return;
+    }
 
     setError('');
     setIsSubmitting(true);
@@ -284,15 +520,15 @@ export default function CreateServiceRequest() {
       const formData = new FormData();
       formData.append('category', category);
       formData.append('description', description.trim());
+      formData.append('serviceLocationType', serviceLocationType); // "home" | "shop"
       if (photo) formData.append('photo', photo);
       if (appointment) {
         formData.append('appointmentDate', toDateKey(appointment.date)); // "YYYY-MM-DD"
         formData.append('appointmentTime', appointment.time);
       }
-      if (coords) {
-        formData.append('latitude', coords.lat);
-        formData.append('longitude', coords.lng);
-      }
+      formData.append('latitude', coords.lat);
+      formData.append('longitude', coords.lng);
+      formData.append('searchRadiusKm', searchRadiusKm);
 
       const { request } = await createServiceRequest(formData);
       setDraftRequestId(request.id); // e.g. "SR-0007"
@@ -306,24 +542,21 @@ export default function CreateServiceRequest() {
 
   return (
     <CustomerSidebar>
-      <div className="box-border px-4 py-6 sm:px-9">
-        <StepProgress activeStep={1} />
-
-        <h1 className="m-0 mb-4 font-[Quicksand] text-[32px] font-bold text-[#005FCA] sm:text-[40px] lg:text-[48px]">
+      <div className="box-border w-full px-5 py-8 sm:px-10 lg:px-14 lg:py-10">
+        <h1 className="m-0 mb-4 font-[Quicksand] text-[32px] font-bold leading-tight text-[#005FCA] sm:text-[40px] lg:text-[48px]">
           Creating Service Request
         </h1>
+        <StepProgress activeStep={1} />
 
-        <h2 className="m-0 mb-1 font-[Roboto] text-[18px] font-semibold text-[#292727] sm:text-[20px]">
+        <h2 className="m-0 mb-2 font-[Roboto] text-[18px] font-semibold text-[#292727] sm:text-[20px]">
           What needs fixing?
         </h2>
-        <p className="m-0 mb-4 font-[Roboto] text-[15px] text-[#414141] sm:text-[16px]">
+        <p className="m-0 mb-8 font-[Roboto] text-[16px] text-[#414141] sm:text-[20px]">
           Pick a category and tell us what&apos;s going on — the more detail, the better the diagnosis.
         </p>
 
-        <h3 className="m-0 mb-2 font-[Roboto] text-[16px] font-semibold text-[#292727] sm:text-[18px]">
-          Category
-        </h3>
-        <div className="mb-5 flex flex-wrap gap-3">
+        <h3 className={SECTION_HEADING}>Category</h3>
+        <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4 lg:gap-6">
           {CATEGORIES.map((c) => {
             const active = c === category;
             return (
@@ -331,10 +564,9 @@ export default function CreateServiceRequest() {
                 key={c}
                 type="button"
                 onClick={() => setCategory(c)}
-                className={`rounded-[10px] border px-5 py-3 font-[Roboto] text-[13px] sm:text-[14px] ${
-                  active
-                    ? 'border-[#818080] bg-gradient-to-r from-[#0255AF] to-[#04A5A5] text-white shadow-[0_4px_4px_rgba(0,0,0,0.25)]'
-                    : 'border-[#818080]/50 bg-white text-[#292727] hover:border-[#818080]'
+                aria-pressed={active}
+                className={`box-border h-[46px] cursor-pointer rounded-[10px] border border-[#818080] bg-gradient-to-r from-[#0255AF] to-[#04A5A5] px-4 font-[Roboto] text-[14px] text-white shadow-[0_4px_4px_rgba(0,0,0,0.25)] transition ${
+                  active ? 'ring-2 ring-[#021E79] ring-offset-2' : 'hover:brightness-110'
                 }`}
               >
                 {c}
@@ -343,23 +575,19 @@ export default function CreateServiceRequest() {
           })}
         </div>
 
-        <div className="mb-5 grid gap-4 lg:grid-cols-2">
+        <div className="mb-8 grid gap-x-10 gap-y-6 lg:grid-cols-2">
           <div>
-            <h3 className="m-0 mb-2 font-[Roboto] text-[16px] font-semibold text-[#292727] sm:text-[18px]">
-              Describe the Problem
-            </h3>
+            <h3 className={SECTION_HEADING}>Describe the Problem</h3>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="e.g. Screen cracked"
-              className="box-border h-[109px] w-full resize-none rounded-[10px] border border-[#818080] p-3 font-[SF_Pro,system-ui,sans-serif] text-[13px] text-[#333333] outline-none focus:border-[#0255AF]"
+              className="box-border h-[140px] w-full resize-none rounded-[10px] border border-[#818080] bg-white p-4 font-[SF_Pro,system-ui,sans-serif] text-[14px] text-[#333333] outline-none placeholder:text-[#333333]/60 focus:border-[#0255AF]"
             />
           </div>
 
           <div>
-            <h3 className="m-0 mb-2 font-[Roboto] text-[16px] font-semibold text-[#292727] sm:text-[18px]">
-              Photo
-            </h3>
+            <h3 className={SECTION_HEADING}>Photo</h3>
             <input
               ref={fileInputRef}
               type="file"
@@ -370,37 +598,45 @@ export default function CreateServiceRequest() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="box-border flex h-[109px] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[10px] border border-[#818080] bg-white"
+              className="box-border flex h-[140px] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[10px] border border-[#818080] bg-white"
             >
-              <img src={photoIcon} alt="" className="h-8 w-8 opacity-70" />
-              <span className="font-[SF_Pro,system-ui,sans-serif] text-[11px] text-[#484040]">
+              <img src={photoIcon} alt="" className="h-10 w-10 opacity-80" />
+              <span className="font-[SF_Pro,system-ui,sans-serif] text-[12px] text-[#484040]">
                 {photo ? photo.name : 'Upload Image'}
               </span>
             </button>
           </div>
+
+          <button
+            type="button"
+            onClick={() => setIsCalendarOpen(true)}
+            className="box-border flex h-[65px] w-full cursor-pointer items-center gap-4 rounded-[10px] border border-[#818080] bg-white px-5 text-left"
+          >
+            <img src={calendarIcon} alt="" className="h-11 w-11 flex-none" />
+            <span>
+              <span className="block font-[SF_Pro,system-ui,sans-serif] text-[14px] font-bold text-[#484040]">
+                Preferred Appointment
+              </span>
+              <span className="block font-[SF_Pro,system-ui,sans-serif] text-[12px] text-[#484040]">
+                {appointmentLabel || 'Choose a date and time'}
+              </span>
+            </span>
+          </button>
+
+          <LocationTypeSelect value={serviceLocationType} onChange={setServiceLocationType} />
         </div>
 
-        <button
-          type="button"
-          onClick={() => setIsCalendarOpen(true)}
-          className="mb-5 box-border flex w-full cursor-pointer items-center gap-4 rounded-[10px] border border-[#818080] bg-white px-5 py-3 text-left"
-        >
-          <img src={calendarIcon} alt="" className="h-9 w-9 flex-none" />
-          <span>
-            <span className="block font-[SF_Pro,system-ui,sans-serif] text-[14px] font-bold text-[#484040]">
-              Preferred Appointment
-            </span>
-            <span className="block font-[SF_Pro,system-ui,sans-serif] text-[12px] text-[#484040]">
-              {appointmentLabel || 'Choose a date and time'}
-            </span>
-          </span>
-        </button>
-
-        <h3 className="m-0 mb-2 font-[Roboto] text-[16px] font-semibold text-[#292727] sm:text-[18px]">
-          Location
-        </h3>
-        <div className="mb-6">
-          <LocationField coords={coords} status={locationStatus} />
+        <h3 className={SECTION_HEADING}>Location</h3>
+        <div className="mb-4">
+          <LocationMap
+            coords={coords}
+            status={locationStatus}
+            radiusKm={searchRadiusKm}
+            onPick={handlePickLocation}
+          />
+        </div>
+        <div className="mb-10">
+          <RadiusSlider value={searchRadiusKm} onChange={setSearchRadiusKm} />
         </div>
 
         <button
