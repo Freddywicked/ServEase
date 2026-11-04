@@ -21,7 +21,7 @@ const PAYMENT_METHODS = [
 ];
 
 // ServEase logo shown on the receipt header. Point this at your logo file.
-const RECEIPT_LOGO = require('../assets/servease_logo.png');
+const RECEIPT_LOGO = require('../assets/logo_servease.png');
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
