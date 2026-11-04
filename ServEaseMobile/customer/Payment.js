@@ -238,11 +238,20 @@ const Payment = ({ navigation, route }) => {
                 Alert.alert('Permission needed', 'Allow ServEase to save photos so the receipt can be downloaded.');
                 return;
             }
-            const uri = await captureRef(receiptRef, { format: 'png', quality: 1, result: 'tmpfile' });
-            await CameraRoll.saveAsset(uri, { type: 'photo' });
+            const captured = await captureRef(receiptRef, { format: 'png', quality: 1, result: 'tmpfile' });
+            // CameraRoll on Android needs a file:// URI.
+            const uri = captured.startsWith('file://') ? captured : `file://${captured}`;
+            // saveAsset exists in camera-roll v7+; older versions only have save.
+            if (typeof CameraRoll.saveAsset === 'function') {
+                await CameraRoll.saveAsset(uri, { type: 'photo' });
+            } else {
+                await CameraRoll.save(uri, { type: 'photo' });
+            }
             Alert.alert('Receipt saved', 'The receipt image was saved to your gallery.');
         } catch (error) {
-            Alert.alert('Could not save receipt', 'Please try again.');
+            console.warn('Save receipt failed:', error);
+            // The reason is included in the alert while we debug; remove it once saving works.
+            Alert.alert('Could not save receipt', String(error?.message || error));
         } finally {
             setIsSavingReceipt(false);
         }
