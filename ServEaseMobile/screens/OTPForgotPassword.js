@@ -6,7 +6,9 @@ import {
 import LinearGradient from 'react-native-linear-gradient';
 import { requestPasswordReset, verifyResetOtp } from '../api/passwordReset';
 
-// The Figma frame is 402 x 874. Every size and position below is the Figma value times `s`.
+// The Figma frame is 402 x 874. Positions and box sizes below are the Figma value times `s`,
+// so the screen keeps the same proportions on any phone. The code boxes, numbers and fonts
+// match the OTP Verification screen so both screens look consistent.
 const DESIGN_W = 402;
 const DESIGN_H = 874;
 
@@ -114,89 +116,91 @@ const OTPForgotPassword = ({ navigation, route }) => {
                     Forgot Password
                 </Text>
 
-                {/* Enter verification code */}
-                <Text style={[styles.heading, { left: px(44), top: px(327), width: px(268) }]}>
-                    Enter Verification code
-                </Text>
+                {/* Heading + code boxes + messages + resend + button live in ONE column,
+                    so nothing can overlap. The message slot reserves space even when empty,
+                    so the layout does not jump when a message appears. */}
+                <View style={{ position: 'absolute', left: px(33), top: px(322), width: px(336) }}>
+                    <Text style={styles.heading}>Enter Verification code</Text>
 
-                {/* Six code boxes */}
-                {Array.from({ length: OTP_LENGTH }).map((_, i) => (
-                    <View
-                        key={i}
-                        pointerEvents="none"
-                        style={[
-                            styles.box,
-                            { left: px(40 + 55 * i), top: px(366), width: px(44), height: px(61), borderRadius: px(10) },
-                            i === activeIndex ? styles.boxActive : null,
-                            error ? styles.boxError : null,
-                        ]}
-                    >
-                        <Text style={styles.boxText}>{code[i] || ''}</Text>
+                    {/* Six code boxes (same look as OTP Verification) */}
+                    <View style={{ height: px(56) }}>
+                        <View style={styles.otpRow} pointerEvents="none">
+                            {Array.from({ length: OTP_LENGTH }).map((_, i) => (
+                                <View
+                                    key={i}
+                                    style={[
+                                        styles.otpBox,
+                                        { width: px(48), height: px(56) },
+                                        i === activeIndex ? styles.otpBoxActive : null,
+                                        error ? styles.otpBoxError : null,
+                                        verifying ? styles.otpBoxDisabled : null,
+                                    ]}
+                                >
+                                    <Text style={styles.otpText}>{code[i] || ''}</Text>
+                                </View>
+                            ))}
+                        </View>
+
+                        {/* Invisible input laid over the boxes: handles typing, paste and SMS/email autofill */}
+                        <TextInput
+                            value={code}
+                            onChangeText={handleChange}
+                            onFocus={() => setFocused(true)}
+                            onBlur={() => setFocused(false)}
+                            selection={{ start: code.length, end: code.length }}
+                            keyboardType="number-pad"
+                            maxLength={OTP_LENGTH}
+                            textContentType="oneTimeCode"
+                            autoComplete="sms-otp"
+                            autoFocus
+                            caretHidden
+                            editable={!verifying}
+                            onSubmitEditing={handleVerify}
+                            style={styles.hiddenInput}
+                        />
                     </View>
-                ))}
 
-                {/* Invisible input laid over the boxes: handles typing, paste and SMS/email autofill */}
-                <TextInput
-                    value={code}
-                    onChangeText={handleChange}
-                    onFocus={() => setFocused(true)}
-                    onBlur={() => setFocused(false)}
-                    selection={{ start: code.length, end: code.length }}
-                    keyboardType="number-pad"
-                    maxLength={OTP_LENGTH}
-                    textContentType="oneTimeCode"
-                    autoComplete="sms-otp"
-                    autoFocus
-                    caretHidden
-                    editable={!verifying}
-                    onSubmitEditing={handleVerify}
-                    style={{
-                        position: 'absolute', left: px(40), top: px(366), width: px(319), height: px(61), opacity: 0,
-                    }}
-                />
+                    {/* Backend messages (reserved area) */}
+                    <View style={{ minHeight: px(32), paddingTop: px(8) }}>
+                        {error ? (
+                            <Text style={styles.errorText}>{error}</Text>
+                        ) : info ? (
+                            <Text style={styles.infoText}>{info}</Text>
+                        ) : null}
+                    </View>
 
-                {/* Resend line */}
-                <Text style={[styles.resendRow, { left: px(40), top: px(446), width: px(319) }]}>
-                    If you didn’t receive a code,{' '}
-                    <Text
-                        style={[styles.resend, resendDisabled && styles.resendDisabled]}
-                        onPress={handleResend}
-                    >
-                        {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend'}
+                    {/* Resend line */}
+                    <Text style={styles.resendText}>
+                        If you didn’t receive a code,{' '}
+                        <Text
+                            style={resendDisabled ? styles.resendDisabled : styles.link}
+                            onPress={handleResend}
+                        >
+                            {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend'}
+                        </Text>
                     </Text>
-                </Text>
 
-                {/* Verify button */}
-                <TouchableOpacity
-                    activeOpacity={0.85}
-                    onPress={handleVerify}
-                    disabled={verifying}
-                    style={[
-                        styles.button,
-                        { left: px(40), top: px(473), width: px(319), height: px(46), borderRadius: px(8) },
-                        verifying && styles.buttonDisabled,
-                    ]}
-                >
-                    <LinearGradient
-                        colors={GRADIENT}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={styles.buttonGradient}
+                    {/* Verify button */}
+                    <TouchableOpacity
+                        activeOpacity={0.8}
+                        onPress={handleVerify}
+                        disabled={verifying}
+                        style={[styles.button, { marginTop: px(16) }, verifying && styles.buttonDisabled]}
                     >
-                        {verifying ? (
-                            <ActivityIndicator color="#FFFFFF" />
-                        ) : (
-                            <Text style={styles.buttonText}>Verify</Text>
-                        )}
-                    </LinearGradient>
-                </TouchableOpacity>
-
-                {/* Backend messages */}
-                {error ? (
-                    <Text style={[styles.message, styles.messageError, { left: px(40), top: px(529), width: px(319) }]}>{error}</Text>
-                ) : info ? (
-                    <Text style={[styles.message, styles.messageInfo, { left: px(40), top: px(529), width: px(319) }]}>{info}</Text>
-                ) : null}
+                        <LinearGradient
+                            colors={GRADIENT}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={styles.buttonGradient}
+                        >
+                            {verifying ? (
+                                <ActivityIndicator color="#FFFFFF" />
+                            ) : (
+                                <Text style={styles.buttonText}>Verify</Text>
+                            )}
+                        </LinearGradient>
+                    </TouchableOpacity>
+                </View>
             </View>
         </Pressable>
     );
@@ -205,58 +209,47 @@ const OTPForgotPassword = ({ navigation, route }) => {
 const styles = StyleSheet.create({
     root: { flex: 1, backgroundColor: '#FFFFFF' },
 
+    // Same title as OTP Verification
     title: {
         position: 'absolute',
         textAlign: 'center',
-        fontSize: 24,
-        lineHeight: 30,
+        fontSize: 26,
+        lineHeight: 32,
         fontWeight: '700',
-        color: '#021E79',
+        color: '#1B2A8C',
     },
-    heading: {
-        position: 'absolute',
-        fontSize: 20,
-        lineHeight: 25,
-        fontWeight: '700',
-        color: '#292727',
-    },
+    // Same as OTP Verification's subtitle
+    heading: { fontSize: 16, fontWeight: '600', color: '#333333', marginBottom: 12 },
 
-    box: {
-        position: 'absolute',
-        backgroundColor: '#D9D9D9',
+    // Same code boxes as OTP Verification
+    otpRow: { flexDirection: 'row', justifyContent: 'space-between' },
+    otpBox: {
+        borderRadius: 10,
+        backgroundColor: '#F0F0F0',
         alignItems: 'center',
         justifyContent: 'center',
-        borderWidth: 1.5,
+        borderWidth: 1,
         borderColor: 'transparent',
     },
-    boxActive: { borderColor: '#0255AF' },
-    boxError: { borderColor: '#E53935' },
-    boxText: { fontSize: 24, lineHeight: 30, fontWeight: '700', color: '#292727' },
+    otpBoxActive: { borderColor: '#0255AF' },
+    otpBoxError: { borderColor: '#E53935' },
+    otpBoxDisabled: { opacity: 0.5 },
+    otpText: { fontSize: 20, fontWeight: '600', color: '#333333' },
+    hiddenInput: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, opacity: 0 },
 
-    resendRow: {
-        position: 'absolute',
-        textAlign: 'center',
-        fontSize: 12,
-        lineHeight: 14,
-        fontWeight: '700',
-        color: '#484040',
-    },
-    resend: { color: '#2E86FF' },
-    resendDisabled: { color: '#9AB8E8' },
+    errorText: { color: '#E53935', fontSize: 11 },
+    infoText: { color: '#2E7D32', fontSize: 11 },
 
-    button: {
-        position: 'absolute',
-        overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: 'rgba(0,0,0,0.3)',
-    },
-    buttonDisabled: { opacity: 0.7 },
-    buttonGradient: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-    buttonText: { color: '#FFFFFF', fontSize: 16, lineHeight: 23, fontWeight: '700' },
+    // Same resend line as OTP Verification
+    resendText: { textAlign: 'center', fontSize: 13, color: '#333333' },
+    resendDisabled: { color: '#999999' },
+    link: { color: '#2E6BE6', fontWeight: '600' },
 
-    message: { position: 'absolute', textAlign: 'center', fontSize: 12, lineHeight: 14 },
-    messageError: { color: '#E53935' },
-    messageInfo: { color: '#2E7D32' },
+    // Same button look as OTP Verification's Verify
+    button: { borderRadius: 12, overflow: 'hidden' },
+    buttonDisabled: { opacity: 0.6 },
+    buttonGradient: { paddingVertical: 15, alignItems: 'center', justifyContent: 'center', minHeight: 50 },
+    buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
 });
 
 export default OTPForgotPassword;

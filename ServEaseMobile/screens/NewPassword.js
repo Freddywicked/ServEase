@@ -6,8 +6,9 @@ import {
 import LinearGradient from 'react-native-linear-gradient';
 import { resetPassword } from '../api/passwordReset';
 
-// The Figma frame is 402 x 874. Every size and position below is the Figma value times `s`,
-// so the screen keeps the same proportions on any phone.
+// The Figma frame is 402 x 874. Positions and box sizes below are the Figma value times `s`,
+// so the screen keeps the same proportions on any phone. Fonts, padding and radii match
+// the Login screen so both screens look consistent.
 const DESIGN_W = 402;
 const DESIGN_H = 874;
 
@@ -31,7 +32,7 @@ const NewPassword = ({ navigation, route }) => {
 
     const updateField = (key, value) => {
         setForm((prev) => ({ ...prev, [key]: value }));
-        setErrors((prev) => (prev[key] ? { ...prev, [key]: '' } : prev));
+        setErrors((prev) => (prev[key] || prev.general ? { ...prev, [key]: '', general: '' } : prev));
     };
 
     const toggleVisible = (key) => setVisible((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -78,45 +79,48 @@ const NewPassword = ({ navigation, route }) => {
             } else {
                 setErrors({ general: err.message || 'Something went wrong. Please try again.' });
             }
+        } finally {
             setSubmitting(false);
         }
     };
 
-    const renderPasswordField = ({ key, label, placeholder, top }) => (
-        <View style={{ position: 'absolute', left: px(39), top: px(top), width: px(325) }}>
+    const renderPasswordField = ({ key, label, placeholder, returnKeyType, onSubmitEditing }) => (
+        <View>
             <Text style={styles.label}>{label}</Text>
             <View
                 style={[
-                    styles.textbox,
-                    { height: px(40), padding: px(8), borderRadius: px(6), marginTop: px(4) },
-                    errors[key] ? styles.textboxError : null,
+                    styles.inputWrapper,
+                    { minHeight: px(48) },
+                    errors[key] ? styles.inputWrapperError : null,
                 ]}
             >
                 <TextInput
                     style={styles.input}
                     placeholder={placeholder}
-                    placeholderTextColor="#A6A6A6"
+                    placeholderTextColor="#B0B0B0"
                     value={form[key]}
                     onChangeText={(text) => updateField(key, text)}
                     secureTextEntry={!visible[key]}
                     autoCapitalize="none"
                     autoCorrect={false}
+                    autoComplete="password-new"
                     textContentType="newPassword"
-                    returnKeyType={key === 'password' ? 'next' : 'go'}
-                    onSubmitEditing={key === 'confirmPassword' ? handleSubmit : undefined}
+                    returnKeyType={returnKeyType}
+                    onSubmitEditing={onSubmitEditing}
+                    editable={!submitting}
                 />
                 <TouchableOpacity
                     onPress={() => toggleVisible(key)}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    style={{ marginLeft: px(10) }}
                 >
-                    <Image
-                        source={require('../assets/icon_eye.png')}
-                        style={{ width: px(14.69), height: px(14.69), resizeMode: 'contain', tintColor: '#000000', opacity: 0.75 }}
-                    />
+                    <Image source={require('../assets/icon_eye.png')} style={styles.eyeIcon} />
                 </TouchableOpacity>
             </View>
-            {errors[key] ? <Text style={styles.errorText}>{errors[key]}</Text> : null}
+
+            {/* Reserved error area, so nothing below it jumps or overlaps */}
+            <View style={{ minHeight: px(24) }}>
+                {errors[key] ? <Text style={styles.errorText}>{errors[key]}</Text> : null}
+            </View>
         </View>
     );
 
@@ -146,37 +150,47 @@ const NewPassword = ({ navigation, route }) => {
                     Forgot Password
                 </Text>
 
-                {renderPasswordField({ key: 'password', label: 'ENTER NEW PASSWORD', placeholder: 'Create a password', top: 324 })}
-                {renderPasswordField({ key: 'confirmPassword', label: 'CONFIRM PASSWORD', placeholder: 'Confirm password', top: 395 })}
+                {/* Fields + errors + button live in ONE column, so errors can never overlap
+                    the fields or the button. */}
+                <View style={{ position: 'absolute', left: px(33), top: px(322), width: px(336) }}>
+                    {renderPasswordField({
+                        key: 'password',
+                        label: 'ENTER NEW PASSWORD',
+                        placeholder: 'Create a password',
+                        returnKeyType: 'next',
+                    })}
 
-                {/* Submit button */}
-                <TouchableOpacity
-                    activeOpacity={0.85}
-                    onPress={handleSubmit}
-                    disabled={submitting}
-                    style={[
-                        styles.button,
-                        { left: px(39), top: px(473), width: px(325), height: px(46), borderRadius: px(8) },
-                        submitting && styles.buttonDisabled,
-                    ]}
-                >
-                    <LinearGradient
-                        colors={GRADIENT}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={styles.buttonGradient}
+                    {renderPasswordField({
+                        key: 'confirmPassword',
+                        label: 'CONFIRM PASSWORD',
+                        placeholder: 'Confirm password',
+                        returnKeyType: 'go',
+                        onSubmitEditing: handleSubmit,
+                    })}
+
+                    {/* Submit button */}
+                    <TouchableOpacity
+                        activeOpacity={0.8}
+                        onPress={handleSubmit}
+                        disabled={submitting}
+                        style={[styles.button, { marginTop: px(8) }, submitting && styles.buttonDisabled]}
                     >
-                        {submitting ? (
-                            <ActivityIndicator color="#FFFFFF" />
-                        ) : (
-                            <Text style={styles.buttonText}>Submit</Text>
-                        )}
-                    </LinearGradient>
-                </TouchableOpacity>
+                        <LinearGradient
+                            colors={GRADIENT}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={styles.buttonGradient}
+                        >
+                            {submitting ? (
+                                <ActivityIndicator color="#FFFFFF" />
+                            ) : (
+                                <Text style={styles.buttonText}>Submit</Text>
+                            )}
+                        </LinearGradient>
+                    </TouchableOpacity>
 
-                {errors.general ? (
-                    <Text style={[styles.generalError, { left: px(39), top: px(529), width: px(325) }]}>{errors.general}</Text>
-                ) : null}
+                    {errors.general ? <Text style={styles.generalError}>{errors.general}</Text> : null}
+                </View>
             </View>
         </Pressable>
     );
@@ -188,48 +202,37 @@ const styles = StyleSheet.create({
     title: {
         position: 'absolute',
         textAlign: 'center',
-        fontSize: 24,
-        lineHeight: 30,
+        fontSize: 26,
+        lineHeight: 32,
         fontWeight: '700',
-        color: '#021E79',
+        color: '#1B2A8C',
     },
 
-    label: {
-        fontSize: 9,
-        lineHeight: 11,
-        fontWeight: '700',
-        letterSpacing: 1.8, // 0.2em
-        textTransform: 'uppercase',
-        color: '#000000',
-    },
-    textbox: {
+    // Same label style as Login
+    label: { fontSize: 11, fontWeight: '600', color: '#555555', letterSpacing: 1, marginBottom: 6 },
+
+    // Same text box container as Login
+    inputWrapper: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#FFFFFF',
         borderWidth: 1,
-        borderColor: '#A6A6A6',
+        borderColor: '#E0E0E0',
+        borderRadius: 10,
+        backgroundColor: '#F9F9F9',
+        paddingHorizontal: 14,
     },
-    textboxError: { borderColor: '#E53935' },
-    input: {
-        flex: 1,
-        padding: 0,
-        fontSize: 12,
-        lineHeight: 14,
-        color: '#333333',
-        includeFontPadding: false,
-    },
-    errorText: { color: '#E53935', fontSize: 10, lineHeight: 12, marginTop: 1 },
+    inputWrapperError: { borderColor: '#E53935' },
+    input: { flex: 1, paddingVertical: 12, fontSize: 14, color: '#333333' },
+    eyeIcon: { width: 20, height: 20, resizeMode: 'contain', tintColor: '#888888' },
 
-    button: {
-        position: 'absolute',
-        overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: 'rgba(0,0,0,0.3)',
-    },
+    errorText: { color: '#E53935', fontSize: 11, marginTop: 4 },
+    generalError: { color: '#E53935', fontSize: 12, textAlign: 'center', marginTop: 12 },
+
+    // Same button look as Login's Sign In
+    button: { borderRadius: 12, overflow: 'hidden' },
     buttonDisabled: { opacity: 0.7 },
-    generalError: { position: 'absolute', textAlign: 'center', color: '#E53935', fontSize: 12, lineHeight: 14 },
-    buttonGradient: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-    buttonText: { color: '#FFFFFF', fontSize: 16, lineHeight: 23, fontWeight: '700' },
+    buttonGradient: { paddingVertical: 15, alignItems: 'center', justifyContent: 'center', minHeight: 50 },
+    buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
 });
 
 export default NewPassword;

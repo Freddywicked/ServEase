@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, Modal, StyleSheet, Alert, Linking, Share } from 'react-native';
+import { View, Image, Text, TouchableOpacity, ScrollView, Modal, StyleSheet, Alert, Linking, Platform, PermissionsAndroid } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { captureRef } from 'react-native-view-shot';
+import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { payForServiceRequest, getPaymentStatus, getPaymentDue } from '../api/servicerequest_api';
 
 // How often / how long the screen re-checks the payment after the customer comes
@@ -18,8 +20,8 @@ const PAYMENT_METHODS = [
     { id: 'cash', label: 'Cash', icon: null },
 ];
 
-// ServEase logo shown on the receipt header (same asset the other mobile screens use).
-const RECEIPT_LOGO = require('../assets/logo_servease.png');
+// ServEase logo shown on the receipt header. Point this at your logo file.
+const RECEIPT_LOGO = require('../assets/servease_logo.png');
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -153,6 +155,9 @@ const Payment = ({ navigation, route }) => {
     const pollTimerRef = useRef(null);
     // Data for the receipt shown in the Payment Processed modal.
     const [receipt, setReceipt] = useState(null);
+    // The receipt view that gets captured as an image, and the saving state of the button.
+    const receiptRef = useRef(null);
+    const [isSavingReceipt, setIsSavingReceipt] = useState(false);
 
     // The amount is read from the backend (payment-due); the route-param amount is
     // only a preview until the server answers. This is what makes the deductions
@@ -216,30 +221,30 @@ const Payment = ({ navigation, route }) => {
         setShowProcessedModal(true);
     };
 
-    // Shares the receipt as text via the system share sheet (no extra packages needed).
-    // To save it as an image/PDF instead, capture <ReceiptCard /> with react-native-view-shot.
+    // Android 9 and below need WRITE_EXTERNAL_STORAGE to save to the gallery; Android 10+
+    // and iOS don't need a runtime permission for saving (iOS shows its own add-photos prompt).
+    const ensureSavePermission = async () => {
+        if (Platform.OS !== 'android' || Platform.Version >= 29) return true;
+        const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE);
+        return result === PermissionsAndroid.RESULTS.GRANTED;
+    };
+
+    // Captures the receipt as a PNG and saves it to the phone's gallery.
     const handleDownloadReceipt = async () => {
-        if (!receipt) return;
-        const lines = [
-            'ServEase - PAYMENT RECEIPT',
-            `Receipt no.: ${receipt.receiptNo || '—'}`,
-            `Service Request: #${String(receipt.requestNumber).replace(/^#/, '')}`,
-            `Date Paid: ${receipt.datePaid}`,
-            `Payment Type: ${receipt.paymentType}`,
-            `Received from: ${receipt.customerName || '—'}`,
-            `Sent to: ${receipt.providerName || '—'}`,
-            '',
-            `${receipt.lineItem}: ${formatPeso(receipt.subtotal)}`,
-            ...(receipt.serviceFee > 0 ? [`Service Fee: ${formatPeso(receipt.serviceFee)}`] : []),
-            `TOTAL: ${formatPeso(receipt.total)}`,
-            '',
-            `Payment Method: ${receipt.methodLabel}`,
-            ...(receipt.reference ? [`Payment Reference: ${receipt.reference}`] : []),
-        ];
+        if (!receipt || isSavingReceipt) return;
+        setIsSavingReceipt(true);
         try {
-            await Share.share({ title: `ServEase Receipt ${receipt.receiptNo || ''}`.trim(), message: lines.join('\n') });
+            if (!(await ensureSavePermission())) {
+                Alert.alert('Permission needed', 'Allow ServEase to save photos so the receipt can be downloaded.');
+                return;
+            }
+            const uri = await captureRef(receiptRef, { format: 'png', quality: 1, result: 'tmpfile' });
+            await CameraRoll.saveAsset(uri, { type: 'photo' });
+            Alert.alert('Receipt saved', 'The receipt image was saved to your gallery.');
         } catch (error) {
-            // Share sheet dismissed/unavailable — nothing to do.
+            Alert.alert('Could not save receipt', 'Please try again.');
+        } finally {
+            setIsSavingReceipt(false);
         }
     };
 
@@ -412,13 +417,21 @@ const Payment = ({ navigation, route }) => {
 
                         {receipt ? (
                             <ScrollView style={styles.receiptScroll} showsVerticalScrollIndicator={false}>
-                                <ReceiptCard receipt={receipt} />
+                                {/* collapsable={false} is required so the view can be captured on Android */}
+                                <View ref={receiptRef} collapsable={false} style={styles.receiptCapture}>
+                                    <ReceiptCard receipt={receipt} />
+                                </View>
                             </ScrollView>
                         ) : null}
 
                         <View style={styles.modalButtonRow}>
-                            <TouchableOpacity style={styles.downloadButton} onPress={handleDownloadReceipt} activeOpacity={0.85}>
-                                <Text style={styles.downloadButtonText}>Download Receipt</Text>
+                            <TouchableOpacity
+                                style={[styles.downloadButton, isSavingReceipt && { opacity: 0.6 }]}
+                                onPress={handleDownloadReceipt}
+                                disabled={isSavingReceipt}
+                                activeOpacity={0.85}
+                            >
+                                <Text style={styles.downloadButtonText}>{isSavingReceipt ? 'Saving…' : 'Download Receipt'}</Text>
                             </TouchableOpacity>
                             <TouchableOpacity style={styles.primaryCtaButton} onPress={handlePrimaryCta} activeOpacity={0.85}>
                                 <Text style={styles.primaryCtaText}>
@@ -548,6 +561,11 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#666666',
         marginBottom: 14,
+    },
+    // White padding around the card so the saved image has a clean margin.
+    receiptCapture: {
+        backgroundColor: '#FFFFFF',
+        padding: 12,
     },
     receiptScroll: {
         flexGrow: 0,
