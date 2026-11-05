@@ -4,14 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { getConversationMessages, sendConversationMessage } from '../api/providerWork_api';
 import { formatDateTime } from '../utils/provider_formatters';
-
-// How often the open thread checks for new messages (ms). Replace the polling with a
-// realtime subscription (Supabase Realtime / Firestore onSnapshot) once that is enabled.
-const POLL_INTERVAL_MS = 5000;
+import { COLORS } from '../constants/theme';
+import { POLL_INTERVAL_MS, SENDER, TEXT } from '../constants/messaging';
 
 const ConversationServiceProvider = ({ navigation, route }) => {
     const conversationId = route?.params?.conversationId;
-    const contactName = route?.params?.contactName || 'Conversation';
+    const contactName = route?.params?.contactName || TEXT.defaultConversationName;
     const jobTitle = route?.params?.jobTitle || '';
     const isOnline = route?.params?.isOnline ?? false;
 
@@ -63,7 +61,7 @@ const ConversationServiceProvider = ({ navigation, route }) => {
         const tempId = `temp-${Date.now()}`;
         setMessages((prev) => [
             ...prev,
-            { id: tempId, text: trimmed, sender: 'provider', createdAt: new Date().toISOString() },
+            { id: tempId, text: trimmed, sender: SENDER.PROVIDER, createdAt: new Date().toISOString() },
         ]);
         setMessageText('');
         setSending(true);
@@ -77,7 +75,7 @@ const ConversationServiceProvider = ({ navigation, route }) => {
         } catch (error) {
             setMessages((prev) => prev.filter((item) => item.id !== tempId));
             setMessageText(trimmed);
-            Alert.alert('Message not sent', 'Please check your connection and try again.');
+            Alert.alert(TEXT.messageNotSentTitle, TEXT.messageNotSentFallback);
         } finally {
             setSending(false);
         }
@@ -90,21 +88,21 @@ const ConversationServiceProvider = ({ navigation, route }) => {
                     <Text style={styles.backArrow}>‹</Text>
                 </TouchableOpacity>
 
-                <Text style={styles.headerTitle}>Messages</Text>
+                <Text style={styles.headerTitle}>{TEXT.messagesTitle}</Text>
                 <View style={styles.headerDivider} />
 
                 <View style={styles.conversationCard}>
                     <View style={styles.contactRow}>
                         <Text style={styles.contactName}>{contactName}</Text>
                         <View style={[styles.statusBadge, !isOnline && styles.statusBadgeOffline]}>
-                            <Text style={styles.statusBadgeText}>{isOnline ? 'Online' : 'Offline'}</Text>
+                            <Text style={styles.statusBadgeText}>{isOnline ? TEXT.online : TEXT.offline}</Text>
                         </View>
                     </View>
                     {jobTitle ? <Text style={styles.jobSubtitle}>{jobTitle}</Text> : null}
                     <View style={styles.cardDivider} />
 
                     {loading ? (
-                        <ActivityIndicator style={styles.loader} color="#0255AF" />
+                        <ActivityIndicator style={styles.loader} color={COLORS.accent} />
                     ) : (
                         <ScrollView
                             ref={scrollRef}
@@ -113,11 +111,11 @@ const ConversationServiceProvider = ({ navigation, route }) => {
                         >
                             {loadFailed && messages.length === 0 ? (
                                 <TouchableOpacity onPress={loadMessages}>
-                                    <Text style={styles.errorBannerText}>Couldn't load messages. Tap to retry.</Text>
+                                    <Text style={styles.errorBannerText}>{TEXT.loadMessagesFailed}</Text>
                                 </TouchableOpacity>
                             ) : null}
                             {messages.map((message) => {
-                                const isOutgoing = message.sender === 'provider';
+                                const isOutgoing = message.sender === SENDER.PROVIDER;
                                 return (
                                     <View
                                         key={message.id}
@@ -139,13 +137,13 @@ const ConversationServiceProvider = ({ navigation, route }) => {
                 <View style={styles.inputRow}>
                     <TextInput
                         style={styles.messageInput}
-                        placeholder="Type a message..."
-                        placeholderTextColor="#AAAAAA"
+                        placeholder={TEXT.messagePlaceholder}
+                        placeholderTextColor={COLORS.placeholderAlt}
                         value={messageText}
                         onChangeText={setMessageText}
                     />
                     <TouchableOpacity style={styles.sendButton} onPress={handleSendMessage} disabled={sending}>
-                        <Text style={styles.sendButtonText}>Send</Text>
+                        <Text style={styles.sendButtonText}>{TEXT.send}</Text>
                     </TouchableOpacity>
                 </View>
             </View>
@@ -156,7 +154,7 @@ const ConversationServiceProvider = ({ navigation, route }) => {
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: COLORS.white,
     },
     container: {
         flex: 1,
@@ -172,24 +170,24 @@ const styles = StyleSheet.create({
     },
     backArrow: {
         fontSize: 30,
-        color: '#111111',
+        color: COLORS.ink900,
         fontWeight: '400',
     },
     headerTitle: {
         fontSize: 24,
         fontWeight: '800',
-        color: '#1B2A8C',
+        color: COLORS.primary,
         marginBottom: 12,
     },
     headerDivider: {
         height: 1,
-        backgroundColor: '#E5E5E5',
+        backgroundColor: COLORS.divider,
         marginBottom: 16,
     },
     conversationCard: {
         flex: 1,
         borderWidth: 1,
-        borderColor: '#E0E0E0',
+        borderColor: COLORS.border,
         borderRadius: 12,
         padding: 16,
         marginBottom: 14,
@@ -202,30 +200,30 @@ const styles = StyleSheet.create({
     contactName: {
         fontSize: 15,
         fontWeight: '700',
-        color: '#111111',
+        color: COLORS.ink900,
     },
     statusBadge: {
-        backgroundColor: '#2FAE60',
+        backgroundColor: COLORS.onlineProvider,
         borderRadius: 12,
         paddingVertical: 4,
         paddingHorizontal: 12,
     },
     statusBadgeOffline: {
-        backgroundColor: '#9E9E9E',
+        backgroundColor: COLORS.offline,
     },
     statusBadgeText: {
         fontSize: 11,
         fontWeight: '700',
-        color: '#FFFFFF',
+        color: COLORS.white,
     },
     jobSubtitle: {
         fontSize: 12,
-        color: '#888888',
+        color: COLORS.grey500,
         marginTop: 3,
     },
     cardDivider: {
         height: 1,
-        backgroundColor: '#EDEDED',
+        backgroundColor: COLORS.dividerSoft,
         marginVertical: 12,
     },
     messagesScroll: {
@@ -249,24 +247,24 @@ const styles = StyleSheet.create({
         paddingHorizontal: 14,
     },
     bubbleOutgoing: {
-        backgroundColor: '#3B6FD6',
+        backgroundColor: COLORS.accentSoft,
         borderBottomRightRadius: 4,
     },
     bubbleIncoming: {
-        backgroundColor: '#F0F0F0',
+        backgroundColor: COLORS.bubbleIncomingProvider,
         borderBottomLeftRadius: 4,
     },
     bubbleTextOutgoing: {
         fontSize: 13,
-        color: '#FFFFFF',
+        color: COLORS.white,
     },
     bubbleTextIncoming: {
         fontSize: 13,
-        color: '#222222',
+        color: COLORS.ink700,
     },
     timestampText: {
         fontSize: 10,
-        color: '#999999',
+        color: COLORS.grey400,
         marginTop: 4,
     },
     inputRow: {
@@ -276,41 +274,33 @@ const styles = StyleSheet.create({
     messageInput: {
         flex: 1,
         borderWidth: 1,
-        borderColor: '#DDDDDD',
+        borderColor: COLORS.borderInputAlt,
         borderRadius: 22,
         paddingHorizontal: 16,
         paddingVertical: 10,
         fontSize: 13,
-        color: '#111111',
+        color: COLORS.ink900,
         marginRight: 10,
     },
     sendButton: {
         borderWidth: 1,
-        borderColor: '#DDDDDD',
+        borderColor: COLORS.borderInputAlt,
         borderRadius: 22,
         paddingVertical: 10,
         paddingHorizontal: 20,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: COLORS.white,
     },
     sendButtonText: {
         fontSize: 13,
         fontWeight: '700',
-        color: '#111111',
+        color: COLORS.ink900,
     },
     loader: {
         marginTop: 30,
     },
-    errorBanner: {
-        borderWidth: 1,
-        borderColor: '#E0E0E0',
-        borderRadius: 12,
-        backgroundColor: '#F9F9F9',
-        padding: 14,
-        marginBottom: 16,
-    },
     errorBannerText: {
         fontSize: 13,
-        color: '#555555',
+        color: COLORS.grey700,
     },
 });
 

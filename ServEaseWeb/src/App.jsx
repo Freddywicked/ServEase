@@ -8,6 +8,7 @@ import VerificationRequirements from './serviceprovider/VerificationRequirements
 import AdminDashboard from './admin/AdminDashboard'
 import UserManagement from './admin/UserManagement'
 import CustomerDashboard from './customer/CustomerDashboard'
+import CustomerProfile from './customer/CustomerProfile'
 import CreateServiceRequest from './customer/CreateServiceRequest'
 import AIDiagnosis_Skip from './customer/AIDiagnosis_Skip'
 import AIResult from './customer/AIResult'
@@ -63,6 +64,8 @@ function App() {
         <Route path="/customer/history" element={<History />} />
         <Route path="/customer/providers" element={<FindServiceProvider />} />
         <Route path="/customer/providers/:providerId" element={<ServiceProviderDetails />} />
+        {/* Opened from the CustomerSidebar account dropdown (name + email) */}
+        <Route path="/customer/profile" element={<CustomerProfile />} />
 
         {/* Service Provider */}
         <Route path="/serviceprovider/service-category" element={<ServiceCategory />} />

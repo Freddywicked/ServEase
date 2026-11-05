@@ -6,10 +6,8 @@ import { useFocusEffect } from '@react-navigation/native';
 // Same thread endpoints the provider's chat uses — the backend is role-aware and
 // marks the thread read for whichever side opens it.
 import { getConversationMessages, sendConversationMessage } from '../api/providerWork_api';
-
-// How often the open thread checks for new messages (ms). Replace the polling with a
-// realtime subscription (Supabase Realtime / FCM) once that is enabled.
-const POLL_INTERVAL_MS = 5000;
+import { COLORS } from '../constants/theme';
+import { POLL_INTERVAL_MS, SENDER, TEXT } from '../constants/messaging';
 
 const formatTimestamp = (iso) => {
     if (!iso) return '';
@@ -23,12 +21,12 @@ const formatTimestamp = (iso) => {
 const ConversationCustomer = ({ navigation, route }) => {
     // Passed by MessageCustomer.js: the thread id is the request reference ("SR-0007").
     const conversationId = route?.params?.conversationId;
-    const contactName = route?.params?.contactName || 'Service provider';
+    const contactName = route?.params?.contactName || TEXT.defaultProviderName;
     const subject = route?.params?.jobTitle || '';
     const isOnline = route?.params?.isOnline ?? false;
 
     // Message shape (GET /conversations/:id/messages): { id, text, sender, senderId, createdAt }.
-    // `sender === 'customer'` is this user — the right-aligned bubble.
+    // `sender === SENDER.CUSTOMER` is this user — the right-aligned bubble.
     const [messages, setMessages] = useState([]);
     const [draft, setDraft] = useState('');
     const [loading, setLoading] = useState(true);
@@ -70,7 +68,7 @@ const ConversationCustomer = ({ navigation, route }) => {
 
         // Show the message right away, then swap in the saved one from the backend.
         const tempId = `temp-${Date.now()}`;
-        setMessages((prev) => [...prev, { id: tempId, text, sender: 'customer', createdAt: new Date().toISOString() }]);
+        setMessages((prev) => [...prev, { id: tempId, text, sender: SENDER.CUSTOMER, createdAt: new Date().toISOString() }]);
         setDraft('');
         setSending(true);
         try {
@@ -80,22 +78,23 @@ const ConversationCustomer = ({ navigation, route }) => {
         } catch (error) {
             setMessages((prev) => prev.filter((m) => m.id !== tempId));
             setDraft(text);
-            Alert.alert('Message not sent', error.message);
+            Alert.alert(TEXT.messageNotSentTitle, error.message || TEXT.messageNotSentFallback);
         } finally {
             setSending(false);
         }
     };
 
-    const renderMessageItem = ({ item }) => (
-        <View>
-            <Text style={styles.timestamp}>{formatTimestamp(item.createdAt)}</Text>
-            <View style={item.sender === 'customer' ? styles.bubbleSent : styles.bubbleReceived}>
-                <Text style={item.sender === 'customer' ? styles.bubbleTextSent : styles.bubbleTextReceived}>
-                    {item.text}
-                </Text>
+    const renderMessageItem = ({ item }) => {
+        const isSent = item.sender === SENDER.CUSTOMER;
+        return (
+            <View>
+                <Text style={styles.timestamp}>{formatTimestamp(item.createdAt)}</Text>
+                <View style={isSent ? styles.bubbleSent : styles.bubbleReceived}>
+                    <Text style={isSent ? styles.bubbleTextSent : styles.bubbleTextReceived}>{item.text}</Text>
+                </View>
             </View>
-        </View>
-    );
+        );
+    };
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -103,7 +102,7 @@ const ConversationCustomer = ({ navigation, route }) => {
                 <TouchableOpacity onPress={() => navigation.goBack()}>
                     <Image source={require('../assets/icon_back_button.png')} style={styles.backIcon} />
                 </TouchableOpacity>
-                <Text style={styles.header}>Messages</Text>
+                <Text style={styles.header}>{TEXT.messagesTitle}</Text>
             </View>
 
             <FlatList
@@ -119,41 +118,41 @@ const ConversationCustomer = ({ navigation, route }) => {
                             <Text style={styles.senderName}>{contactName}</Text>
                             {isOnline && (
                                 <View style={styles.onlineBadge}>
-                                    <Text style={styles.onlineBadgeText}>Online</Text>
+                                    <Text style={styles.onlineBadgeText}>{TEXT.online}</Text>
                                 </View>
                             )}
                         </View>
                         {!!subject && <Text style={styles.subject}>{subject}</Text>}
                         {loadFailed && (
                             <TouchableOpacity onPress={loadMessages}>
-                                <Text style={styles.loadErrorText}>Couldn't load messages. Tap to retry.</Text>
+                                <Text style={styles.loadErrorText}>{TEXT.loadMessagesFailed}</Text>
                             </TouchableOpacity>
                         )}
-                        {loading && <ActivityIndicator color="#0255AF" style={{ marginVertical: 8 }} />}
+                        {loading && <ActivityIndicator color={COLORS.accent} style={styles.loader} />}
                         <View style={styles.divider} />
                     </View>
                 }
                 ListEmptyComponent={
-                    !loading && !loadFailed ? <Text style={styles.emptyThreadText}>No messages yet — say hi!</Text> : null
+                    !loading && !loadFailed ? <Text style={styles.emptyThreadText}>{TEXT.noMessagesSayHi}</Text> : null
                 }
             />
 
             <View style={styles.inputBar}>
                 <TextInput
                     style={styles.textInput}
-                    placeholder="Type a message..."
-                    placeholderTextColor="#9AA0AE"
+                    placeholder={TEXT.messagePlaceholder}
+                    placeholderTextColor={COLORS.placeholder}
                     value={draft}
                     onChangeText={setDraft}
                 />
                 <TouchableOpacity onPress={handleSend} activeOpacity={0.8}>
                     <LinearGradient
-                        colors={['#1B2A8C', '#4A7FBF']}
+                        colors={[COLORS.primary, COLORS.primaryGradientEnd]}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 0 }}
                         style={styles.sendButton}
                     >
-                        <Text style={styles.sendButtonText}>Send</Text>
+                        <Text style={styles.sendButtonText}>{TEXT.send}</Text>
                     </LinearGradient>
                 </TouchableOpacity>
             </View>
@@ -164,19 +163,22 @@ const ConversationCustomer = ({ navigation, route }) => {
 const styles = StyleSheet.create({
     loadErrorText: {
         fontSize: 12,
-        color: '#B00020',
+        color: COLORS.error,
         textAlign: 'center',
         marginVertical: 8,
     },
     emptyThreadText: {
         fontSize: 13,
-        color: '#999999',
+        color: COLORS.grey400,
         textAlign: 'center',
         marginTop: 24,
     },
+    loader: {
+        marginVertical: 8,
+    },
     safeArea: {
         flex: 1,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: COLORS.white,
     },
     topBar: {
         paddingHorizontal: 24,
@@ -192,7 +194,7 @@ const styles = StyleSheet.create({
     header: {
         fontSize: 24,
         fontWeight: '800',
-        color: '#1B2A8C',
+        color: COLORS.primary,
     },
     listContent: {
         paddingHorizontal: 24,
@@ -211,10 +213,10 @@ const styles = StyleSheet.create({
     senderName: {
         fontSize: 16,
         fontWeight: '700',
-        color: '#1A1A1A',
+        color: COLORS.ink800,
     },
     onlineBadge: {
-        backgroundColor: '#4CAF50',
+        backgroundColor: COLORS.online,
         borderRadius: 14,
         paddingHorizontal: 14,
         paddingVertical: 5,
@@ -222,28 +224,28 @@ const styles = StyleSheet.create({
     onlineBadgeText: {
         fontSize: 12,
         fontWeight: '600',
-        color: '#FFFFFF',
+        color: COLORS.white,
     },
     subject: {
         fontSize: 13,
-        color: '#777777',
+        color: COLORS.grey600,
         marginTop: 4,
         marginBottom: 14,
     },
     divider: {
         height: 1,
-        backgroundColor: '#E0E0E0',
+        backgroundColor: COLORS.border,
     },
     timestamp: {
         fontSize: 11,
-        color: '#9AA0AE',
+        color: COLORS.placeholder,
         textAlign: 'center',
         marginTop: 14,
         marginBottom: 8,
     },
     bubbleReceived: {
         alignSelf: 'flex-start',
-        backgroundColor: '#E5E5EA',
+        backgroundColor: COLORS.bubbleIncomingCustomer,
         borderRadius: 16,
         paddingVertical: 10,
         paddingHorizontal: 14,
@@ -251,7 +253,7 @@ const styles = StyleSheet.create({
     },
     bubbleSent: {
         alignSelf: 'flex-end',
-        backgroundColor: '#1B2A8C',
+        backgroundColor: COLORS.primary,
         borderRadius: 16,
         paddingVertical: 10,
         paddingHorizontal: 14,
@@ -259,11 +261,11 @@ const styles = StyleSheet.create({
     },
     bubbleTextReceived: {
         fontSize: 14,
-        color: '#1A1A1A',
+        color: COLORS.ink800,
     },
     bubbleTextSent: {
         fontSize: 14,
-        color: '#FFFFFF',
+        color: COLORS.white,
     },
     inputBar: {
         flexDirection: 'row',
@@ -271,18 +273,18 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
         paddingVertical: 12,
         borderTopWidth: 1,
-        borderTopColor: '#E0E0E0',
-        backgroundColor: '#FFFFFF',
+        borderTopColor: COLORS.border,
+        backgroundColor: COLORS.white,
     },
     textInput: {
         flex: 1,
         borderWidth: 1,
-        borderColor: '#D9DDE4',
+        borderColor: COLORS.borderInput,
         borderRadius: 20,
         paddingHorizontal: 16,
         paddingVertical: 10,
         fontSize: 14,
-        color: '#333333',
+        color: COLORS.ink600,
         marginRight: 10,
     },
     sendButton: {
@@ -295,7 +297,7 @@ const styles = StyleSheet.create({
     sendButtonText: {
         fontSize: 14,
         fontWeight: '700',
-        color: '#FFFFFF',
+        color: COLORS.white,
     },
 });
 

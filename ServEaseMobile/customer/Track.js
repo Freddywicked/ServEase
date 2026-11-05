@@ -44,19 +44,59 @@ import { formatDateTime } from '../utils/formatters';
  *                  Nothing is sent until the customer confirms.
  *   Quotation approve/decline happens in RequestDetails (respondToQuotation in the API file).
  *
+ * Tabs (customer-facing) and which tracking groups feed them:
+ *   Pending    <- sent                 sent requests, quotations being reviewed, price negotiations
+ *   Active     <- approved + ongoing   confirmed appointments and repairs underway
+ *   Completed  <- done                 finished services with payment settled
+ *   Closed     <- declined             declined or cancelled requests
+ *
+ * Notification count on each tab = requests in that tab that need the customer's attention:
+ * the backend flags one with `isUnread: true`, and anything waiting on the customer
+ * (quotation to approve, new schedule, additional payment, unpaid final balance) counts too.
+ * Counts are always derived from the loaded data; nothing is hard-coded.
+ *
  * Reloads on focus and on pull-to-refresh. For live updates the moment the provider acts,
  * see the commented Realtime subscription inside the component.
  *
  * ========================================================================== */
 
-// Tab labels. `key` is the property of the tracking response that holds that tab's cards.
+// Fonts from the Figma spec. If a font is not loaded in the app, React Native falls back to the
+// system font, so nothing breaks; adjust the names to match how the fonts are registered.
+const FONTS = { quicksand: 'Quicksand', roboto: 'Roboto' };
+
+// Figma: the four tabs sit 5px apart. A notification count above this shows as "99+".
+const TAB_GAP = 5;
+const MAX_BADGE_COUNT = 99;
+
+// Customer-facing tabs. `sources` are the properties of the tracking response whose cards belong
+// to the tab, so the backend contract (sent / approved / ongoing / declined / done) is unchanged.
 const STATUS_FILTERS = [
-    { key: 'sent', label: 'Sent' },
-    { key: 'approved', label: 'Approved' },
-    { key: 'ongoing', label: 'On-going' },
-    { key: 'declined', label: 'Declined' },
-    { key: 'done', label: 'Done' },
+    { key: 'pending', label: 'Pending', sources: ['sent'] },
+    { key: 'active', label: 'Active', sources: ['approved', 'ongoing'] },
+    { key: 'completed', label: 'Completed', sources: ['done'] },
+    { key: 'closed', label: 'Closed', sources: ['declined'] },
 ];
+
+// Cards that sit waiting on the customer's answer.
+const ACTION_CARD_TYPES = ['quotation', 'schedule', 'payment'];
+
+const getTabRequests = (groups, tab) => tab.sources.flatMap((source) => groups?.[source] ?? []);
+
+// Accepts a tab key, or an old group key ('sent', 'approved', 'ongoing', 'declined', 'done') that
+// the PayMongo deep link, Payment screen and Ratings screen may still pass as the `tab` param.
+const findTab = (key) => STATUS_FILTERS.find((tab) => tab.key === key || tab.sources.includes(key));
+
+// A request is paid once the customer settled the remaining balance, which is what moves it to
+// Completed. A backend `isPaid` flag wins; the tab is the fallback.
+const isPaidRequest = (request, tab) => request.isPaid ?? tab.key === 'completed';
+
+const needsAttention = (request, tab) =>
+    request.isUnread === true ||
+    ACTION_CARD_TYPES.includes(request.cardType) ||
+    (request.cardType === 'completed' && !isPaidRequest(request, tab));
+
+const getTabNotificationCount = (groups, tab) =>
+    getTabRequests(groups, tab).filter((request) => needsAttention(request, tab)).length;
 
 // Badge text on the expandable cards. Not part of the card contract, so it is chosen by cardType;
 // a backend-supplied `statusLabel` wins if one is ever sent.
@@ -82,6 +122,24 @@ const getSearchableText = (request) =>
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
+
+// Red count bubble on the top-right corner of a tab (Figma). Hidden when there is nothing new.
+const NotificationBadge = ({ count }) => {
+    if (!count) return null;
+    return (
+        <View style={styles.tabBadge} pointerEvents="none">
+            <Text style={styles.tabBadgeText}>{count > MAX_BADGE_COUNT ? `${MAX_BADGE_COUNT}+` : count}</Text>
+        </View>
+    );
+};
+
+// Magnifier drawn with Views so this screen does not depend on an icon asset.
+const SearchIcon = () => (
+    <View style={styles.searchIcon}>
+        <View style={styles.searchIconCircle} />
+        <View style={styles.searchIconHandle} />
+    </View>
+);
 
 const Track = ({ navigation, route }) => {
     const [selectedStatus, setSelectedStatus] = useState(STATUS_FILTERS[0]);
@@ -118,7 +176,7 @@ const Track = ({ navigation, route }) => {
     useFocusEffect(
         useCallback(() => {
             const tabKey = route?.params?.tab;
-            const target = STATUS_FILTERS.find((filter) => filter.key === tabKey);
+            const target = findTab(tabKey);
             if (target) {
                 setSelectedStatus(target);
                 navigation.setParams({ tab: undefined });
@@ -143,7 +201,7 @@ const Track = ({ navigation, route }) => {
     // The FCM push the backend sends on each provider action can call loadTracking() too.
     // ---------------------------------------------------------------------
 
-    const statusRequests = groups?.[selectedStatus.key] ?? [];
+    const statusRequests = getTabRequests(groups, selectedStatus);
     const visibleRequests = searchQuery.trim()
         ? statusRequests.filter((request) => getSearchableText(request).includes(searchQuery.trim().toLowerCase()))
         : statusRequests;
@@ -266,9 +324,7 @@ const Track = ({ navigation, route }) => {
         });
     };
 
-    // A request is paid once the customer settled the remaining balance. That is exactly what
-    // moves it to the Done tab, so a backend `isPaid` flag wins and the tab is the fallback.
-    const isRequestPaid = (request) => request.isPaid ?? selectedStatus.key === 'done';
+    const isRequestPaid = (request) => isPaidRequest(request, selectedStatus);
 
     // Indicator flow (see Figma):
     //  - every step stays GREY until the service provider updates it, then turns blue with a check;
@@ -309,10 +365,16 @@ const Track = ({ navigation, route }) => {
             onPress={() => handleRequestPress(request)}
             activeOpacity={0.85}
         >
-            <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
+            <View style={styles.cardTopRow}>
+                <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
+                <View style={styles.badgePending}>
+                    <Text style={styles.badgePendingText}>{request.statusLabel ?? selectedStatus.label}</Text>
+                </View>
+            </View>
             <Text style={styles.sentToLine}>
                 sent to <Text style={styles.providerName}>{request.providerName}</Text>
             </Text>
+            <View style={styles.headerRule} />
 
             {request.probableCause ? (
                 <>
@@ -320,20 +382,9 @@ const Track = ({ navigation, route }) => {
                     <Text style={styles.probableCauseText}>{request.probableCause}</Text>
 
                     {request.confidencePercent !== null && request.confidencePercent !== undefined && (
-                        <>
-                            <View style={styles.progressRow}>
-                                <View style={styles.progressTrack}>
-                                    <View
-                                        style={[
-                                            styles.progressFill,
-                                            { width: `${Math.min(100, Math.max(0, request.confidencePercent))}%` },
-                                        ]}
-                                    />
-                                </View>
-                                <Text style={styles.progressPercent}>{request.confidencePercent}%</Text>
-                            </View>
-                            <Text style={styles.progressCaption}>Confidence based on similar reported cases</Text>
-                        </>
+                        <Text style={styles.confidenceText}>
+                            {Math.round(Math.min(100, Math.max(0, request.confidencePercent)))}% AI Confidence based on similar reported cases
+                        </Text>
                     )}
                 </>
             ) : (
@@ -492,7 +543,7 @@ const Track = ({ navigation, route }) => {
             <View style={styles.cardTopRow}>
                 <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
                 <View style={styles.badgeDeclined}>
-                    <Text style={styles.badgeDeclinedText}>Declined</Text>
+                    <Text style={styles.badgeDeclinedText}>{request.statusLabel ?? selectedStatus.label}</Text>
                 </View>
             </View>
             <Text style={styles.sentToLine}>{request.providerName} declined this request.</Text>
@@ -581,35 +632,40 @@ const Track = ({ navigation, route }) => {
             >
                 <Text style={styles.headerTitle}>My Requests</Text>
 
-                <TextInput
-                    style={styles.searchInput}
-                    placeholder="Search request details..."
-                    placeholderTextColor="#999999"
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                />
+                <View style={styles.searchBox}>
+                    <SearchIcon />
+                    <TextInput
+                        style={styles.searchInput}
+                        placeholder="Search request details"
+                        placeholderTextColor="#727272"
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        returnKeyType="search"
+                    />
+                </View>
 
-                <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.statusTabRow}
-                >
-                    {STATUS_FILTERS.map((status) => {
+                <View style={styles.statusTabRow}>
+                    {STATUS_FILTERS.map((status, index) => {
                         const isSelected = status.key === selectedStatus.key;
-                        const count = groups?.[status.key]?.length;
+                        const count = getTabNotificationCount(groups, status);
                         return (
-                            <TouchableOpacity
-                                key={status.key}
-                                style={[styles.statusTab, isSelected && styles.statusTabSelected]}
-                                onPress={() => handleSelectStatus(status)}
-                            >
-                                <Text style={[styles.statusTabText, isSelected && styles.statusTabTextSelected]}>
-                                    {status.label}{count !== undefined ? ` (${count})` : ''}
-                                </Text>
-                            </TouchableOpacity>
+                            <View key={status.key} style={[styles.statusTabWrap, index > 0 && styles.statusTabWrapSpaced]}>
+                                <TouchableOpacity
+                                    style={[styles.statusTab, isSelected && styles.statusTabSelected]}
+                                    onPress={() => handleSelectStatus(status)}
+                                    accessibilityRole="button"
+                                    accessibilityState={{ selected: isSelected }}
+                                    accessibilityLabel={count ? `${status.label}, ${count} need attention` : status.label}
+                                >
+                                    <Text style={[styles.statusTabText, isSelected && styles.statusTabTextSelected]}>
+                                        {status.label}
+                                    </Text>
+                                </TouchableOpacity>
+                                <NotificationBadge count={count} />
+                            </View>
                         );
                     })}
-                </ScrollView>
+                </View>
 
                 {renderBody()}
             </ScrollView>
@@ -674,61 +730,143 @@ const Track = ({ navigation, route }) => {
     );
 };
 
+// Shared pill shape for every status badge (Figma: 21px tall, 20px radius, grey outline).
+const badgeShape = {
+    minHeight: 21,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#B1A8A8',
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+};
+const badgeTextBase = {
+    fontFamily: FONTS.quicksand,
+    fontSize: 10,
+    fontWeight: '500',
+    lineHeight: 17,
+    color: '#FFFFFF',
+};
+
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
         backgroundColor: '#FFFFFF',
     },
     scrollContent: {
-        paddingHorizontal: 24,
-        paddingTop: 16,
+        paddingHorizontal: 25,
+        paddingTop: 46, // Figma: title starts 108px down, below the 62px status bar the SafeAreaView already covers
         paddingBottom: 24,
     },
     headerTitle: {
+        fontFamily: FONTS.roboto,
         fontSize: 24,
-        fontWeight: '800',
-        color: '#1B2A8C',
-        marginBottom: 16,
+        fontWeight: '700',
+        lineHeight: 28,
+        color: '#021E79',
+        marginBottom: 18,
+    },
+    searchBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        height: 37,
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: '#9E9898',
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        marginBottom: 18,
+    },
+    searchIcon: {
+        width: 18,
+        height: 18,
+    },
+    searchIconCircle: {
+        width: 13,
+        height: 13,
+        borderRadius: 7,
+        borderWidth: 1.6,
+        borderColor: '#9A9A9A',
+    },
+    searchIconHandle: {
+        position: 'absolute',
+        right: 0,
+        bottom: 1.5,
+        width: 6,
+        height: 1.8,
+        borderRadius: 1,
+        backgroundColor: '#9A9A9A',
+        transform: [{ rotate: '45deg' }],
     },
     searchInput: {
-        backgroundColor: '#EFEFEF',
-        borderRadius: 10,
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        fontSize: 14,
-        color: '#333333',
-        marginBottom: 16,
+        flex: 1,
+        marginLeft: 10,
+        paddingVertical: 0,
+        fontFamily: FONTS.quicksand,
+        fontSize: 10,
+        fontWeight: '500',
+        color: '#414141',
     },
     statusTabRow: {
-        paddingBottom: 4,
+        flexDirection: 'row',
         marginBottom: 20,
     },
+    statusTabWrap: {
+        flex: 1, // four equal pills across the 346px row (Figma)
+    },
+    statusTabWrapSpaced: {
+        marginLeft: TAB_GAP,
+    },
     statusTab: {
+        height: 29,
         borderWidth: 1,
-        borderColor: '#DDDDDD',
+        borderColor: '#B1A8A8',
         borderRadius: 20,
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        marginRight: 10,
         backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     statusTabSelected: {
         backgroundColor: '#021E79',
-        borderColor: '#021E79',
     },
     statusTabText: {
-        fontSize: 13,
-        color: '#333333',
-        fontWeight: '600',
+        fontFamily: FONTS.quicksand,
+        fontSize: 10,
+        fontWeight: '500',
+        lineHeight: 17,
+        color: '#414141',
+        includeFontPadding: false,
     },
     statusTabTextSelected: {
         color: '#FFFFFF',
     },
+    tabBadge: {
+        position: 'absolute',
+        top: -6,
+        right: -2,
+        minWidth: 14,
+        height: 14,
+        borderRadius: 7,
+        paddingHorizontal: 3,
+        backgroundColor: '#C62828',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    tabBadgeText: {
+        fontSize: 9,
+        fontWeight: '700',
+        lineHeight: 11,
+        color: '#FFFFFF',
+        includeFontPadding: false,
+    },
     requestCard: {
+        backgroundColor: '#FFFFFF',
         borderWidth: 1,
-        borderColor: '#E0E0E0',
-        borderRadius: 12,
-        padding: 16,
+        borderColor: '#818080',
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        paddingTop: 8,
+        paddingBottom: 12,
         marginBottom: 14,
     },
     cardTopRow: {
@@ -736,18 +874,19 @@ const styles = StyleSheet.create({
         flexWrap: 'wrap', // a long badge drops under the request number instead of overflowing
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 4,
     },
     requestNumber: {
-        fontSize: 15,
+        fontSize: 13,
         fontWeight: '700',
-        color: '#111111',
-        marginBottom: 4,
+        lineHeight: 22,
+        color: '#292727',
     },
     sentToLine: {
-        fontSize: 13,
-        color: '#333333',
-        marginBottom: 12,
+        fontSize: 11,
+        lineHeight: 13,
+        color: '#484040',
+        marginTop: 2,
+        marginBottom: 7,
     },
     providerName: {
         fontWeight: '700',
@@ -758,80 +897,64 @@ const styles = StyleSheet.create({
         color: '#666666',
         marginBottom: 12,
     },
-    probableCauseLabel: {
-        fontSize: 11,
-        color: '#888888',
-        marginBottom: 2,
-    },
-    probableCauseText: {
-        fontSize: 14,
-        fontWeight: '700',
-        color: '#111111',
-        marginBottom: 10,
-    },
-    progressRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
+    headerRule: {
+        height: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.4)',
         marginBottom: 6,
     },
-    progressTrack: {
-        flex: 1,
-        height: 6,
-        borderRadius: 3,
-        backgroundColor: '#E5E5E5',
-        overflow: 'hidden',
-        marginRight: 8,
+    probableCauseLabel: {
+        fontSize: 10,
+        lineHeight: 12,
+        color: '#484040',
+        marginBottom: 4,
     },
-    progressFill: {
-        height: 6,
-        borderRadius: 3,
-        backgroundColor: '#0255AF',
+    probableCauseText: {
+        fontSize: 13,
+        fontWeight: '700',
+        lineHeight: 16,
+        color: '#484040',
+        marginBottom: 5,
     },
-    progressPercent: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#333333',
+    confidenceText: {
+        fontSize: 9,
+        fontWeight: '500',
+        lineHeight: 11,
+        color: '#484040',
     },
     progressCaption: {
         fontSize: 11,
         color: '#999999',
     },
     badgeOrange: {
+        ...badgeShape,
         backgroundColor: '#BB8157',
-        borderRadius: 14,
-        paddingHorizontal: 12,
-        paddingVertical: 5,
     },
     badgeOrangeText: {
-        fontSize: 11,
-        fontWeight: '600',
-        color: '#FFFFFF',
+        ...badgeTextBase,
+    },
+    badgePending: {
+        ...badgeShape,
+        backgroundColor: '#DAC855',
+    },
+    badgePendingText: {
+        ...badgeTextBase,
     },
     badgeDeclined: {
+        ...badgeShape,
         backgroundColor: '#DA5555',
-        borderRadius: 14,
-        paddingHorizontal: 12,
-        paddingVertical: 5,
-        marginBottom: 4,
     },
     badgeDeclinedText: {
-        fontSize: 11,
-        fontWeight: '600',
-        color: '#FFFFFF',
+        ...badgeTextBase,
     },
     badgeBlue: {
+        ...badgeShape,
         backgroundColor: '#5C7CC9',
-        borderRadius: 14,
-        paddingHorizontal: 12,
-        paddingVertical: 5,
         maxWidth: '100%',
         marginBottom: 4,
     },
     badgeBlueText: {
+        ...badgeTextBase,
         flexShrink: 1,
-        fontSize: 11,
-        fontWeight: '600',
-        color: '#FFFFFF',
     },
     divider: {
         height: 1,

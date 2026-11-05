@@ -5,6 +5,8 @@ import { useFocusEffect } from '@react-navigation/native';
 // Same backend endpoints the provider's Messages screen uses — GET /conversations
 // is role-aware, so a customer gets their threads with service providers here.
 import { getConversations } from '../api/providerWork_api';
+import { COLORS } from '../constants/theme';
+import { ROUTES, TEXT } from '../constants/messaging';
 
 const MessageCustomer = ({ navigation }) => {
     // Conversation shape (GET /conversations): { id ('SR-0007'), name, avatarUrl,
@@ -43,7 +45,7 @@ const MessageCustomer = ({ navigation }) => {
         <TouchableOpacity
             style={styles.card}
             onPress={() =>
-                navigation.navigate('ConversationCustomer', {
+                navigation.navigate(ROUTES.CONVERSATION_CUSTOMER, {
                     conversationId: item.id,
                     contactName: item.name,
                     jobTitle: item.jobTitle,
@@ -59,7 +61,7 @@ const MessageCustomer = ({ navigation }) => {
             <View style={styles.cardContent}>
                 <Text style={styles.senderName}>{item.name}</Text>
                 <Text style={styles.lastMessage} numberOfLines={1}>
-                    {item.lastMessage || `About your request ${item.id}`}
+                    {item.lastMessage || TEXT.aboutRequest(item.id)}
                 </Text>
             </View>
             {item.hasUnread && <View style={styles.unreadDot} />}
@@ -77,19 +79,19 @@ const MessageCustomer = ({ navigation }) => {
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
                 ListHeaderComponent={
                     <View>
-                        <Text style={styles.header}>Messages</Text>
+                        <Text style={styles.header}>{TEXT.messagesTitle}</Text>
                         {loadFailed && (
                             <TouchableOpacity onPress={loadConversations}>
-                                <Text style={styles.errorText}>Couldn't load your messages. Tap to retry.</Text>
+                                <Text style={styles.errorText}>{TEXT.loadConversationsFailed}</Text>
                             </TouchableOpacity>
                         )}
-                        {loading && <ActivityIndicator color="#0255AF" style={{ marginBottom: 12 }} />}
+                        {loading && <ActivityIndicator color={COLORS.accent} style={styles.loader} />}
                     </View>
                 }
                 ListEmptyComponent={
                     !loading ? (
                         <View style={styles.emptyState}>
-                            <Text style={styles.emptyStateText}>No Messages yet</Text>
+                            <Text style={styles.emptyStateText}>{TEXT.noMessagesYet}</Text>
                         </View>
                     ) : null
                 }
@@ -101,7 +103,7 @@ const MessageCustomer = ({ navigation }) => {
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: COLORS.white,
     },
     listContent: {
         paddingHorizontal: 24,
@@ -112,16 +114,19 @@ const styles = StyleSheet.create({
     header: {
         fontSize: 24,
         fontWeight: '800',
-        color: '#1B2A8C',
+        color: COLORS.primary,
         marginBottom: 20,
+    },
+    loader: {
+        marginBottom: 12,
     },
     card: {
         flexDirection: 'row',
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#E0E0E0',
+        borderColor: COLORS.border,
         borderRadius: 10,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: COLORS.white,
         padding: 16,
         marginBottom: 14,
     },
@@ -129,7 +134,7 @@ const styles = StyleSheet.create({
         width: 44,
         height: 44,
         borderRadius: 22,
-        backgroundColor: '#E0E0E0',
+        backgroundColor: COLORS.avatarPlaceholder,
         marginRight: 14,
     },
     cardContent: {
@@ -138,23 +143,23 @@ const styles = StyleSheet.create({
     senderName: {
         fontSize: 14,
         fontWeight: '700',
-        color: '#333333',
+        color: COLORS.ink600,
     },
     lastMessage: {
         fontSize: 13,
-        color: '#777777',
+        color: COLORS.grey600,
         marginTop: 2,
     },
     unreadDot: {
         width: 8,
         height: 8,
         borderRadius: 4,
-        backgroundColor: '#0255AF',
+        backgroundColor: COLORS.accent,
         marginLeft: 10,
     },
     errorText: {
         fontSize: 12,
-        color: '#B00020',
+        color: COLORS.error,
         textAlign: 'center',
         marginBottom: 12,
     },
@@ -166,7 +171,7 @@ const styles = StyleSheet.create({
     },
     emptyStateText: {
         fontSize: 13,
-        color: '#999999',
+        color: COLORS.grey400,
         textAlign: 'center',
     },
 });

@@ -19,6 +19,7 @@ const CustomerProfile = ({ navigation }) => {
     const hasProviderAccount = provider?.verification_status === VERIFIED_STATUS;
     const isApplicationPending = provider?.verification_status === 'pending';
 
+    // The edit icon on the avatar opens the edit screen (Edit Profile is no longer a menu item).
     const handleEditProfile = () => {
         // TODO: point this to the actual edit-profile screen once it exists
         navigation.navigate('EditProfile');
@@ -60,24 +61,30 @@ const CustomerProfile = ({ navigation }) => {
                 <Text style={styles.headerTitle}>Profile</Text>
 
                 <View style={styles.profileHeader}>
-                    <Image
-                        source={user?.photoUrl ? { uri: user.photoUrl } : require('../assets/icon_profile_photo.png')}
-                        style={styles.avatar}
-                    />
+                    <View style={styles.avatarWrap}>
+                        <Image
+                            source={user?.photoUrl ? { uri: user.photoUrl } : require('../assets/icon_profile_photo.png')}
+                            style={styles.avatar}
+                        />
+                        <TouchableOpacity
+                            style={styles.avatarEdit}
+                            onPress={handleEditProfile}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            accessibilityRole="button"
+                            accessibilityLabel="Edit profile"
+                        >
+                            <Image source={require('../assets/icon_edit_profile.png')} style={styles.avatarEditIcon} />
+                        </TouchableOpacity>
+                    </View>
                     <Text style={styles.name}>{name}</Text>
                     {contactText ? <Text style={styles.contactText}>{contactText}</Text> : null}
                 </View>
 
                 <View style={styles.menuList}>
-                    <TouchableOpacity style={styles.menuItem} onPress={handleEditProfile}>
-                        <Image source={require('../assets/icon_edit_profile.png')} style={styles.menuIcon} />
-                        <Text style={styles.menuLabel}>Edit Profile</Text>
-                    </TouchableOpacity>
-
                     {hasProviderAccount ? (
                         <TouchableOpacity style={styles.menuItem} onPress={handleSwitchAccount}>
                             <Image source={require('../assets/icon_switch_account.png')} style={styles.menuIcon} />
-                            <Text style={styles.menuLabel}>Switch as Service Provider</Text>
+                            <Text style={styles.menuLabel}>Switch to Service Provider</Text>
                         </TouchableOpacity>
                     ) : isApplicationPending ? (
                         <View style={[styles.menuItem, styles.menuItemPending]}>
@@ -112,34 +119,57 @@ const styles = StyleSheet.create({
         paddingBottom: 24,
     },
     headerTitle: {
-        fontSize: 26,
-        fontWeight: '800',
-        color: '#1B2A8C',
-        marginBottom: 24,
+        fontSize: 24,
+        lineHeight: 28,
+        fontWeight: '700',
+        color: '#021E79',
+        marginBottom: 28,
     },
     profileHeader: {
         alignItems: 'center',
         marginBottom: 28,
     },
-    avatar: {
-        width: 110,
-        height: 110,
-        borderRadius: 55,
+    avatarWrap: {
+        width: 100,
+        height: 100,
         marginBottom: 14,
-        backgroundColor: '#EDEAE4',
+    },
+    avatar: {
+        width: 100,
+        height: 100,
+        borderRadius: 50,
+        backgroundColor: '#D9D9D9',
+    },
+    avatarEdit: {
+        position: 'absolute',
+        right: 4,
+        bottom: 4,
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    avatarEditIcon: {
+        width: 16,
+        height: 16,
+        resizeMode: 'contain',
     },
     name: {
-        fontSize: 17,
+        fontSize: 16,
+        lineHeight: 19,
         fontWeight: '700',
-        color: '#111111',
+        color: '#484040',
         marginBottom: 4,
     },
     contactText: {
-        fontSize: 13,
-        color: '#666666',
+        fontSize: 12,
+        color: '#484040',
     },
     menuList: {
-        marginTop: 4,
+        marginTop: 12,
+        paddingLeft: 12,
     },
     menuItem: {
         flexDirection: 'row',
@@ -150,15 +180,15 @@ const styles = StyleSheet.create({
         opacity: 0.5,
     },
     menuIcon: {
-        width: 22,
-        height: 22,
+        width: 27,
+        height: 27,
         resizeMode: 'contain',
-        marginRight: 16,
+        marginRight: 12,
     },
     menuLabel: {
-        fontSize: 15,
-        fontWeight: '500',
-        color: '#222222',
+        fontSize: 13,
+        lineHeight: 16,
+        color: '#484040',
     },
 });
 

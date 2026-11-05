@@ -3,6 +3,8 @@ import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIn
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { getConversations } from '../api/providerWork_api';
+import { COLORS } from '../constants/theme';
+import { AVATAR_URL_PATTERN, ROUTES, TEXT } from '../constants/messaging';
 
 const MessageServiceProvider = ({ navigation }) => {
     // Conversations come from GET /conversations (see api/providerWorkApi.js for the shape).
@@ -36,7 +38,7 @@ const MessageServiceProvider = ({ navigation }) => {
     };
 
     const handleOpenConversation = (conversation) => {
-        navigation.navigate('ConversationServiceProvider', {
+        navigation.navigate(ROUTES.CONVERSATION_PROVIDER, {
             conversationId: conversation.id,
             contactName: conversation.name,
             jobTitle: conversation.jobTitle,
@@ -50,16 +52,16 @@ const MessageServiceProvider = ({ navigation }) => {
                 contentContainerStyle={styles.scrollContent}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
             >
-                <Text style={styles.headerTitle}>Messages</Text>
+                <Text style={styles.headerTitle}>{TEXT.messagesTitle}</Text>
 
                 {loadFailed && (
                     <TouchableOpacity style={styles.errorBanner} onPress={loadConversations}>
-                        <Text style={styles.errorBannerText}>Couldn't load your messages. Tap to retry.</Text>
+                        <Text style={styles.errorBannerText}>{TEXT.loadConversationsFailed}</Text>
                     </TouchableOpacity>
                 )}
 
                 {loading ? (
-                    <ActivityIndicator style={styles.loader} color="#0255AF" />
+                    <ActivityIndicator style={styles.loader} color={COLORS.accent} />
                 ) : conversations.length > 0 ? (
                     conversations.map((conversation) => (
                         <TouchableOpacity
@@ -68,7 +70,7 @@ const MessageServiceProvider = ({ navigation }) => {
                             onPress={() => handleOpenConversation(conversation)}
                             activeOpacity={0.85}
                         >
-                            {/^https?:\/\//.test(conversation.avatarUrl || '') ? (
+                            {AVATAR_URL_PATTERN.test(conversation.avatarUrl || '') ? (
                                 <Image source={{ uri: conversation.avatarUrl }} style={styles.avatar} />
                             ) : (
                                 <View style={styles.avatar} />
@@ -83,7 +85,7 @@ const MessageServiceProvider = ({ navigation }) => {
                         </TouchableOpacity>
                     ))
                 ) : (
-                    !loadFailed && <Text style={styles.emptyStateText}>No messages yet</Text>
+                    !loadFailed && <Text style={styles.emptyStateText}>{TEXT.noMessagesYet}</Text>
                 )}
             </ScrollView>
         </SafeAreaView>
@@ -93,7 +95,7 @@ const MessageServiceProvider = ({ navigation }) => {
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: COLORS.white,
     },
     scrollContent: {
         paddingHorizontal: 24,
@@ -103,14 +105,14 @@ const styles = StyleSheet.create({
     headerTitle: {
         fontSize: 24,
         fontWeight: '800',
-        color: '#1B2A8C',
+        color: COLORS.primary,
         marginBottom: 16,
     },
     conversationCard: {
         flexDirection: 'row',
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#E0E0E0',
+        borderColor: COLORS.border,
         borderRadius: 12,
         padding: 14,
         marginBottom: 14,
@@ -119,7 +121,7 @@ const styles = StyleSheet.create({
         width: 44,
         height: 44,
         borderRadius: 22,
-        backgroundColor: '#E0E0E0',
+        backgroundColor: COLORS.avatarPlaceholder,
         marginRight: 14,
     },
     conversationTextWrap: {
@@ -128,18 +130,18 @@ const styles = StyleSheet.create({
     contactName: {
         fontSize: 14,
         fontWeight: '700',
-        color: '#111111',
+        color: COLORS.ink900,
         marginBottom: 3,
     },
     lastMessage: {
         fontSize: 12,
-        color: '#888888',
+        color: COLORS.grey500,
     },
     unreadDot: {
         width: 9,
         height: 9,
         borderRadius: 4.5,
-        backgroundColor: '#3B6FD6',
+        backgroundColor: COLORS.accentSoft,
         marginLeft: 10,
     },
     loader: {
@@ -147,19 +149,19 @@ const styles = StyleSheet.create({
     },
     errorBanner: {
         borderWidth: 1,
-        borderColor: '#E0E0E0',
+        borderColor: COLORS.border,
         borderRadius: 12,
-        backgroundColor: '#F9F9F9',
+        backgroundColor: COLORS.surfaceMuted,
         padding: 14,
         marginBottom: 16,
     },
     errorBannerText: {
         fontSize: 13,
-        color: '#555555',
+        color: COLORS.grey700,
     },
     emptyStateText: {
         fontSize: 13,
-        color: '#999999',
+        color: COLORS.grey400,
         textAlign: 'center',
         marginTop: 20,
     },
