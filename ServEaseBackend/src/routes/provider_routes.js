@@ -38,6 +38,48 @@ const uploadFields = (req, res, next) =>
 router.get('/me', authenticate, providers.me);
 router.post('/apply', authenticate, uploadFields, providers.apply);
 
+// GET /api/providers/me/profile
+// Everything the mobile Profile screen (ServiceProviderProfile.js) shows. Only fields that are
+// safe to show are sent. The verification documents (valid ID, selfie, supporting docs)
+// are never included.
+// TODO: reviews, rating and aiSummary stay empty until the reviews data is wired in.
+const firstValue = (obj, ...keys) => {
+  for (const key of keys) {
+    if (obj[key] !== undefined && obj[key] !== null) return obj[key];
+  }
+  return null;
+};
+
+router.get(
+  '/me/profile',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const profile = await Provider.findProfile(req.user.user_id);
+    if (!profile) throw new ApiError(403, 'Provider account required');
+
+    res.json({
+      fullName: req.user.name || null,
+      specialty: firstValue(profile, 'specialty', 'service_category', 'category'),
+      yearsExperience: firstValue(profile, 'years_experience', 'years_of_experience'),
+      photoUrl: firstValue(profile, 'photo_url', 'profile_photo_url'),
+      rating: null,
+      reviewCount: 0,
+      aiSummary: { positiveFeedbackPercent: null, tags: [] },
+      reviews: [],
+      account: {
+        email: req.user.email || null,
+        address: firstValue(profile, 'address', 'home_address'),
+      },
+      other: {
+        availabilityDays: firstValue(profile, 'availability_days'),
+        availabilityHours: firstValue(profile, 'availability_hours'),
+        companyAddress: firstValue(profile, 'company_address', 'business_address'),
+        companyName: firstValue(profile, 'company_name', 'business_name'),
+      },
+    });
+  })
+);
+
 // PATCH /api/providers/me  body: { homeServiceRadiusKm: 5-100 }
 // The provider changes how far they will travel for home service. Only providers who
 // offered home service in their application have a range to edit.

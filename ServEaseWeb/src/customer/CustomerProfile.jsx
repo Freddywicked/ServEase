@@ -4,7 +4,7 @@ import CustomerSidebar from '../components/CustomerSidebar.jsx';
 import { me } from '../api/client';
 import { useAuth } from '../context/auth_context';
 import avatarCircle from '../assets/icon_bigellipse.png';
-import gearIconWhite from '../assets/icon_gear_white.png';
+import formIconWhite from '../assets/icon_form_white.png';
 
 // Returns the first non-empty value found under any of the given keys of `source`.
 // The account fields below are read from the logged-in user (useAuth / GET /api/me).
@@ -156,7 +156,7 @@ export default function CustomerProfile() {
               onClick={handleApply}
               className="box-border flex h-[67px] w-[291px] cursor-pointer items-center gap-[17px] rounded-[10px] border-0 bg-gradient-to-r from-[#0255AF] to-[#04A5A5] pl-[27px] text-left font-[SF_Pro,system-ui,sans-serif] text-[15px] font-bold leading-[18px] text-white"
             >
-              <img src={gearIconWhite} alt="" className="h-[26px] w-[26px] flex-none object-contain" />
+              <img src={formIconWhite} alt="" className="h-[26px] w-[26px] flex-none object-contain" />
               Apply as Service Provider
             </button>
           </div>
