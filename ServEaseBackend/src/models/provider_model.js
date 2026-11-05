@@ -47,6 +47,62 @@ const findProfile = async (userId) => {
   };
 };
 
+// Everything the provider Profile screen needs beyond findProfile: the provider's own row,
+// the service categories they offer, and their customer ratings (all of them, so the
+// average and the positive-feedback share are exact) plus who wrote the latest reviews.
+// Deliberately leaves out government_id and certification (private documents).
+const PROFILE_REVIEW_LIMIT = 10;
+
+const findProfilePageData = async (userId) => {
+  const row = unwrap(
+    await supabase
+      .from('service_providers')
+      .select('years_of_experience, profile_photo, availability, company_name, company_address')
+      .eq('user_id', userId)
+      .maybeSingle()
+  );
+  if (!row) return null;
+
+  const specs = unwrap(
+    await supabase
+      .from('service_provider_specialization')
+      .select('service_category')
+      .eq('provider_id', userId)
+  );
+
+  const ratings =
+    unwrap(
+      await supabase
+        .from('ratings')
+        .select('rating_id, request_id, customer_id, rating, review, sentiment, created_at')
+        .eq('provider_id', userId)
+        .order('created_at', { ascending: false })
+    ) || [];
+
+  // Names and service categories are only needed for the reviews that are shown.
+  const latest = ratings.slice(0, PROFILE_REVIEW_LIMIT);
+  const customerIds = [...new Set(latest.map((r) => r.customer_id))];
+  const requestIds = [...new Set(latest.map((r) => r.request_id))];
+
+  const customers = customerIds.length
+    ? unwrap(await supabase.from('users').select('user_id, name').in('user_id', customerIds))
+    : [];
+  const requests = requestIds.length
+    ? unwrap(
+        await supabase.from('service_requests').select('request_id, category').in('request_id', requestIds)
+      )
+    : [];
+
+  return {
+    row,
+    categories: [...new Set((specs || []).map((s) => s.service_category).filter(Boolean))],
+    ratings,
+    latest,
+    customers: customers || [],
+    requests: requests || [],
+  };
+};
+
 // Creates the service_providers row, then one service_provider_specialization
 // row per selected category/service. verification_status always starts 'pending' —
 // an admin flips it to 'verified' (or rejects it) from the web dashboard.
@@ -116,4 +172,4 @@ const updateHomeServiceRadius = async (userId, km) =>
       .single()
   );
 
-module.exports = { findByUserId, findProfile, create, updateHomeServiceRadius };
+module.exports = { findByUserId, findProfile, findProfilePageData, create, updateHomeServiceRadius };
