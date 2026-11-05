@@ -51,6 +51,8 @@ customer.get('/active', authenticate, workflow.getActiveRepair);
 customer.get('/tracking', authenticate, workflow.getTracking);
 // Customer History screen (web): closed requests + paid payments.
 customer.get('/history', authenticate, workflow.getCustomerHistory);
+// Web create-request form: categories, location types, time slots, radius range, map start.
+customer.get('/options', authenticate, controller.listCreateOptions);
 // Mobile create-request flow: the photo and the AI diagnosis happen BEFORE the request
 // row exists (it is created on submit), so these take no :requestId.
 customer.post('/photos', authenticate, uploadPhoto, controller.uploadPhoto);
