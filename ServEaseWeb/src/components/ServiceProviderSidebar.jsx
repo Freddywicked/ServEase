@@ -12,8 +12,6 @@ import requestIconWhite from '../assets/icon_request_white.png';
 import requestIconBlack from '../assets/icon_request.png';
 import toolsIconWhite from '../assets/icon_tools_white.png';
 import toolsIconBlack from '../assets/icon_tools.png';
-import historyIconWhite from '../assets/icon_dollar_white.png';
-import historyIconBlack from '../assets/icon_dollar.png';
 import hamburgerIcon from '../assets/icon_hamburger.png';
 import dropdownIcon from '../assets/icon_dropdown.png';
 import switchAccountIcon from '../assets/icon_switch_account.png';
@@ -39,6 +37,10 @@ const getInitials = (name = '') => {
   return (first + last).toUpperCase();
 };
 
+// Earnings is no longer a tab: it opens from "View" on the Dashboard's Earnings card, so the
+// Dashboard tab stays highlighted while the Earnings screen is open.
+const EARNINGS_PATH = '/serviceprovider/earnings';
+
 // Messages is not a tab: it is the floating message button (MessagingWidget) at the bottom-right.
 const NAV_ITEMS = [
   {
@@ -58,12 +60,6 @@ const NAV_ITEMS = [
     to: '/serviceprovider/jobs',
     iconActive: toolsIconWhite,
     iconInactive: toolsIconBlack,
-  },
-  {
-    label: 'Earnings',
-    to: '/serviceprovider/earnings',
-    iconActive: historyIconWhite,
-    iconInactive: historyIconBlack,
   },
 ];
 
@@ -208,7 +204,9 @@ export default function ServiceProviderSidebar({ children, initials }) {
           style={{ width }}
         >
           {NAV_ITEMS.map((item) => {
-            const active = location.pathname.startsWith(item.to);
+            const active =
+              location.pathname.startsWith(item.to) ||
+              (item.to === '/serviceprovider/dashboard' && location.pathname.startsWith(EARNINGS_PATH));
             return (
               <Link
                 key={item.to}

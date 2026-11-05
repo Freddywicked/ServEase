@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { Navigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import ServiceProviderSidebar from '../components/ServiceProviderSidebar.jsx';
 import {
   getProviderAvailability,
@@ -84,14 +84,24 @@ const rowTitle = (category, requestId) => {
 const formatPeso = (amount) => `₱${Number(amount || 0).toLocaleString('en-PH')}`;
 
 // White card with a bold title (Figma: Pending Request / Active Repair / Earnings).
-function DashboardCard({ title, minHeightClass, children }) {
+function DashboardCard({ title, minHeightClass, actionLabel, actionTo, children }) {
   return (
     <section
       className={`box-border flex w-full flex-col rounded-[14px] border border-[#C9C2C2] bg-white px-[21px] pb-[21px] pt-[11px] ${minHeightClass}`}
     >
-      <h2 className="m-0 font-[SF_Pro,system-ui,sans-serif] text-[15px] font-bold leading-[26px] text-[#414141]">
-        {title}
-      </h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="m-0 font-[SF_Pro,system-ui,sans-serif] text-[15px] font-bold leading-[26px] text-[#414141]">
+          {title}
+        </h2>
+        {actionTo && (
+          <Link
+            to={actionTo}
+            className="font-[SF_Pro,system-ui,sans-serif] text-[13px] font-medium leading-[26px] text-[#005FCA] no-underline hover:underline"
+          >
+            {actionLabel}
+          </Link>
+        )}
+      </div>
       {children}
     </section>
   );
@@ -486,7 +496,12 @@ export default function ServiceProviderDashboard() {
         </div>
 
         <div className="mt-6 md:mt-[45px]">
-          <DashboardCard title="Earnings" minHeightClass="min-h-[143px]">
+          <DashboardCard
+            title="Earnings"
+            minHeightClass="min-h-[143px]"
+            actionLabel="View"
+            actionTo="/serviceprovider/earnings"
+          >
             <div className="mt-[3px] grid grid-cols-1 gap-4 sm:grid-cols-2 sm:px-[10%]">
               <EarningsFigure amount={earnings.thisWeek} label="This week" />
               <EarningsFigure amount={earnings.pendingPayment} label="Pending Payment" />

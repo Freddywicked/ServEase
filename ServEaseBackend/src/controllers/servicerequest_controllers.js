@@ -18,6 +18,7 @@ const Workflow = require('../models/workflow_model');
 const { diagnose } = require('../utils/ai_diagnosis');
 const { getProviderFileUrl } = require('../utils/storage');
 const {
+  MIN_RADIUS_KM,
   MAX_RADIUS_KM,
   DEFAULT_PROVIDER_RADIUS_KM,
   DEFAULT_CUSTOMER_RADIUS_KM,
@@ -370,29 +371,75 @@ const resolve = asyncHandler(async (req, res) => {
 });
 
 // GET /api/service-requests/:requestId/providers -> { providers: [...] }
-// Verified providers, those matching the request's category first.
+// Web step 3 (RecommendServiceProvider.jsx). Verified providers for a SAVED draft, ranked: the
+// request's category first, then rating (highest first), then distance. Every provider carries what
+// the cards show — verified, available (can they take the request's preferred date/time?), rating,
+// reviewCount, experience, locationName, distanceKm, availabilitySchedule — plus `recommended`,
+// which marks the best matches the screen pre-selects.
+const RECOMMENDED_COUNT = 2;
+
 const recommendedProviders = asyncHandler(async (req, res) => {
   const row = await getOwnedRequest(req);
   const wanted = SPECIALIZATION_FOR_CATEGORY[row.category];
+  const latitude = toNumberOrNull(row.latitude);
+  const longitude = toNumberOrNull(row.longitude);
+  const scheduledDate = toIsoDateOrNull(row.date);
+  const scheduledSlot = to24hSlot(row.time);
 
   const providers = await Request.listVerifiedProviders();
-  const users = await Request.findUsersByIds(providers.map((p) => p.user_id));
+  const candidates = providers.filter((p) => p.user_id !== req.user.user_id);
+  const ids = candidates.map((p) => p.user_id);
+  const [users, ratings, unavailable] = await Promise.all([
+    Request.findUsersByIds(ids),
+    Request.listRatingsForProviders(ids),
+    unavailableForSchedule(ids, scheduledDate, scheduledSlot),
+  ]);
 
-  const list = providers
-    .filter((p) => p.user_id !== req.user.user_id)
-    .map((p) => ({
-      id: p.user_id, // pass this in submitServiceRequest(requestId, [id, ...])
-      userId: p.user_id,
-      name: users[p.user_id]?.name || 'Service provider',
-      experience: p.years_of_experience,
-      specializations: p.specializations,
-      offersHomeServices: Boolean(p.offers_home_service),
-      photoUrl: p.profile_photo || null,
-      rating: null, // TODO: average of the customer ratings (see Rating.jsx)
-      distanceKm: null, // TODO
-      matchesCategory: p.specializations.includes(wanted),
-    }))
-    .sort((a, b) => Number(b.matchesCategory) - Number(a.matchesCategory));
+  const list = await Promise.all(
+    candidates.map(async (p) => {
+      // Providers store a text address, not coordinates: geocode it (cached) and measure the
+      // distance to the request's pin. Without a pin or an address the distance stays null.
+      const address = p.company_address || users[p.user_id]?.address || '';
+      let distanceKm = null;
+      if (latitude !== null && longitude !== null && address) {
+        const point = await geocodeAddress(address);
+        if (point) distanceKm = Math.round(haversineKm(latitude, longitude, point.lat, point.lng) * 10) / 10;
+      }
+      const rating = ratings[p.user_id];
+      return {
+        id: p.user_id, // pass this in submitServiceRequest(requestId, [id, ...])
+        userId: p.user_id,
+        name: users[p.user_id]?.name || p.company_name || 'Service provider',
+        experience: p.years_of_experience,
+        specializations: p.specializations,
+        offersHomeServices: Boolean(p.offers_home_service),
+        availabilitySchedule: p.availability || null,
+        // profile_photo is a private storage path; sign it so the browser can render it.
+        photoUrl: await getProviderFileUrl(p.profile_photo),
+        verified: true, // listVerifiedProviders only returns verified providers
+        available: !unavailable.has(p.user_id),
+        rating: rating ? Math.round(rating.rating * 10) / 10 : null,
+        reviewCount: rating?.reviewCount || 0,
+        locationName: address,
+        distanceKm,
+        matchesCategory: wanted ? p.specializations.includes(wanted) : false,
+        recommended: false,
+      };
+    })
+  );
+
+  list.sort(
+    (a, b) =>
+      Number(b.matchesCategory) - Number(a.matchesCategory) ||
+      (b.rating ?? -1) - (a.rating ?? -1) ||
+      (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity)
+  );
+  list
+    .filter((p) => p.matchesCategory && p.available)
+    .slice(0, RECOMMENDED_COUNT)
+    .forEach((p) => {
+      p.recommended = true;
+    });
 
   res.json({ providers: list });
 });
@@ -743,6 +790,34 @@ const listTimeSlots = (req, res) => {
   res.json({ timeSlots: TIME_SLOTS.map((label) => ({ value: label, label })) });
 };
 
+// GET /api/service-requests/options -> everything the WEB "Creating Service Request" form offers,
+// so CreateServiceRequest.jsx has nothing hard-coded (getServiceRequestOptions in api/client.js).
+// Register it BEFORE '/:requestId' in servicerequest_routes.js.
+//   categories / locationTypes: [{ value, label }] — `value` is what the form sends back.
+//   searchRadius: the slider's range and start value (same limits the recommendations enforce).
+//   defaultMapCenter: where the map opens until the browser location resolves; set DEFAULT_MAP_LAT
+//   and DEFAULT_MAP_LNG in the server environment (null when they are not set).
+const LOCATION_TYPES = [
+  { value: 'home', label: 'Home-based' },
+  { value: 'shop', label: 'Shop-based' },
+];
+
+const listCreateOptions = (req, res) => {
+  const lat = toNumberOrNull(process.env.DEFAULT_MAP_LAT);
+  const lng = toNumberOrNull(process.env.DEFAULT_MAP_LNG);
+  res.json({
+    categories: CATEGORIES.map((label) => ({ value: label, label })),
+    locationTypes: LOCATION_TYPES,
+    timeSlots: TIME_SLOTS,
+    searchRadius: {
+      minKm: MIN_RADIUS_KM,
+      maxKm: MAX_RADIUS_KM,
+      defaultKm: DEFAULT_CUSTOMER_RADIUS_KM,
+    },
+    defaultMapCenter: lat !== null && lng !== null ? { lat, lng } : null,
+  });
+};
+
 // POST /api/service-requests/photos (multipart, field "photo") -> { photo: { path } }
 // The mobile app uploads the photo BEFORE any SERVICE_REQUEST row exists (it creates the
 // row only on submit), so this just stores the file and returns its storage path. The path
@@ -909,6 +984,7 @@ module.exports = {
   rejectRequest,
   listCategories,
   listTimeSlots,
+  listCreateOptions,
   uploadPhoto,
   diagnoseDraft,
   reverseGeocode,

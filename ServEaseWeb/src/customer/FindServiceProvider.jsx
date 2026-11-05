@@ -1,24 +1,53 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
 import { browseServiceProviders } from '../api/client';
 
-// Filter chips shown under the search bar. 'Available' and 'Top rated' are quick filters;
-// the rest are service categories. Each chip maps to query params for
-// GET /api/service-providers (the server does the searching/filtering/sorting).
-const FILTER_CHIPS = ['Available', 'Top rated', 'Automotive', 'IT Devices', 'Phone', 'Home Repair'];
+// Two dropdowns sit next to the search bar (Figma): a status filter and a category filter.
+// Each option maps to the query params of GET /api/service-providers. These lists only describe
+// the FILTERS — every provider shown on the screen (name, location, rating, badges) comes
+// from the backend.
+const STATUS_OPTIONS = [
+  { value: 'available', label: 'Available', query: { available: true } },
+  { value: 'unavailable', label: 'Unavailable', query: { available: false } },
+  // The list arrives sorted by rating; it is also sorted again below so "Top-rated" is reliable.
+  { value: 'top-rated', label: 'Top-rated', query: {} },
+];
 
-// Chip label -> backend query. Category keywords match specialization names on the
-// server; 'Top rated' needs no param (the list arrives sorted by rating, highest first).
-const CHIP_TO_QUERY = {
-  Available: { available: true },
-  'Top rated': {},
-  Automotive: { category: 'Automotive Services' },
-  'IT Devices': { category: 'IT-related Device Repair' },
-  Phone: { category: 'Phone Repair' },
-  'Home Repair': { category: 'Home Repair Services' },
-};
+const CATEGORY_OPTIONS = [
+  { value: 'all', label: 'All', query: {} },
+  { value: 'it', label: 'IT-Related Devices', query: { category: 'IT-related Device Repair' } },
+  { value: 'phone', label: 'Phone Devices', query: { category: 'Phone Repair' } },
+  { value: 'automotive', label: 'Automotive', query: { category: 'Automotive Services' } },
+  { value: 'home', label: 'Home', query: { category: 'Home Repair Services' } },
+];
 
+function SearchIcon() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#393939"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      aria-hidden="true"
+      className="pointer-events-none absolute left-[22px] top-1/2 -translate-y-1/2"
+    >
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </svg>
+  );
+}
+
+function ChevronIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-none">
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
 
 function PinIcon() {
   return (
@@ -29,7 +58,7 @@ function PinIcon() {
   );
 }
 
-function CheckBadgeIcon({ size = 14 }) {
+function CheckBadgeIcon({ size = 13 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
       <circle cx="12" cy="12" r="12" fill="#0255AF" />
@@ -38,58 +67,123 @@ function CheckBadgeIcon({ size = 14 }) {
   );
 }
 
+// Dropdown that opens a list right under its button (Figma: "Available" / "Automotive" filters).
+function FilterDropdown({ label, options, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  // Close when clicking outside or pressing Escape.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onMouseDown = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  const selected = options.find((o) => o.value === value) || options[0];
+
+  return (
+    <div ref={ref} className={`relative h-[49px] w-full flex-none sm:w-[173px] ${open ? 'z-30' : 'z-10'}`}>
+      <button
+        type="button"
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="relative z-10 box-border flex h-[49px] w-full cursor-pointer items-center justify-between rounded-[14px] border border-[#7E7A7A] bg-white px-5 text-left font-[Inter] text-[14px] font-semibold leading-[24px] tracking-[-0.3125px] text-[#484040]"
+      >
+        <span className="truncate">{selected.label}</span>
+        <ChevronIcon />
+      </button>
+
+      {open && (
+        <ul
+          role="listbox"
+          aria-label={label}
+          className="absolute left-0 right-0 top-[calc(100%-14px)] z-0 m-0 box-border list-none rounded-b-[14px] border border-[#7E7A7A] bg-white px-0 pb-3 pt-[22px]"
+        >
+          {options.map((option) => (
+            <li key={option.value} role="option" aria-selected={option.value === selected.value}>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+                className="box-border block h-[31px] w-full cursor-pointer border-0 bg-transparent px-5 text-left font-[Inter] text-[14px] font-medium leading-[24px] tracking-[-0.3125px] text-[#484040] hover:bg-[#F6FAFF]"
+              >
+                {option.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function FindServiceProvider() {
   const navigate = useNavigate();
 
   const [search, setSearch] = useState('');
-  const [activeChip, setActiveChip] = useState('Automotive');
+  const [statusFilter, setStatusFilter] = useState(STATUS_OPTIONS[0].value);
+  const [categoryFilter, setCategoryFilter] = useState('automotive');
 
-  // Live provider list from the backend. The server does the search + chip filtering;
+  // Live provider list from the backend. The server does the search + filtering;
   // typing is debounced so every keystroke does not fire a request.
   const [providers, setProviders] = useState([]);
-  const [status, setStatus] = useState('loading'); // 'loading' | 'done' | 'error'
+  const [loadState, setLoadState] = useState('loading'); // 'loading' | 'done' | 'error'
 
   useEffect(() => {
     let cancelled = false;
-    setStatus('loading');
+    setLoadState('loading');
+    const statusOption = STATUS_OPTIONS.find((o) => o.value === statusFilter) || STATUS_OPTIONS[0];
+    const categoryOption = CATEGORY_OPTIONS.find((o) => o.value === categoryFilter) || CATEGORY_OPTIONS[0];
+
     const timer = setTimeout(() => {
       browseServiceProviders({
         search: search.trim(),
-        ...(CHIP_TO_QUERY[activeChip] || {}),
+        ...statusOption.query,
+        ...categoryOption.query,
       })
         .then((data) => {
           if (cancelled) return;
           // Map the server shape onto the card fields below.
-          setProviders(
-            (data?.providers ?? []).map((p) => ({
-              id: p.id,
-              name: p.name,
-              address: p.locationName || '',
-              rating: p.rating ?? 'New',
-              category: p.specialty,
-              verified: Boolean(p.verified),
-              available: Boolean(p.available),
-            }))
-          );
-          setStatus('done');
+          let list = (data?.providers ?? []).map((p) => ({
+            id: p.id,
+            name: p.name,
+            address: p.locationName || '',
+            rating: p.rating ?? null, // null = no reviews yet
+            verified: Boolean(p.verified),
+            available: Boolean(p.available),
+          }));
+          if (statusFilter === 'unavailable') list = list.filter((p) => !p.available);
+          if (statusFilter === 'top-rated') {
+            list = [...list].sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0));
+          }
+          setProviders(list);
+          setLoadState('done');
         })
         .catch(() => {
-          if (!cancelled) setStatus('error');
+          if (!cancelled) setLoadState('error');
         });
     }, 300);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [search, activeChip]);
-
-  const handleChipClick = (chip) => {
-    // Clicking the active chip again clears the filter.
-    setActiveChip((current) => (current === chip ? '' : chip));
-  };
+  }, [search, statusFilter, categoryFilter]);
 
   const handleViewProfile = (providerId) => {
-    // Route: service provider details screen (adjust if the route name differs).
     // TODO (backend-ready): carry along request context if needed, e.g.
     // navigate(`/customer/providers/${providerId}`, { state: { requestId, diagnosis } });
     navigate(`/customer/providers/${providerId}`);
@@ -102,30 +196,34 @@ export default function FindServiceProvider() {
           Service Providers
         </h1>
 
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search services or service providers..."
-          className="box-border mt-[19px] block h-[54px] w-full max-w-[876px] rounded-[8px] border-0 bg-[#EAEAEA] px-5 font-[Poppins,Quicksand,sans-serif] text-[16px] font-medium text-[#292727] outline-none placeholder:text-black/[0.34] sm:text-[20px]"
-        />
-
-        <div className="mt-[37px] flex flex-wrap gap-[5px]">
-          {FILTER_CHIPS.map((chip) => (
-            <button
-              key={chip}
-              type="button"
-              onClick={() => handleChipClick(chip)}
-              className={`box-border h-[32px] w-[103px] cursor-pointer rounded-[20px] border border-[#B1A8A8] p-0 text-center font-[Quicksand] text-[13px] font-medium leading-[22px] ${
-                activeChip === chip ? 'bg-[#021E79] text-white' : 'bg-[#FFFDFD] text-[#414141]'
-              }`}
-            >
-              {chip}
-            </button>
-          ))}
+        {/* Search bar + the two filter dropdowns (Figma: one row, 49px high) */}
+        <div className="mt-[19px] flex max-w-[1068px] flex-col gap-[10px] sm:flex-row sm:items-start">
+          <div className="relative h-[49px] min-w-0 flex-1">
+            <SearchIcon />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search request"
+              aria-label="Search service providers"
+              className="box-border h-full w-full rounded-[14px] border border-[#7E7A7A] bg-white pl-[67px] pr-4 font-[Inter] text-[16px] font-medium leading-[24px] tracking-[-0.3125px] text-[#292727] outline-none placeholder:text-[#718096]"
+            />
+          </div>
+          <FilterDropdown
+            label="Filter by availability"
+            options={STATUS_OPTIONS}
+            value={statusFilter}
+            onChange={setStatusFilter}
+          />
+          <FilterDropdown
+            label="Filter by category"
+            options={CATEGORY_OPTIONS}
+            value={categoryFilter}
+            onChange={setCategoryFilter}
+          />
         </div>
 
-        <div className="mt-8 flex max-w-[859px] flex-col gap-4">
+        <div className="mt-[29px] flex max-w-[1068px] flex-col gap-3">
           {providers.map((provider) => (
             <div
               key={provider.id}
@@ -138,54 +236,59 @@ export default function FindServiceProvider() {
                   handleViewProfile(provider.id);
                 }
               }}
-              className="relative box-border h-[98px] w-full min-w-[340px] cursor-pointer rounded-[10px] border border-[#818080] bg-white font-[SF_Pro,system-ui,sans-serif] text-[#484040]"
+              className="relative box-border h-[98px] w-full min-w-[340px] cursor-pointer rounded-[20px] border border-[#818080] bg-white font-[SF_Pro,system-ui,sans-serif] text-[#484040]"
             >
-              <div className="absolute right-[15px] top-[9px] flex gap-[5px]">
+              <div className="absolute right-[15px] top-[9px] flex gap-[4px]">
                 {provider.verified && (
-                  <span className="flex h-[21px] w-[71px] items-center rounded-[10px] bg-[rgba(2,85,175,0.46)] pl-[3px] text-[10px] leading-[12px] text-[#0255AF]">
+                  <span className="flex h-[21px] w-[74px] items-center rounded-[10px] bg-[rgba(2,85,175,0.46)] pl-[9px] text-[11px] leading-[13px] text-[#0255AF]">
                     <CheckBadgeIcon />
                     <span className="ml-[5px]">Verified</span>
                   </span>
                 )}
                 {provider.available && (
-                  <span className="flex h-[21px] w-[63px] items-center justify-center rounded-[10px] bg-[#86FF8A] text-[10px] leading-[12px] text-[#167713]">
+                  <span className="flex h-[21px] w-[64px] items-center justify-center rounded-[10px] bg-[#2E7D32] text-[11px] leading-[13px] text-white">
                     Available
                   </span>
                 )}
               </div>
 
-              <p className="absolute left-[19px] top-[12px] m-0 max-w-[calc(100%-180px)] truncate text-[20px] font-bold leading-[24px]">
+              <p className="absolute left-[22px] top-[12px] m-0 max-w-[calc(100%-190px)] truncate text-[20px] font-bold leading-[24px]">
                 {provider.name}
               </p>
 
-              <div className="absolute left-[19px] top-[39px]">
-                <PinIcon />
-              </div>
-              <p className="absolute left-[42px] top-[41px] m-0 text-[12px] leading-[14px]">
-                {provider.address}
+              {/* Location: pin icon + the provider's address, right under the name */}
+              {provider.address && (
+                <>
+                  <div className="absolute left-[22px] top-[38px]">
+                    <PinIcon />
+                  </div>
+                  <p className="absolute left-[44px] top-[39px] m-0 max-w-[calc(100%-70px)] truncate text-[13px] leading-[16px]">
+                    {provider.address}
+                  </p>
+                </>
+              )}
+
+              <p className="absolute left-[22px] top-[62px] m-0 text-[11px] leading-[13px]">
+                Reviews ({provider.rating ?? 'New'})
               </p>
 
-              <p className="absolute left-[22px] top-[63px] m-0 text-[11px] leading-[13px] underline">
-                Reviews ({provider.rating})
-              </p>
-
-              <span className="absolute left-[calc(50%-12px)] top-[80px] -translate-x-1/2 text-center text-[9px] leading-[11px] underline">
+              <span className="absolute left-[calc(50%-15px)] top-[78px] -translate-x-1/2 text-center text-[9px] leading-[11px] underline">
                 View Profile
               </span>
             </div>
           ))}
 
-          {status === 'loading' && (
+          {loadState === 'loading' && (
             <p className="m-0 py-10 text-center font-[Roboto] text-[14px] text-[#817C7C]">
               Searching service providers…
             </p>
           )}
-          {status === 'error' && (
+          {loadState === 'error' && (
             <p role="alert" className="m-0 py-10 text-center font-[Roboto] text-[14px] text-[#B91C1C]">
               Could not load service providers. Please try again.
             </p>
           )}
-          {status === 'done' && providers.length === 0 && (
+          {loadState === 'done' && providers.length === 0 && (
             <p className="m-0 py-10 text-center font-[Roboto] text-[14px] text-[#817C7C]">
               No service providers found.
             </p>

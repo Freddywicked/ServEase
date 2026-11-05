@@ -2,37 +2,25 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
-import { createServiceRequest, setDraftRequestId } from '../api/client';
+import { createServiceRequest, getServiceRequestOptions, setDraftRequestId } from '../api/client';
 import calendarIcon from '../assets/icon_calendar.png';
 import photoIcon from '../assets/icon_photo.png';
 
-// The category chips a customer can pick from. Layout/config, not user data — like the
-// nav items in CustomerSidebar — so it stays a constant. Swap for a backend-fetched list
-// (e.g. GET /api/categories) if categories become admin-configurable.
-const CATEGORIES = ['Home Repair', 'Automotive', 'IT-Related Devices', 'Phone Device'];
-
-// Where the repair takes place. `value` is what travels to the backend
-// (e.g. SERVICE_REQUEST.service_location_type), `label` is what the customer sees.
-const SERVICE_LOCATION_TYPES = [
-  { value: 'home', label: 'Home-based' },
-  { value: 'shop', label: 'Shop-based' },
-];
-
-// Appointment time options offered at this step, before a provider has been matched.
-// TODO: once providers can set their own working hours, this could instead come from
-// GET /api/service-request/preferred-slots (or similar) rather than being a fixed list.
-const TIME_SLOTS = ['10:00 AM', '11:00 AM', '01:00 PM', '02:00 PM'];
-
-// Search area: how far (km) from the customer's location to look for providers.
-// Keep these in step with RadiusSlider / DEFAULT_CUSTOMER_RADIUS_KM in the mobile app.
-const MIN_RADIUS_KM = 1;
-const MAX_RADIUS_KM = 20;
-const DEFAULT_RADIUS_KM = 5;
+// Everything the form offers — the categories, the service location types, the appointment
+// time slots, the search-radius range and where the map opens — comes from the backend
+// (GET /api/service-requests/options, see getServiceRequestOptions in api/client). Nothing about
+// them is hard-coded here. A list entry is { value, label } (`value` is what is sent back to the
+// backend, `label` is what the customer sees); a plain string is accepted too and used for both.
+const toOption = (item) =>
+  typeof item === 'string'
+    ? { value: item, label: item }
+    : {
+        value: item.value ?? item.name ?? item.id,
+        label: item.label ?? item.name ?? String(item.value ?? item.id ?? ''),
+      };
 
 // Google Maps JavaScript API key. Add VITE_GOOGLE_MAPS_API_KEY=... to your .env (Maps JavaScript API enabled).
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-// Where the map opens until the device location resolves (Naga City).
-const DEFAULT_MAP_CENTER = { lat: 13.6218, lng: 123.1948 };
 
 // Loads the Google Maps script once and resolves with `google.maps`.
 let googleMapsPromise = null;
@@ -89,11 +77,11 @@ function formatAppointment(date, time) {
 // `activeStep` is 1-indexed; this screen is step 1 of 4.
 function StepProgress({ activeStep, totalSteps = 4 }) {
   return (
-    <div className="mb-8 flex w-full max-w-[579px] gap-[6px]">
+    <div className="mb-8 flex w-full gap-3">
       {Array.from({ length: totalSteps }, (_, i) => (
         <div
           key={i}
-          className={`h-[9px] flex-1 rounded-full ${i < activeStep ? 'bg-[#0255AF]' : 'bg-[#D9D9D9]'}`}
+          className={`h-[9px] flex-1 rounded-[10px] ${i < activeStep ? 'bg-[#0255AF]' : 'bg-[#D9D9D9]'}`}
         />
       ))}
     </div>
@@ -102,7 +90,7 @@ function StepProgress({ activeStep, totalSteps = 4 }) {
 
 // Appointment date/time picker modal. Selecting a date and a time and pressing Confirm
 // hands the chosen appointment back to the parent form.
-function AppointmentModal({ initialDate, onClose, onConfirm }) {
+function AppointmentModal({ initialDate, timeSlots, onClose, onConfirm }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const start = initialDate || today;
@@ -200,7 +188,10 @@ function AppointmentModal({ initialDate, onClose, onConfirm }) {
 
         <p className="m-0 mb-2 mt-5 font-[Quicksand] text-[13px] font-bold text-black">Select Time</p>
         <div className="grid grid-cols-2 gap-2">
-          {TIME_SLOTS.map((slot) => (
+          {timeSlots.length === 0 && (
+            <p className="col-span-2 m-0 text-[12px] text-[#817C7C]">No time slots available</p>
+          )}
+          {timeSlots.map((slot) => (
             <button
               key={slot}
               type="button"
@@ -237,10 +228,10 @@ function AppointmentModal({ initialDate, onClose, onConfirm }) {
 
 // Service Location Type dropdown (Home-based / Shop-based). The menu floats over the content
 // below it (the map), like the Figma open state, and closes on outside click or Escape.
-function LocationTypeSelect({ value, onChange }) {
+function LocationTypeSelect({ options, value, onChange }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
-  const selected = SERVICE_LOCATION_TYPES.find((t) => t.value === value) || null;
+  const selected = options.find((t) => t.value === value) || null;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -286,7 +277,7 @@ function LocationTypeSelect({ value, onChange }) {
           role="listbox"
           className="absolute left-0 right-0 top-full z-30 m-0 mt-1 list-none overflow-hidden rounded-[10px] border border-[#818080] bg-white p-0 shadow-[0_4px_10px_rgba(0,0,0,0.15)]"
         >
-          {SERVICE_LOCATION_TYPES.map((type, index) => (
+          {options.map((type, index) => (
             <li key={type.value} role="option" aria-selected={type.value === value}>
               <button
                 type="button"
@@ -314,7 +305,7 @@ function LocationTypeSelect({ value, onChange }) {
 // from that zoom so it matches the real distance. It is not draggable; use "Update location".
 const METERS_PER_PIXEL_AT_ZOOM_0 = 156543.03392;
 
-function EmbedMap({ coords, radiusKm }) {
+function EmbedMap({ coords, fallbackCenter, radiusKm }) {
   const wrapRef = useRef(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
@@ -328,28 +319,32 @@ function EmbedMap({ coords, radiusKm }) {
     return () => observer.disconnect();
   }, []);
 
-  const center = coords || DEFAULT_MAP_CENTER;
-  const cosLat = Math.cos((center.lat * Math.PI) / 180);
-  const radiusM = radiusKm * 1000;
+  const center = coords || fallbackCenter || null;
+  const cosLat = center ? Math.cos((center.lat * Math.PI) / 180) : 1;
+  const radiusM = (radiusKm ?? 0) * 1000;
   const targetDiameter = 0.7 * Math.min(size.w || 400, size.h || 300);
   const zoom = coords
-    ? Math.max(
-        3,
-        Math.min(20, Math.floor(Math.log2((METERS_PER_PIXEL_AT_ZOOM_0 * cosLat * targetDiameter) / (2 * radiusM))))
-      )
+    ? radiusM > 0
+      ? Math.max(
+          3,
+          Math.min(20, Math.floor(Math.log2((METERS_PER_PIXEL_AT_ZOOM_0 * cosLat * targetDiameter) / (2 * radiusM))))
+        )
+      : 15
     : 14;
   const diameter = (2 * radiusM * 2 ** zoom) / (METERS_PER_PIXEL_AT_ZOOM_0 * cosLat);
 
   return (
     <div ref={wrapRef} className="absolute inset-0 z-10 bg-[#EDF2F8]">
-      <iframe
-        title="Service location map"
-        src={`https://maps.google.com/maps?q=${center.lat},${center.lng}&z=${zoom}&output=embed`}
-        loading="lazy"
-        referrerPolicy="no-referrer-when-downgrade"
-        className="pointer-events-none absolute inset-0 h-full w-full border-0"
-      />
-      {coords && (
+      {center && (
+        <iframe
+          title="Service location map"
+          src={`https://maps.google.com/maps?q=${center.lat},${center.lng}&z=${zoom}&output=embed`}
+          loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+          className="pointer-events-none absolute inset-0 h-full w-full border-0"
+        />
+      )}
+      {coords && radiusM > 0 && (
         <div
           className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#0255AF] bg-[#0255AF]/10"
           style={{ width: diameter, height: diameter }}
@@ -363,7 +358,7 @@ function EmbedMap({ coords, radiusKm }) {
 // The pin can be dragged (or the map clicked) to correct the location — also the way to set it
 // when device geolocation is denied. Falls back to a plain placeholder if the map can't load
 // (missing/invalid VITE_GOOGLE_MAPS_API_KEY, offline, etc.).
-function LocationMap({ coords, status, radiusKm, onPick }) {
+function LocationMap({ coords, fallbackCenter, status, radiusKm, onPick }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const markerRef = useRef(null);
@@ -372,26 +367,34 @@ function LocationMap({ coords, status, radiusKm, onPick }) {
   onPickRef.current = onPick;
   const [mapState, setMapState] = useState('loading'); // 'loading' | 'ready' | 'error'
 
-  // Create the map once.
+  // The map opens on the customer's location, or on the backend's default center until it resolves.
+  const startCenter = coords || fallbackCenter || null;
+  const startCenterRef = useRef(startCenter);
+  startCenterRef.current = startCenter;
+  const hasStartCenter = Boolean(startCenter);
+
+  // Create the map once there is somewhere to open it.
   useEffect(() => {
+    if (!hasStartCenter) return undefined;
     let cancelled = false;
     let map = null;
     loadGoogleMaps()
       .then((maps) => {
         if (cancelled || !containerRef.current) return;
+        const start = startCenterRef.current;
         map = new maps.Map(containerRef.current, {
-          center: DEFAULT_MAP_CENTER,
+          center: start,
           zoom: 14,
           disableDefaultUI: true,
           zoomControl: true,
           clickableIcons: false,
           gestureHandling: 'cooperative',
         });
-        const marker = new maps.Marker({ map, position: DEFAULT_MAP_CENTER, draggable: true, visible: false });
+        const marker = new maps.Marker({ map, position: start, draggable: true, visible: false });
         const circle = new maps.Circle({
           map,
-          center: DEFAULT_MAP_CENTER,
-          radius: DEFAULT_RADIUS_KM * 1000,
+          center: start,
+          radius: 1000, // set from the slider as soon as the customer's location is known
           strokeColor: '#0255AF',
           strokeOpacity: 0.9,
           strokeWeight: 2,
@@ -415,7 +418,7 @@ function LocationMap({ coords, status, radiusKm, onPick }) {
       cancelled = true;
       if (map && window.google?.maps) window.google.maps.event.clearInstanceListeners(map);
     };
-  }, []);
+  }, [hasStartCenter]);
 
   // Keep the pin, the radius circle and the viewport in step with the coordinates and slider.
   useEffect(() => {
@@ -423,9 +426,15 @@ function LocationMap({ coords, status, radiusKm, onPick }) {
     markerRef.current.setPosition(coords);
     markerRef.current.setVisible(true);
     circleRef.current.setCenter(coords);
-    circleRef.current.setRadius(radiusKm * 1000);
-    circleRef.current.setVisible(true);
-    mapRef.current.fitBounds(circleRef.current.getBounds(), 24);
+    if (radiusKm > 0) {
+      circleRef.current.setRadius(radiusKm * 1000);
+      circleRef.current.setVisible(true);
+      mapRef.current.fitBounds(circleRef.current.getBounds(), 24);
+    } else {
+      circleRef.current.setVisible(false);
+      mapRef.current.setCenter(coords);
+      mapRef.current.setZoom(15);
+    }
   }, [mapState, coords, radiusKm]);
 
   const caption =
@@ -439,7 +448,7 @@ function LocationMap({ coords, status, radiusKm, onPick }) {
     <div className="relative box-border h-[300px] w-full overflow-hidden rounded-[20px] border border-[#818080]/30 bg-[#EDF2F8] sm:h-[360px]">
       <div ref={containerRef} className="absolute inset-0" />
 
-      {mapState === 'error' && <EmbedMap coords={coords} radiusKm={radiusKm} />}
+      {mapState === 'error' && <EmbedMap coords={coords} fallbackCenter={fallbackCenter} radiusKm={radiusKm} />}
 
       <span className="absolute bottom-3 left-3 z-20 rounded-md bg-white/90 px-2 py-1 font-[Roboto] text-[12px] text-[#414141] shadow-sm">
         {caption}
@@ -449,7 +458,7 @@ function LocationMap({ coords, status, radiusKm, onPick }) {
 }
 
 // Slider for how far from the customer's location providers are searched (km).
-function RadiusSlider({ value, onChange }) {
+function RadiusSlider({ value, min, max, onChange }) {
   return (
     <div className="box-border w-full rounded-[10px] border border-[#818080] bg-white px-6 py-4">
       <div className="mb-2 flex items-center justify-between">
@@ -458,8 +467,8 @@ function RadiusSlider({ value, onChange }) {
       </div>
       <input
         type="range"
-        min={MIN_RADIUS_KM}
-        max={MAX_RADIUS_KM}
+        min={min}
+        max={max}
         step={1}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
@@ -467,8 +476,8 @@ function RadiusSlider({ value, onChange }) {
         className="h-2 w-full cursor-pointer accent-[#0255AF]"
       />
       <div className="mt-1 flex justify-between font-[SF_Pro,system-ui,sans-serif] text-[11px] text-[#7C7979]">
-        <span>{MIN_RADIUS_KM} km</span>
-        <span>{MAX_RADIUS_KM} km</span>
+        <span>{min} km</span>
+        <span>{max} km</span>
       </div>
       <p className="m-0 mt-2 font-[SF_Pro,system-ui,sans-serif] text-[12px] text-[#484040]">
         We&apos;ll recommend service providers within this distance from your location.
@@ -488,10 +497,50 @@ export default function CreateServiceRequest() {
   const [photo, setPhoto] = useState(null); // File object, TODO uploaded to backend on submit
   const [appointment, setAppointment] = useState(null); // { date: Date, time: string }
   const [serviceLocationType, setServiceLocationType] = useState(''); // 'home' | 'shop'
-  const [searchRadiusKm, setSearchRadiusKm] = useState(DEFAULT_RADIUS_KM);
+  const [searchRadiusKm, setSearchRadiusKm] = useState(null); // km, set from the backend's default once the options load
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  // Form options from the backend (see toOption above).
+  const [options, setOptions] = useState(null);
+  const [optionsStatus, setOptionsStatus] = useState('loading'); // 'loading' | 'done' | 'error'
+  const [optionsReload, setOptionsReload] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setOptionsStatus('loading');
+    getServiceRequestOptions()
+      .then((data) => {
+        if (cancelled) return;
+        const radius = data?.searchRadius || {};
+        const minKm = Number(radius.minKm);
+        const maxKm = Number(radius.maxKm);
+        const defaultKm = Number(radius.defaultKm);
+        const hasRange = Number.isFinite(minKm) && Number.isFinite(maxKm) && maxKm > minKm;
+        const c = data?.defaultMapCenter;
+        const hasCenter = c && Number.isFinite(Number(c.lat)) && Number.isFinite(Number(c.lng));
+        setOptions({
+          categories: (data?.categories ?? []).map(toOption),
+          locationTypes: (data?.locationTypes ?? []).map(toOption),
+          timeSlots: data?.timeSlots ?? [],
+          radiusRange: hasRange ? { min: minKm, max: maxKm } : null,
+          defaultMapCenter: hasCenter ? { lat: Number(c.lat), lng: Number(c.lng) } : null,
+        });
+        if (hasRange) {
+          setSearchRadiusKm(
+            Number.isFinite(defaultKm) ? Math.min(maxKm, Math.max(minKm, defaultKm)) : minKm
+          );
+        }
+        setOptionsStatus('done');
+      })
+      .catch(() => {
+        if (!cancelled) setOptionsStatus('error');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [optionsReload]);
 
   // Device geolocation (the customer can then fine-tune it on the map). The coordinates and the
   // search radius are sent with the request when the customer presses Next.
@@ -586,7 +635,7 @@ export default function CreateServiceRequest() {
       }
       formData.append('latitude', coords.lat);
       formData.append('longitude', coords.lng);
-      formData.append('searchRadiusKm', searchRadiusKm);
+      if (searchRadiusKm != null) formData.append('searchRadiusKm', searchRadiusKm);
 
       const { request } = await createServiceRequest(formData);
       setDraftRequestId(request.id); // e.g. "SR-0007"
@@ -614,24 +663,46 @@ export default function CreateServiceRequest() {
         </p>
 
         <h3 className={SECTION_HEADING}>Category</h3>
-        <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4 lg:gap-6">
-          {CATEGORIES.map((c) => {
-            const active = c === category;
-            return (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setCategory(c)}
-                aria-pressed={active}
-                className={`box-border h-[46px] cursor-pointer rounded-[10px] border border-[#818080] bg-gradient-to-r from-[#0255AF] to-[#04A5A5] px-4 font-[Roboto] text-[14px] text-white shadow-[0_4px_4px_rgba(0,0,0,0.25)] transition ${
-                  active ? 'ring-2 ring-[#021E79] ring-offset-2' : 'hover:brightness-110'
-                }`}
-              >
-                {c}
-              </button>
-            );
-          })}
-        </div>
+        {optionsStatus === 'loading' && (
+          <p className="m-0 mb-8 font-[Roboto] text-[14px] text-[#817C7C]">Loading categories…</p>
+        )}
+        {optionsStatus === 'error' && (
+          <div className="mb-8 flex flex-wrap items-center gap-3">
+            <p role="alert" className="m-0 font-[Roboto] text-[14px] text-[#B91C1C]">
+              Couldn&apos;t load the form options.
+            </p>
+            <button
+              type="button"
+              onClick={() => setOptionsReload((n) => n + 1)}
+              className="cursor-pointer border-none bg-transparent p-0 font-[Roboto] text-[14px] font-medium text-[#0255AF] underline"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+        {optionsStatus === 'done' && options.categories.length === 0 && (
+          <p className="m-0 mb-8 font-[Roboto] text-[14px] text-[#817C7C]">No categories available.</p>
+        )}
+        {optionsStatus === 'done' && options.categories.length > 0 && (
+          <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4 lg:gap-6">
+            {options.categories.map((c) => {
+              const active = c.value === category;
+              return (
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => setCategory(c.value)}
+                  aria-pressed={active}
+                  className={`box-border h-[46px] cursor-pointer rounded-[10px] border border-[#818080] bg-gradient-to-r from-[#0255AF] to-[#04A5A5] px-4 font-[Roboto] text-[14px] text-white shadow-[0_4px_4px_rgba(0,0,0,0.25)] transition ${
+                    active ? 'ring-2 ring-[#021E79] ring-offset-2' : 'hover:brightness-110'
+                  }`}
+                >
+                  {c.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <div className="mb-8 grid gap-x-10 gap-y-6 lg:grid-cols-2">
           <div>
@@ -681,13 +752,18 @@ export default function CreateServiceRequest() {
             </span>
           </button>
 
-          <LocationTypeSelect value={serviceLocationType} onChange={setServiceLocationType} />
+          <LocationTypeSelect
+            options={options?.locationTypes ?? []}
+            value={serviceLocationType}
+            onChange={setServiceLocationType}
+          />
         </div>
 
         <h3 className={SECTION_HEADING}>Location</h3>
         <div className="mb-3">
           <LocationMap
             coords={coords}
+            fallbackCenter={options?.defaultMapCenter ?? null}
             status={locationStatus}
             radiusKm={searchRadiusKm}
             onPick={handlePickLocation}
@@ -703,14 +779,23 @@ export default function CreateServiceRequest() {
         >
           Update location
         </button>
-        <div className="mb-10">
-          <RadiusSlider value={searchRadiusKm} onChange={setSearchRadiusKm} />
-        </div>
+        {options?.radiusRange && searchRadiusKm != null ? (
+          <div className="mb-10">
+            <RadiusSlider
+              value={searchRadiusKm}
+              min={options.radiusRange.min}
+              max={options.radiusRange.max}
+              onChange={setSearchRadiusKm}
+            />
+          </div>
+        ) : (
+          <div className="mb-10" />
+        )}
 
         <button
           type="button"
           onClick={handleNext}
-          disabled={isSubmitting}
+          disabled={isSubmitting || optionsStatus !== 'done'}
           className="mx-auto box-border flex h-[46px] w-full max-w-[348px] cursor-pointer items-center justify-center rounded-lg border border-black/30 bg-gradient-to-r from-[#0255AF] to-[#04A5A5] font-[Quicksand] text-[16px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-70"
         >
           {isSubmitting ? 'Saving…' : 'Next'}
@@ -725,6 +810,7 @@ export default function CreateServiceRequest() {
       {isCalendarOpen && (
         <AppointmentModal
           initialDate={appointment?.date}
+          timeSlots={options?.timeSlots ?? []}
           onClose={() => setIsCalendarOpen(false)}
           onConfirm={handleConfirmAppointment}
         />

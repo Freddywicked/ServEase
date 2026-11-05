@@ -20,14 +20,24 @@ const rowTitle = (category, requestId) => {
 };
 
 // White card with a bold title (Figma: Pending Request / Active Repair / History).
-function DashboardCard({ title, emptyMessage, minHeightClass, hasItems, children }) {
+function DashboardCard({ title, emptyMessage, minHeightClass, hasItems, actionLabel, actionTo, children }) {
   return (
     <section
       className={`box-border flex w-full flex-col rounded-[14px] border border-[#C9C2C2] bg-white px-[21px] pb-[21px] pt-[11px] ${minHeightClass}`}
     >
-      <h2 className="m-0 font-[SF_Pro,system-ui,sans-serif] text-[20px] font-bold leading-[34px] text-[#414141]">
-        {title}
-      </h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="m-0 font-[SF_Pro,system-ui,sans-serif] text-[20px] font-bold leading-[34px] text-[#414141]">
+          {title}
+        </h2>
+        {actionTo && (
+          <Link
+            to={actionTo}
+            className="font-[SF_Pro,system-ui,sans-serif] text-[13px] font-medium leading-[34px] text-[#0255AF] no-underline hover:underline"
+          >
+            {actionLabel}
+          </Link>
+        )}
+      </div>
 
       {hasItems ? (
         <div className="mt-[16px] flex flex-col gap-[15px]">{children}</div>
@@ -169,6 +179,8 @@ export default function CustomerDashboard() {
               emptyMessage="No History"
               minHeightClass="min-h-[226px]"
               hasItems={history.length > 0}
+              actionLabel="View All"
+              actionTo="/customer/history"
             >
               {history.map((r) => (
                 <RequestRow key={r.id} title={r.title} summary={r.summary} />

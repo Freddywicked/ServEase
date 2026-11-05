@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
 import { clearDraftRequestId } from '../api/client';
 import bigEllipse from '../assets/icon_bigellipse.png';
@@ -7,27 +7,28 @@ import bigCheck from '../assets/icon_bigcheck.png';
 // Step progress: four 85px x 9px segments with a 4px gap (Figma). This screen is step 4 of 4 (all filled).
 function StepProgress({ activeStep, totalSteps = 4 }) {
   return (
-    <div className="mt-[10px] flex gap-1">
+    <div className="mt-[10px] flex w-full gap-3">
       {Array.from({ length: totalSteps }, (_, i) => (
         <div
           key={i}
-          className={`h-[9px] w-[85px] rounded-[10px] ${i < activeStep ? 'bg-[#0255AF]' : 'bg-[#D9D9D9]'}`}
+          className={`h-[9px] flex-1 rounded-[10px] ${i < activeStep ? 'bg-[#0255AF]' : 'bg-[#D9D9D9]'}`}
         />
       ))}
     </div>
   );
 }
 
-// ── HARD-CODED CONTENT: START ─────────────────────────────────────────────
-// Static copy shown on the confirmation screen. Once the backend is wired up, the
-// provider name / request reference could be shown here too (see TODO below).
-const CONFIRMATION_TITLE = 'Sent to the Service Provider!';
-const CONFIRMATION_MESSAGE =
-  "This service provider will review your request and send a pre-repair quotation. You'll be notified the moment it arrives.";
-// ── HARD-CODED CONTENT: END ───────────────────────────────────────────────
-
 export default function SubmitServiceRequest() {
   const navigate = useNavigate();
+
+  // Set by RecommendServiceProvider.jsx / ServiceProviderDetails.jsx right after the request was
+  // sent: { requestId, providers: [{ id, name }] } — the request and the providers it went to.
+  const { state } = useLocation();
+  const requestId = state?.requestId ?? null;
+  const providers = Array.isArray(state?.providers) ? state.providers : [];
+  const sentToMany = providers.length > 1;
+  const reference = requestId ? `#${String(requestId).replace(/^#/, '')}` : '';
+  const providerNames = providers.map((p) => p.name).filter(Boolean).join(', ');
 
   // The request was sent to the chosen provider(s) by RecommendServiceProvider.jsx
   // (submitServiceRequest(requestId, providerIds) -> POST /api/service-requests/:id/submit).
@@ -55,11 +56,19 @@ export default function SubmitServiceRequest() {
           </div>
 
           <h2 className="m-0 mt-[39px] font-[Roboto] text-[20px] font-bold leading-[23px] text-[#292727]">
-            {CONFIRMATION_TITLE}
+            {sentToMany ? 'Sent to the Service Providers!' : 'Sent to the Service Provider!'}
           </h2>
           <p className="m-0 mt-[31px] w-[300px] max-w-full font-[Roboto] text-[16px] font-normal leading-[19px] text-[#292727]">
-            {CONFIRMATION_MESSAGE}
+            {sentToMany ? 'These service providers' : 'This service provider'} will review your request and
+            send a pre-repair quotation. You&apos;ll be notified the moment it arrives.
           </p>
+          {(reference || providerNames) && (
+            <p className="m-0 mt-5 max-w-full font-[Roboto] text-[14px] leading-[19px] text-[#484040]">
+              {reference && <span className="font-bold">{reference}</span>}
+              {reference && providerNames && ' · '}
+              {providerNames}
+            </p>
+          )}
         </div>
 
         <div className="mt-12 flex justify-center pb-[38px] lg:mt-[239px]">

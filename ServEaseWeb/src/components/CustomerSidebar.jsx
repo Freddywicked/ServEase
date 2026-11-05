@@ -12,8 +12,6 @@ import gearIconWhite from '../assets/icon_search_white.png';
 import gearIconBlack from '../assets/icon_search.png';
 import requestIconWhite from '../assets/icon_tools_white.png';
 import requestIconBlack from '../assets/icon_tools.png';
-import historyIconWhite from '../assets/icon_history_white.png';
-import historyIconBlack from '../assets/icon_history.png';
 import hamburgerIcon from '../assets/icon_hamburger.png';
 import dropdownIcon from '../assets/icon_dropdown.png';
 import formIcon from '../assets/icon_form.png';
@@ -51,16 +49,22 @@ const CREATE_REQUEST_PATHS = [
 const isCreateRequestFlow = (pathname) =>
   CREATE_REQUEST_PATHS.some((path) => pathname.startsWith(path));
 
+// History is no longer a tab: it opens from "View All" on the Dashboard's History card, so the
+// Dashboard tab stays highlighted while the History screen is open.
+const HISTORY_PATH = '/customer/history';
+
 // Track Requests stays highlighted for everything under /customer/requests, including the
 // quotation page and the payment screen (/customer/requests/:requestId/payment).
 const isNavItemActive = (item, pathname) => {
   const inCreateFlow = isCreateRequestFlow(pathname);
-  if (item.to === '/customer/dashboard') return pathname.startsWith(item.to) || inCreateFlow;
+  if (item.to === '/customer/dashboard') {
+    return pathname.startsWith(item.to) || inCreateFlow || pathname.startsWith(HISTORY_PATH);
+  }
   if (item.to === '/customer/requests') return pathname.startsWith(item.to) && !inCreateFlow;
   return pathname.startsWith(item.to);
 };
 
-// Matches the Figma sidebar: Dashboard, Find Service Providers, Track Requests, History.
+// Matches the Figma sidebar: Dashboard, Find Service Providers, Track Requests.
 // Messages is not a tab: it is the floating message button (MessagingWidget) at the bottom-right.
 const NAV_ITEMS = [
   {
@@ -80,12 +84,6 @@ const NAV_ITEMS = [
     to: '/customer/requests',
     iconActive: requestIconWhite,
     iconInactive: requestIconBlack,
-  },
-  {
-    label: 'History',
-    to: '/customer/history',
-    iconActive: historyIconWhite,
-    iconInactive: historyIconBlack,
   },
 ];
 

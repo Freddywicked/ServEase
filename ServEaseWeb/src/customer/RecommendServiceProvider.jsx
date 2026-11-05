@@ -12,11 +12,11 @@ import {
 // Step progress: four 85px x 9px segments with a 4px gap (Figma). This screen is step 3 of 4.
 function StepProgress({ activeStep, totalSteps = 4 }) {
   return (
-    <div className="mt-[10px] flex gap-1">
+    <div className="mt-[10px] flex w-full gap-3">
       {Array.from({ length: totalSteps }, (_, i) => (
         <div
           key={i}
-          className={`h-[9px] w-[85px] rounded-[10px] ${i < activeStep ? 'bg-[#0255AF]' : 'bg-[#D9D9D9]'}`}
+          className={`h-[9px] flex-1 rounded-[10px] ${i < activeStep ? 'bg-[#0255AF]' : 'bg-[#D9D9D9]'}`}
         />
       ))}
     </div>
@@ -34,22 +34,30 @@ function CheckBadgeIcon({ size = 22 }) {
 }
 
 // Live data: GET /api/service-requests/:requestId/providers — verified providers,
-// those matching the draft request's category first (matchesCategory). Mapped here
-// onto the shape the cards below render.
+// those matching the draft request's category first (matchesCategory). Each provider carries
+// { id, name, photoUrl, specializations, rating, reviewCount, experience, locationName,
+//   distanceKm, availabilitySchedule, offersHomeServices, verified, available, recommended }.
+// Mapped here onto the shape the cards below render.
 const toProviderCard = (p) => ({
   id: p.id, // the provider's user id — this is what submitServiceRequest expects
   name: p.name,
-  category: (p.specializations || [])[0] || 'Service provider',
+  category: (p.specializations || [])[0] || '',
   // photoUrl is a private storage path unless the server signed it (starts with http)
   avatarUrl: typeof p.photoUrl === 'string' && p.photoUrl.startsWith('http') ? p.photoUrl : null,
-  verified: true, // the endpoint only returns verified providers
-  available: true,
+  verified: Boolean(p.verified),
+  available: Boolean(p.available),
   rating: p.rating ?? 'New',
   reviewCount: p.reviewCount ?? 0,
-  yearsExperience: p.experience ?? 0,
+  yearsExperience: p.experience ?? p.experienceYears ?? 0,
   specialities: (p.specializations || []).join(', '),
-  location: p.distanceKm != null ? `${Number(p.distanceKm).toFixed(1)} km away` : '',
-  availability: p.offersHomeServices ? 'Offers home services' : '',
+  location: [
+    p.locationName,
+    p.distanceKm != null ? `${Number(p.distanceKm).toFixed(1)} km away` : '',
+  ]
+    .filter(Boolean)
+    .join(' · '),
+  availability: p.availabilitySchedule || (p.offersHomeServices ? 'Offers home services' : ''),
+  recommended: Boolean(p.recommended),
   matchesCategory: Boolean(p.matchesCategory),
 });
 
@@ -75,9 +83,8 @@ export default function RecommendServiceProvider() {
         if (cancelled) return;
         const list = (data?.providers ?? []).map(toProviderCard);
         setProviders(list);
-        // In the design the top matches start selected (the backend already sorts
-        // category matches first, so the first two are the best fit).
-        setSelectedIds(new Set(list.slice(0, 2).map((p) => p.id)));
+        // The providers the backend recommends (recommended: true) start selected.
+        setSelectedIds(new Set(list.filter((p) => p.recommended).map((p) => p.id)));
         setStatus('done');
       })
       .catch(() => {
@@ -108,8 +115,14 @@ export default function RecommendServiceProvider() {
     setSubmitError('');
     try {
       await submitServiceRequest(requestId, [...selectedIds]);
+      // The confirmation screen shows which request went to which providers.
+      const sentTo = providers
+        .filter((p) => selectedIds.has(p.id))
+        .map((p) => ({ id: p.id, name: p.name }));
       clearDraftRequestId();
-      navigate('/customer/requests/new/request-submitted');
+      navigate('/customer/requests/new/request-submitted', {
+        state: { requestId, providers: sentTo },
+      });
     } catch (err) {
       setSubmitError(err.message || 'Could not submit the request. Please try again.');
       setSubmitting(false);
@@ -181,9 +194,11 @@ export default function RecommendServiceProvider() {
                   <p className="absolute left-[77px] top-[22px] m-0 text-[13px] font-bold leading-[16px]">
                     {provider.name}
                   </p>
-                  <p className="absolute left-[77px] top-[46px] m-0 text-[12px] leading-[14px]">
-                    {provider.category}
-                  </p>
+                  {provider.category && (
+                    <p className="absolute left-[77px] top-[46px] m-0 text-[12px] leading-[14px]">
+                      {provider.category}
+                    </p>
+                  )}
 
                   <div className="absolute right-[14px] top-[22px] flex gap-2">
                     {provider.verified && (

@@ -6,11 +6,11 @@ import { getDraftRequestId, skipAiDiagnosis } from '../api/client';
 // Same step progress visual as CreateServiceRequest.jsx — this screen is step 2 of 4.
 function StepProgress({ activeStep, totalSteps = 4 }) {
   return (
-    <div className="mb-6 flex gap-2">
+    <div className="mb-6 flex w-full gap-3">
       {Array.from({ length: totalSteps }, (_, i) => (
         <div
           key={i}
-          className={`h-[9px] flex-1 rounded-full ${i < activeStep ? 'bg-[#0255AF]' : 'bg-[#D9D9D9]'}`}
+          className={`h-[9px] flex-1 rounded-[10px] ${i < activeStep ? 'bg-[#0255AF]' : 'bg-[#D9D9D9]'}`}
         />
       ))}
     </div>

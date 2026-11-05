@@ -139,8 +139,20 @@ export const getProviderDocuments = (id, kind) => request(`/admin/users/${id}/do
 
 // --- Service requests: customer side (backend: /api/service-requests, see servicerequest_routes.js) ---
 
+// What the "Creating Service Request" form offers, so none of it is hard-coded in the screen:
+// -> {
+//      categories:       [{ value, label }],   // `value` is sent back as `category`
+//      locationTypes:    [{ value, label }],   // e.g. 'home' / 'shop', sent as `serviceLocationType`
+//      timeSlots:        ['10:00 AM', ...],    // appointment times offered
+//      searchRadius:     { minKm, maxKm, defaultKm },
+//      defaultMapCenter: { lat, lng },         // optional: where the map opens until the location resolves
+//    }
+// Register this route BEFORE '/:requestId' in servicerequest_routes.js (like '/active' and '/tracking').
+export const getServiceRequestOptions = () => request('/service-requests/options');
+
 // Step 1 of the create-request flow. `formData` is multipart: category, description,
-// photo?, appointmentDate? ("YYYY-MM-DD"), appointmentTime? ("10:00 AM"), latitude?, longitude?.
+// serviceLocationType?, photo?, appointmentDate? ("YYYY-MM-DD"), appointmentTime? ("10:00 AM"),
+// latitude?, longitude?, searchRadiusKm?.
 // Creates a draft (request_status 'New') -> { request: { id: "SR-0007", ... } }.
 export const createServiceRequest = (formData) =>
   request('/service-requests', { method: 'POST', body: formData });

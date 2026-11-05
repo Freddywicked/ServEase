@@ -12,11 +12,11 @@ import loadingIcon from '../assets/icon_loading.png';
 // Same step progress visual as the previous two screens — this screen is step 3 of 4.
 function StepProgress({ activeStep, totalSteps = 4 }) {
   return (
-    <div className="mb-6 flex gap-2">
+    <div className="mb-6 flex w-full gap-3">
       {Array.from({ length: totalSteps }, (_, i) => (
         <div
           key={i}
-          className={`h-[9px] flex-1 rounded-full ${i < activeStep ? 'bg-[#0255AF]' : 'bg-[#D9D9D9]'}`}
+          className={`h-[9px] flex-1 rounded-[10px] ${i < activeStep ? 'bg-[#0255AF]' : 'bg-[#D9D9D9]'}`}
         />
       ))}
     </div>
@@ -121,7 +121,7 @@ export default function AIResult() {
                 <div className="mb-1 h-2 w-full overflow-hidden rounded-full bg-[#E7E7E7]">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-[#0255AF] to-[#04A5A5]"
-                    style={{ width: `${diagnosis.confidencePercent}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, Number(diagnosis.confidencePercent) || 0))}%` }}
                   />
                 </div>
                 <p className="m-0 mb-4 text-right font-[Roboto] text-[12px] text-[#484040]">
@@ -132,7 +132,7 @@ export default function AIResult() {
                 </p>
 
                 <div className="flex flex-wrap gap-2">
-                  {diagnosis.relatedChecks.map((chip) => (
+                  {(diagnosis.relatedChecks ?? []).map((chip) => (
                     <span
                       key={chip}
                       className="rounded-full border border-[#DAD2D2] px-3 py-1 font-[Roboto] text-[12px] text-[#292727]"
@@ -148,7 +148,7 @@ export default function AIResult() {
                   Troubleshooting Suggestions
                 </p>
                 <div className="flex flex-col gap-3">
-                  {diagnosis.troubleshootingSuggestions.map((tip) => (
+                  {(diagnosis.troubleshootingSuggestions ?? []).map((tip) => (
                     <div key={tip.title} className="rounded-[10px] border border-[#EFEFEF] bg-[#FAFAFA] p-3">
                       <p className="m-0 font-[Roboto] text-[13px] font-bold text-[#292727]">{tip.title}</p>
                       <p className="m-0 font-[Roboto] text-[12px] text-[#817C7C]">{tip.description}</p>
