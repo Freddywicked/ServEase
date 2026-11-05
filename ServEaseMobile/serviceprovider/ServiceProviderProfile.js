@@ -1,522 +1,615 @@
-// ServEaseMobile/provider/ServiceProviderProfile.js
-//
-// Service provider "Profile" screen (Figma: Profile - Service Provider).
-// - Read-only view. Every Edit button opens the separate edit screen
-//   (EditServiceProviderProfile) with the section to open.
-// - Loads the signed-in provider's real profile from the backend
-//   (see api/providerProfile.js) and refreshes it whenever the screen is focused,
-//   so changes made on the edit screen show up right away.
-// - The bottom navbar (Home / Find / Track / Chat / Profile) is NOT rendered here;
-//   it stays in the shared static navbar, so this screen only leaves space for it.
-//
-// Icons use @expo/vector-icons. If the project uses react-native-vector-icons
-// instead, change the three import lines marked ICONS.
-
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Platform,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    useWindowDimensions,
+    View,
 } from 'react-native';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons'; // ICONS
-import {
-  clearSession,
-  fetchMyProviderProfile,
-  switchAccountMode,
-} from '../api/providerProfile';
-
-/* ------------------------------------------------------------------ */
-/* Theme (values taken from the Figma)                                 */
-/* ------------------------------------------------------------------ */
-const COLORS = {
-  title: '#021E79',
-  text: '#484040',
-  textStrong: '#000000',
-  cardTitle: '#292727',
-  border: '#818080',
-  buttonBorder: '#55575B',
-  star: '#FFDD03',
-  avatar: '#D9D9D9',
-  white: '#FFFFFF',
-};
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../context/auth_context';
+import { fetchMyProviderProfile } from '../api/providerProfile';
 
 const SIDE = 24; // horizontal screen padding
 const REVIEW_GAP = 10; // space between review cards
-const NAVBAR_SPACE = 120; // keeps the last row clear of the static bottom navbar
 
-/* ------------------------------------------------------------------ */
-/* Small building blocks                                               */
-/* ------------------------------------------------------------------ */
 const Stars = ({ count = 5, size = 11 }) => (
-  <View style={styles.starsRow} accessibilityLabel={`${count} out of 5 stars`}>
-    {Array.from({ length: 5 }).map((_, i) => (
-      <Ionicons
-        key={i}
-        name={i < count ? 'star' : 'star-outline'}
-        size={size}
-        color={COLORS.star}
-      />
-    ))}
-  </View>
+    <View style={styles.starsRow} accessibilityLabel={`${count} out of 5 stars`}>
+        {[1, 2, 3, 4, 5].map((n) => (
+            <Text key={n} style={[styles.star, { fontSize: size, lineHeight: size + 3 }]}>
+                {n <= count ? '★' : '☆'}
+            </Text>
+        ))}
+    </View>
 );
 
 const Chip = ({ label }) => (
-  <View style={styles.chip}>
-    <Text style={styles.chipText} numberOfLines={1}>
-      {label}
-    </Text>
-  </View>
+    <View style={styles.chip}>
+        <Text style={styles.chipText} numberOfLines={1}>{label}</Text>
+    </View>
 );
 
 const Field = ({ label, children, style }) => (
-  <View style={[styles.field, style]}>
-    <Text style={styles.fieldLabel}>{label}</Text>
-    {children}
-  </View>
+    <View style={[styles.field, style]}>
+        <Text style={styles.fieldLabel}>{label}</Text>
+        {children}
+    </View>
 );
 
 const EditButton = ({ onPress, label }) => (
-  <Pressable
-    onPress={onPress}
-    hitSlop={10}
-    style={({ pressed }) => [styles.editButton, pressed && styles.pressed]}
-    accessibilityRole="button"
-    accessibilityLabel={label}
-  >
-    <Text style={styles.editButtonText}>Edit</Text>
-  </Pressable>
+    <TouchableOpacity
+        style={styles.editButton}
+        onPress={onPress}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        accessibilityRole="button"
+        accessibilityLabel={label}
+    >
+        <Text style={styles.editButtonText}>Edit</Text>
+    </TouchableOpacity>
 );
 
 const ReviewCard = ({ review, width }) => (
-  <View style={[styles.reviewCard, { width }]}>
-    <Text style={styles.reviewName}>{review.reviewer}</Text>
-    <Stars count={review.rating} />
-    <Text style={styles.reviewService}>Service Availed: {review.service}</Text>
-    <Text style={styles.reviewComment} numberOfLines={2}>
-      {review.comment}
-    </Text>
-  </View>
+    <View style={[styles.reviewCard, { width }]}>
+        <Text style={styles.reviewName}>{review.reviewer}</Text>
+        <Stars count={review.rating} />
+        <Text style={styles.reviewService}>Service Availed: {review.service}</Text>
+        <Text style={styles.reviewComment} numberOfLines={2}>{review.comment}</Text>
+    </View>
 );
 
-/* ------------------------------------------------------------------ */
-/* Screen                                                              */
-/* ------------------------------------------------------------------ */
-export default function ServiceProviderProfile({ navigation }) {
-  const { width } = useWindowDimensions();
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+const ServiceProviderProfile = ({ navigation }) => {
+    const { width } = useWindowDimensions();
+    const { signOut } = useAuth();
 
-  const loadProfile = useCallback(async () => {
-    try {
-      setError(null);
-      setProfile(await fetchMyProviderProfile());
-    } catch (e) {
-      setError(e.message || 'Could not load your profile.');
-    } finally {
-      setLoading(false);
+    // The profile comes from the backend (api/providerProfile.js), never hard-coded.
+    const [profile, setProfile] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    const loadProfile = useCallback(async () => {
+        try {
+            setError(null);
+            setProfile(await fetchMyProviderProfile());
+        } catch (e) {
+            setError(e.message || 'Could not load your profile.');
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        loadProfile();
+        // refresh when coming back from the edit screen
+        const unsubscribe = navigation.addListener('focus', loadProfile);
+        return unsubscribe;
+    }, [loadProfile, navigation]);
+
+    const reviewCardWidth = width - SIDE * 2;
+
+    const goToEdit = (section) => {
+        // section: 'photo' | 'account' | 'other'
+        navigation.navigate('EditServiceProviderProfile', { section, profile });
+    };
+
+    const handleSwitchToCustomer = () => {
+        // ---------------------------------------------------------------------
+        // BACKEND-READY: persist the user's active mode as "customer" so the
+        // account opens in Customer mode on future logins too. A single account
+        // holds both roles, so this only flips which side of the app is shown.
+        // ---------------------------------------------------------------------
+        navigation.reset({
+            index: 0,
+            routes: [{ name: 'CustomerDashboard' }],
+        });
+    };
+
+    const handleLogout = () => {
+        Alert.alert('Log out', 'Are you sure you want to log out?', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Log out',
+                style: 'destructive',
+                onPress: async () => {
+                    // signOut() clears the persisted token and resets user/provider
+                    await signOut();
+                    navigation.reset({
+                        index: 0,
+                        routes: [{ name: 'LoginScreen' }],
+                    });
+                },
+            },
+        ]);
+    };
+
+    if (loading) {
+        return (
+            <SafeAreaView style={[styles.safeArea, styles.center]} edges={['top', 'left', 'right']}>
+                <ActivityIndicator size="large" color="#021E79" />
+            </SafeAreaView>
+        );
     }
-  }, []);
 
-  useEffect(() => {
-    loadProfile();
-    // refresh when coming back from the edit screen
-    const unsubscribe = navigation?.addListener?.('focus', loadProfile);
-    return unsubscribe;
-  }, [loadProfile, navigation]);
-
-  const reviewCardWidth = width - SIDE * 2;
-
-  const goToEdit = (section) => {
-    // section: 'photo' | 'account' | 'other'
-    navigation?.navigate?.('EditServiceProviderProfile', { section, profile });
-  };
-
-  const handleSwitchToCustomer = async () => {
-    try {
-      await switchAccountMode('customer');
-      navigation?.reset?.({ index: 0, routes: [{ name: 'CustomerDashboard' }] });
-    } catch (e) {
-      Alert.alert('Could not switch account', e.message || 'Please try again.');
+    if (error || !profile) {
+        return (
+            <SafeAreaView style={[styles.safeArea, styles.center]} edges={['top', 'left', 'right']}>
+                <Text style={styles.errorTitle}>Could not load your profile</Text>
+                <Text style={styles.errorText}>{error || 'Please try again.'}</Text>
+                <TouchableOpacity
+                    style={styles.retryButton}
+                    onPress={() => {
+                        setLoading(true);
+                        loadProfile();
+                    }}
+                    accessibilityRole="button"
+                >
+                    <Text style={styles.retryText}>Try again</Text>
+                </TouchableOpacity>
+            </SafeAreaView>
+        );
     }
-  };
 
-  const handleLogout = () => {
-    Alert.alert('Log out', 'Are you sure you want to log out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Log out',
-        style: 'destructive',
-        onPress: async () => {
-          await clearSession();
-          navigation?.reset?.({ index: 0, routes: [{ name: 'LoginScreen' }] });
-        },
-      },
-    ]);
-  };
+    const { aiSummary, account, other } = profile;
+    const reviewLabel = profile.reviewCount === 1 ? 'review' : 'reviews';
 
-  if (loading) {
     return (
-      <SafeAreaView style={[styles.safe, styles.center]}>
-        <ActivityIndicator size="large" color={COLORS.title} />
-      </SafeAreaView>
-    );
-  }
-
-  if (error || !profile) {
-    return (
-      <SafeAreaView style={[styles.safe, styles.center]}>
-        <Text style={styles.errorTitle}>Could not load your profile</Text>
-        <Text style={styles.errorText}>{error || 'Please try again.'}</Text>
-        <Pressable
-          onPress={() => {
-            setLoading(true);
-            loadProfile();
-          }}
-          style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
-          accessibilityRole="button"
-        >
-          <Text style={styles.retryText}>Try again</Text>
-        </Pressable>
-      </SafeAreaView>
-    );
-  }
-
-  return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Title */}
-        <Text style={styles.screenTitle} accessibilityRole="header">
-          Profile
-        </Text>
-
-        {/* Header: avatar + name */}
-        <View style={styles.headerRow}>
-          <View style={styles.avatarWrap}>
-            {profile.photoUrl ? (
-              <Image source={{ uri: profile.photoUrl }} style={styles.avatar} />
-            ) : (
-              <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                <Ionicons name="person" size={34} color={COLORS.white} />
-              </View>
-            )}
-            <Pressable
-              onPress={() => goToEdit('photo')}
-              hitSlop={10}
-              style={({ pressed }) => [styles.avatarEdit, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="Change profile photo"
+        <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+            <ScrollView
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}
             >
-              <Ionicons name="create-outline" size={14} color="#1E1E1E" />
-            </Pressable>
-          </View>
+                <Text style={styles.headerTitle}>Profile</Text>
 
-          <View style={styles.headerText}>
-            <Text style={styles.name} numberOfLines={1}>
-              {profile.fullName || '—'}
-            </Text>
-            <Text style={styles.specialty} numberOfLines={1}>
-              {profile.specialty || '—'}
-            </Text>
-            {profile.yearsExperience != null && (
-              <Text style={styles.experience}>
-                {profile.yearsExperience} {Number(profile.yearsExperience) === 1 ? 'year' : 'years'} experience
-              </Text>
-            )}
-          </View>
-        </View>
+                {/* Header: avatar + name */}
+                <View style={styles.headerRow}>
+                    <View style={styles.avatarWrap}>
+                        <Image
+                            source={
+                                profile.photoUrl
+                                    ? { uri: profile.photoUrl }
+                                    : require('../assets/icon_profile_photo.png')
+                            }
+                            style={styles.avatar}
+                        />
+                        <TouchableOpacity
+                            style={styles.avatarEdit}
+                            onPress={() => goToEdit('photo')}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            accessibilityRole="button"
+                            accessibilityLabel="Change profile photo"
+                        >
+                            <Image
+                                source={require('../assets/icon_edit_profile.png')}
+                                style={styles.avatarEditIcon}
+                            />
+                        </TouchableOpacity>
+                    </View>
 
-        {/* AI Summary Insights */}
-        {profile.aiSummary.positiveFeedbackPercent != null && (
-        <View style={styles.insights}>
-          <Text style={styles.insightsTitle}>AI Summary Insights</Text>
-          <View style={styles.insightsRow}>
-            <Text style={styles.insightsFeedback}>
-              {profile.aiSummary.positiveFeedbackPercent}% Positive Feedback
-            </Text>
-            <View style={styles.chipsRow}>
-              {profile.aiSummary.tags.map((tag) => (
-                <Chip key={tag} label={tag} />
-              ))}
-            </View>
-          </View>
-        </View>
-        )}
+                    <View style={styles.headerText}>
+                        <Text style={styles.name} numberOfLines={1}>{profile.fullName || '—'}</Text>
+                        <Text style={styles.specialty} numberOfLines={1}>{profile.specialty || '—'}</Text>
+                        {profile.yearsExperience != null && (
+                            <Text style={styles.experience}>
+                                {profile.yearsExperience} {Number(profile.yearsExperience) === 1 ? 'year' : 'years'} experience
+                            </Text>
+                        )}
+                    </View>
+                </View>
 
-        {/* Rating summary */}
-        <View style={styles.ratingRow}>
-          <Ionicons name="star" size={21} color={COLORS.star} />
-          <Text style={styles.ratingValue}>{profile.rating != null ? Number(profile.rating).toFixed(1) : '—'}</Text>
-          <Text style={styles.ratingCount}>{profile.reviewCount} {profile.reviewCount === 1 ? 'review' : 'reviews'}</Text>
-        </View>
+                {/* AI Summary Insights (only when the backend provides one) */}
+                {aiSummary.positiveFeedbackPercent != null && (
+                    <View style={styles.insights}>
+                        <Text style={styles.insightsTitle}>AI Summary Insights</Text>
+                        <View style={styles.insightsRow}>
+                            <Text style={styles.insightsFeedback}>
+                                {aiSummary.positiveFeedbackPercent}% Positive Feedback
+                            </Text>
+                            <View style={styles.chipsRow}>
+                                {aiSummary.tags.map((tag) => (
+                                    <Chip key={tag} label={tag} />
+                                ))}
+                            </View>
+                        </View>
+                    </View>
+                )}
 
-        {/* Reviews (swipe sideways; the next card peeks in) */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          snapToInterval={reviewCardWidth + REVIEW_GAP}
-          decelerationRate="fast"
-          style={styles.reviewsScroll}
-          contentContainerStyle={styles.reviewsContent}
-        >
-          {profile.reviews.length > 0 ? (
-            profile.reviews.map((review) => (
-              <ReviewCard key={review.id} review={review} width={reviewCardWidth} />
-            ))
-          ) : (
-            <View style={[styles.reviewCard, styles.reviewEmpty, { width: reviewCardWidth }]}>
-              <Text style={styles.reviewComment}>
-                No reviews yet. Completed jobs will show customer reviews here.
-              </Text>
-            </View>
-          )}
-        </ScrollView>
+                {/* Rating summary */}
+                <View style={styles.ratingRow}>
+                    <Text style={styles.ratingStar}>★</Text>
+                    <Text style={styles.ratingText}>
+                        {profile.rating != null ? Number(profile.rating).toFixed(1) : '—'}
+                    </Text>
+                    <Text style={styles.ratingText}>{profile.reviewCount} {reviewLabel}</Text>
+                </View>
 
-        {/* Account Details */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Account Details</Text>
-          <View style={styles.accountRow}>
-            <Field label="Email Address" style={styles.accountEmail}>
-              <Text style={styles.fieldValue} numberOfLines={1}>
-                {profile.account.email || '—'}
-              </Text>
-            </Field>
-            <Field label="Address" style={styles.accountAddress}>
-              <Text style={styles.fieldValue} numberOfLines={1}>
-                {profile.account.address || '—'}
-              </Text>
-            </Field>
-            <EditButton onPress={() => goToEdit('account')} label="Edit account details" />
-          </View>
-        </View>
+                {/* Reviews (swipe sideways; the next card peeks in) */}
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    snapToInterval={reviewCardWidth + REVIEW_GAP}
+                    decelerationRate="fast"
+                    style={styles.reviewsScroll}
+                    contentContainerStyle={styles.reviewsContent}
+                >
+                    {profile.reviews.length > 0 ? (
+                        profile.reviews.map((review) => (
+                            <ReviewCard key={review.id} review={review} width={reviewCardWidth} />
+                        ))
+                    ) : (
+                        <View style={[styles.reviewCard, styles.reviewEmpty, { width: reviewCardWidth }]}>
+                            <Text style={styles.reviewComment}>
+                                No reviews yet. Completed jobs will show customer reviews here.
+                            </Text>
+                        </View>
+                    )}
+                </ScrollView>
 
-        {/* Other Details */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Other Details</Text>
-          <View style={styles.otherRow}>
-            <Field label="Availability" style={styles.otherCol}>
-              <Text style={styles.fieldValue}>{profile.other.availabilityDays || '—'}</Text>
-              <Text style={styles.fieldValue}>{profile.other.availabilityHours || '—'}</Text>
-            </Field>
-            <Field label="Company Address" style={styles.otherCol}>
-              <Text style={styles.fieldValue}>{profile.other.companyAddress || '—'}</Text>
-            </Field>
-            <Field label="Company Name" style={styles.otherCol}>
-              <Text style={styles.fieldValue}>{profile.other.companyName || '—'}</Text>
-            </Field>
-          </View>
-          <View style={styles.otherEditWrap}>
-            <EditButton onPress={() => goToEdit('other')} label="Edit other details" />
-          </View>
-        </View>
+                {/* Account Details */}
+                <View style={styles.card}>
+                    <Text style={styles.cardTitle}>Account Details</Text>
+                    <View style={styles.accountRow}>
+                        <Field label="Email Address" style={styles.accountColumn}>
+                            <Text style={styles.fieldValue} numberOfLines={1}>{account.email || '—'}</Text>
+                        </Field>
+                        <Field label="Address" style={styles.accountColumn}>
+                            <Text style={styles.fieldValue} numberOfLines={1}>{account.address || '—'}</Text>
+                        </Field>
+                        <EditButton onPress={() => goToEdit('account')} label="Edit account details" />
+                    </View>
+                </View>
 
-        {/* Switch account / Log out */}
-        <Pressable
-          onPress={handleSwitchToCustomer}
-          style={({ pressed }) => [styles.actionRow, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Switch to customer"
-        >
-          <MaterialCommunityIcons name="account-switch" size={26} color="#1E1E1E" />
-          <Text style={styles.actionText}>Switch to Customer</Text>
-        </Pressable>
+                {/* Other Details */}
+                <View style={styles.card}>
+                    <Text style={styles.cardTitle}>Other Details</Text>
+                    <View style={styles.otherRow}>
+                        <Field label="Availability" style={styles.otherColumn}>
+                            <Text style={styles.fieldValue}>{other.availabilityDays || '—'}</Text>
+                            {other.availabilityHours ? (
+                                <Text style={styles.fieldValue}>{other.availabilityHours}</Text>
+                            ) : null}
+                        </Field>
+                        <Field label="Company Address" style={styles.otherColumn}>
+                            <Text style={styles.fieldValue}>{other.companyAddress || '—'}</Text>
+                        </Field>
+                        <Field label="Company Name" style={styles.otherColumn}>
+                            <Text style={styles.fieldValue}>{other.companyName || '—'}</Text>
+                        </Field>
+                    </View>
+                    <View style={styles.otherEditWrap}>
+                        <EditButton onPress={() => goToEdit('other')} label="Edit other details" />
+                    </View>
+                </View>
 
-        <Pressable
-          onPress={handleLogout}
-          style={({ pressed }) => [styles.actionRow, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Log out"
-        >
-          <Ionicons name="log-out-outline" size={27} color="#1E1E1E" />
-          <Text style={styles.actionText}>Log out</Text>
-        </Pressable>
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
+                {/* Switch account / Log out */}
+                <View style={styles.menuList}>
+                    <TouchableOpacity style={styles.menuItem} onPress={handleSwitchToCustomer}>
+                        <Image source={require('../assets/icon_switch_account.png')} style={styles.menuIcon} />
+                        <Text style={styles.menuLabel}>Switch to Customer</Text>
+                    </TouchableOpacity>
 
-/* ------------------------------------------------------------------ */
-/* Styles                              */
-/* ------------------------------------------------------------------ */
+                    <TouchableOpacity style={styles.menuItem} onPress={handleLogout}>
+                        <Image source={require('../assets/icon_exit.png')} style={styles.menuIcon} />
+                        <Text style={styles.menuLabel}>Log out</Text>
+                    </TouchableOpacity>
+                </View>
+            </ScrollView>
+        </SafeAreaView>
+    );
+};
+
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: COLORS.white,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0,
-  },
-  content: {
-    paddingHorizontal: SIDE,
-    paddingTop: 44,
-    paddingBottom: NAVBAR_SPACE,
-  },
-  pressed: { opacity: 0.6 },
-  center: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: SIDE },
-  errorTitle: { fontSize: 16, lineHeight: 19, fontWeight: '700', color: COLORS.text },
-  errorText: { fontSize: 12, lineHeight: 16, color: COLORS.text, textAlign: 'center', marginTop: 6 },
-  retryButton: {
-    marginTop: 16,
-    height: 32,
-    paddingHorizontal: 20,
-    borderWidth: 1,
-    borderColor: COLORS.buttonBorder,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  retryText: { fontSize: 12, fontWeight: '700', color: COLORS.textStrong },
+    safeArea: {
+        flex: 1,
+        backgroundColor: '#FFFFFF',
+    },
+    center: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: SIDE,
+    },
+    scrollContent: {
+        paddingHorizontal: SIDE,
+        paddingTop: 16,
+        paddingBottom: 24,
+    },
+    headerTitle: {
+        fontSize: 24,
+        lineHeight: 28,
+        fontWeight: '700',
+        color: '#021E79',
+        marginBottom: 28,
+    },
 
-  /* Title */
-  screenTitle: {
-    fontSize: 24,
-    lineHeight: 28,
-    fontWeight: '700',
-    color: COLORS.title,
-    marginBottom: 35,
-  },
+    // Error state
+    errorTitle: {
+        fontSize: 16,
+        lineHeight: 19,
+        fontWeight: '700',
+        color: '#484040',
+    },
+    errorText: {
+        fontSize: 12,
+        lineHeight: 16,
+        color: '#484040',
+        textAlign: 'center',
+        marginTop: 6,
+    },
+    retryButton: {
+        marginTop: 16,
+        height: 32,
+        paddingHorizontal: 20,
+        borderWidth: 1,
+        borderColor: '#55575B',
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    retryText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#000000',
+    },
 
-  /* Header */
-  headerRow: { flexDirection: 'row', alignItems: 'center' },
-  avatarWrap: { width: 71, height: 71 },
-  avatar: { width: 71, height: 71, borderRadius: 36 },
-  avatarPlaceholder: {
-    backgroundColor: COLORS.avatar,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarEdit: {
-    position: 'absolute',
-    right: -2,
-    bottom: -2,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerText: { flex: 1, marginLeft: 12 },
-  name: { fontSize: 16, lineHeight: 19, fontWeight: '700', color: COLORS.text },
-  specialty: {
-    fontSize: 12,
-    lineHeight: 14,
-    fontStyle: 'italic',
-    color: COLORS.text,
-    marginTop: 4,
-  },
-  experience: { fontSize: 12, lineHeight: 14, color: COLORS.text, marginTop: 4 },
+    // Header
+    headerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    avatarWrap: {
+        width: 71,
+        height: 71,
+    },
+    avatar: {
+        width: 71,
+        height: 71,
+        borderRadius: 36,
+        backgroundColor: '#D9D9D9',
+    },
+    avatarEdit: {
+        position: 'absolute',
+        right: -2,
+        bottom: -2,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    avatarEditIcon: {
+        width: 14,
+        height: 14,
+        resizeMode: 'contain',
+    },
+    headerText: {
+        flex: 1,
+        marginLeft: 12,
+    },
+    name: {
+        fontSize: 16,
+        lineHeight: 19,
+        fontWeight: '700',
+        color: '#484040',
+    },
+    specialty: {
+        fontSize: 12,
+        lineHeight: 14,
+        fontStyle: 'italic',
+        color: '#484040',
+        marginTop: 4,
+    },
+    experience: {
+        fontSize: 12,
+        lineHeight: 14,
+        color: '#484040',
+        marginTop: 4,
+    },
 
-  /* AI Summary Insights */
-  insights: { marginTop: 14, paddingHorizontal: 12 },
-  insightsTitle: { fontSize: 12, lineHeight: 14, fontWeight: '700', color: COLORS.text },
-  insightsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    columnGap: 8,
-    rowGap: 6,
-    marginTop: 4,
-  },
-  insightsFeedback: { fontSize: 12, lineHeight: 14, color: COLORS.text },
-  chipsRow: { flexDirection: 'row', columnGap: 4 },
-  chip: {
-    minWidth: 98,
-    height: 21,
-    paddingHorizontal: 8,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 10,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  chipText: { fontSize: 9, lineHeight: 11, textAlign: 'center', color: COLORS.text },
+    // AI Summary Insights
+    insights: {
+        marginTop: 14,
+        paddingHorizontal: 12,
+    },
+    insightsTitle: {
+        fontSize: 12,
+        lineHeight: 14,
+        fontWeight: '700',
+        color: '#484040',
+    },
+    insightsRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginTop: 4,
+    },
+    insightsFeedback: {
+        fontSize: 12,
+        lineHeight: 14,
+        color: '#484040',
+        marginRight: 8,
+        marginBottom: 6,
+    },
+    chipsRow: {
+        flexDirection: 'row',
+        marginBottom: 6,
+    },
+    chip: {
+        minWidth: 98,
+        height: 21,
+        paddingHorizontal: 8,
+        marginLeft: 4,
+        borderWidth: 1,
+        borderColor: '#818080',
+        borderRadius: 10,
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    chipText: {
+        fontSize: 9,
+        lineHeight: 11,
+        textAlign: 'center',
+        color: '#484040',
+    },
 
-  /* Rating summary */
-  ratingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 14,
-    paddingLeft: 4,
-    columnGap: 6,
-  },
-  ratingValue: { fontSize: 12, lineHeight: 14, color: COLORS.text },
-  ratingCount: { fontSize: 12, lineHeight: 14, color: COLORS.text },
+    // Rating summary
+    ratingRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 8,
+        paddingLeft: 4,
+    },
+    ratingStar: {
+        fontSize: 24,
+        lineHeight: 28,
+        color: '#FFDD03',
+        marginRight: 6,
+    },
+    ratingText: {
+        fontSize: 12,
+        lineHeight: 14,
+        color: '#484040',
+        marginRight: 12,
+    },
 
-  /* Reviews */
-  starsRow: { flexDirection: 'row', columnGap: 0, marginTop: 1 },
-  reviewsScroll: { marginTop: 7, marginHorizontal: -SIDE, flexGrow: 0 },
-  reviewsContent: { paddingHorizontal: SIDE, columnGap: REVIEW_GAP },
-  reviewCard: {
-    minHeight: 83,
-    paddingHorizontal: 11,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 10,
-    backgroundColor: COLORS.white,
-  },
-  reviewEmpty: { justifyContent: 'center' },
-  reviewName: { fontSize: 11, lineHeight: 13, color: COLORS.text },
-  reviewService: { fontSize: 9, lineHeight: 11, color: COLORS.text, marginTop: 3 },
-  reviewComment: { fontSize: 8, lineHeight: 10, color: COLORS.text, marginTop: 3 },
+    // Reviews
+    starsRow: {
+        flexDirection: 'row',
+        marginTop: 1,
+    },
+    star: {
+        color: '#FFDD03',
+    },
+    reviewsScroll: {
+        marginTop: 7,
+        marginHorizontal: -SIDE,
+        flexGrow: 0,
+    },
+    reviewsContent: {
+        paddingHorizontal: SIDE,
+    },
+    reviewCard: {
+        minHeight: 83,
+        marginRight: REVIEW_GAP,
+        paddingHorizontal: 11,
+        paddingVertical: 10,
+        borderWidth: 1,
+        borderColor: '#818080',
+        borderRadius: 10,
+        backgroundColor: '#FFFFFF',
+    },
+    reviewEmpty: {
+        justifyContent: 'center',
+    },
+    reviewName: {
+        fontSize: 11,
+        lineHeight: 13,
+        color: '#484040',
+    },
+    reviewService: {
+        fontSize: 9,
+        lineHeight: 11,
+        color: '#484040',
+        marginTop: 3,
+    },
+    reviewComment: {
+        fontSize: 8,
+        lineHeight: 10,
+        color: '#484040',
+        marginTop: 3,
+    },
 
-  /* Cards */
-  card: {
-    marginTop: 10,
-    paddingHorizontal: 13,
-    paddingTop: 12,
-    paddingBottom: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 10,
-    backgroundColor: COLORS.white,
-  },
-  cardTitle: { fontSize: 11, lineHeight: 14, fontWeight: '700', color: COLORS.cardTitle },
-  field: { marginTop: 10 },
-  fieldLabel: { fontSize: 9, lineHeight: 15, color: COLORS.text },
-  fieldValue: { fontSize: 9, lineHeight: 15, fontWeight: '700', color: COLORS.textStrong },
+    // Detail cards
+    card: {
+        marginTop: 10,
+        paddingHorizontal: 13,
+        paddingTop: 12,
+        paddingBottom: 10,
+        borderWidth: 1,
+        borderColor: '#818080',
+        borderRadius: 10,
+        backgroundColor: '#FFFFFF',
+    },
+    cardTitle: {
+        fontSize: 11,
+        lineHeight: 14,
+        fontWeight: '700',
+        color: '#292727',
+    },
+    field: {
+        marginTop: 10,
+    },
+    fieldLabel: {
+        fontSize: 9,
+        lineHeight: 15,
+        color: '#484040',
+    },
+    fieldValue: {
+        fontSize: 9,
+        lineHeight: 15,
+        fontWeight: '700',
+        color: '#000000',
+    },
+    accountRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+    },
+    accountColumn: {
+        flex: 1,
+        marginRight: 8,
+    },
+    otherRow: {
+        flexDirection: 'row',
+    },
+    otherColumn: {
+        flex: 1,
+        marginRight: 8,
+    },
+    otherEditWrap: {
+        alignItems: 'flex-end',
+        marginTop: 4,
+    },
+    editButton: {
+        width: 52,
+        height: 24,
+        borderWidth: 1,
+        borderColor: '#55575B',
+        borderRadius: 10,
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    editButtonText: {
+        fontSize: 9,
+        fontWeight: '700',
+        color: '#000000',
+    },
 
-  accountRow: { flexDirection: 'row', alignItems: 'flex-end', columnGap: 8 },
-  accountEmail: { flex: 1 },
-  accountAddress: { flex: 1 },
-
-  otherRow: { flexDirection: 'row', columnGap: 8 },
-  otherCol: { flex: 1 },
-  otherEditWrap: { alignItems: 'flex-end', marginTop: 4 },
-
-  editButton: {
-    width: 52,
-    height: 24,
-    borderWidth: 1,
-    borderColor: COLORS.buttonBorder,
-    borderRadius: 10,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  editButtonText: { fontSize: 9, fontWeight: '700', color: COLORS.textStrong },
-
-  /* Switch account / Log out */
-  actionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    columnGap: 12,
-    minHeight: 27,
-    marginTop: 14,
-    paddingLeft: 6,
-  },
-  actionText: { fontSize: 13, lineHeight: 16, color: COLORS.text },
+    // Switch account / Log out (same look as CustomerProfile)
+    menuList: {
+        marginTop: 12,
+        paddingLeft: 12,
+    },
+    menuItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 10,
+    },
+    menuIcon: {
+        width: 27,
+        height: 27,
+        resizeMode: 'contain',
+        marginRight: 12,
+    },
+    menuLabel: {
+        fontSize: 13,
+        lineHeight: 16,
+        color: '#484040',
+    },
 });
+
+export default ServiceProviderProfile;
