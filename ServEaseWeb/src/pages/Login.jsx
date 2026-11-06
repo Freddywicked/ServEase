@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { GoogleLogin } from '@react-oauth/google';
+import { useGoogleLogin } from '@react-oauth/google';
 import logo from '../assets/servease_logo.png';
 import eyeIcon from '../assets/icon_eye.png';
 import { login, loginWithGoogle } from '../api/client';
@@ -8,6 +8,18 @@ import { useAuth } from '../context/auth_context';
 
 const CARD_WIDTH = 659;
 const CARD_HEIGHT = 737;
+
+// The multicolor Google "G" mark, shown in a white chip on the gradient button.
+function GoogleGLogo({ size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
+      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+    </svg>
+  );
+}
 
 const styles = {
   page: {
@@ -185,18 +197,40 @@ const styles = {
     lineHeight: '14px',
     color: '#A6A6A6',
   },
-  // Slot for the official Google button (it renders its own styled iframe button,
-  // per Google's branding rules — a custom-styled button can't produce ID tokens).
-  googleSlot: {
+  // Custom Google button: same gradient, size and width as the Sign in button, with
+  // the Google "G" in a white chip. It triggers useGoogleLogin (popup flow), which
+  // returns an access token the backend verifies — so we are free to style it.
+  googleBtn: {
     position: 'absolute',
     top: 581,
-    left: '50%',
-    transform: 'translateX(-50%)',
+    left: '6.525%',
+    right: '6.525%',
+    boxSizing: 'border-box',
     display: 'flex',
+    alignItems: 'center',
     justifyContent: 'center',
-    maxWidth: 'calc(100% - 86px)',
-    overflow: 'hidden',
+    gap: 12,
+    height: 46,
+    border: '1px solid rgba(0, 0, 0, 0.3)',
     borderRadius: 8,
+    backgroundImage: 'linear-gradient(90deg, #0255AF 0%, #04A5A5 100%)',
+    color: '#FFFFFF',
+    fontFamily: "'Quicksand', sans-serif",
+    fontWeight: 700,
+    fontSize: 16,
+    lineHeight: '23px',
+    cursor: 'pointer',
+    transition: 'filter 150ms ease, transform 150ms ease',
+  },
+  googleChip: {
+    flex: 'none',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: '#FFFFFF',
   },
   footerText: {
     position: 'absolute',
@@ -255,12 +289,12 @@ export default function Login() {
     }
   };
 
-  // credentialResponse.credential is Google's ID token (JWT) — the backend
-  // verifies it (POST /api/auth/google) and returns our own session token.
-  const handleGoogleSuccess = async (credentialResponse) => {
+  // tokenResponse.access_token is Google's access token (implicit popup flow) — the
+  // backend verifies it (POST /api/auth/google) and returns our own session token.
+  const handleGoogleSuccess = async (tokenResponse) => {
     setError('');
     try {
-      const { user, provider, needsPhone } = await loginWithGoogle(credentialResponse.credential);
+      const { user, provider, needsPhone } = await loginWithGoogle(tokenResponse.access_token);
       setUser(user);
       // Brand-new Google accounts still need a verified phone number (BR-01).
       if (needsPhone) {
@@ -276,6 +310,13 @@ export default function Login() {
   const handleGoogleError = () => {
     setError('Google sign-in was cancelled or failed. Please try again.');
   };
+
+  // The custom gradient button starts the same Google sign-in the official button
+  // did, but as a popup we fully control the look of.
+  const startGoogleLogin = useGoogleLogin({
+    onSuccess: handleGoogleSuccess,
+    onError: handleGoogleError,
+  });
 
   return (
     <div className="servease-login-page" style={styles.page}>
@@ -357,15 +398,17 @@ export default function Login() {
             <hr style={{ ...styles.dividerLine, ...styles.dividerLineRight }} />
           </div>
 
-          <div style={styles.googleSlot}>
-            <GoogleLogin
-              onSuccess={handleGoogleSuccess}
-              onError={handleGoogleError}
-              text="continue_with"
-              shape="rectangular"
-              width="233"
-            />
-          </div>
+          <button
+            type="button"
+            className="servease-google-btn"
+            style={styles.googleBtn}
+            onClick={() => startGoogleLogin()}
+          >
+            <span style={styles.googleChip}>
+              <GoogleGLogo />
+            </span>
+            Continue with Google
+          </button>
 
           <p style={styles.footerText}>
             Don&apos;t have an account?{' '}

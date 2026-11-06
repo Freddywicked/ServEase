@@ -109,24 +109,49 @@ const me = asyncHandler(async (req, res) => {
   });
 });
 
-// Sign in (or sign up) with Google. The client (web button / native SDK) sends the
-// Google ID token; we verify it against our own client IDs, then find-or-create the
-// user and return the SAME response shape as /login, so both apps reuse their
-// existing session handling.
+// Sign in (or sign up) with Google. Two token kinds are accepted, so both apps can
+// use their natural SDK flow while sharing this endpoint:
+//   - id_token     (mobile): @react-native-google-signin hands us Google's ID token,
+//                  verified with verifyIdToken against our own client IDs.
+//   - access_token (web): the custom gradient button on Login.jsx uses useGoogleLogin
+//                  (implicit popup flow), which returns an access token instead. We
+//                  verify its audience via tokeninfo, then read sub/email/name from
+//                  Google's userinfo endpoint.
+// Either way we find-or-create the user and return the SAME response shape as
+// /login, so both apps reuse their existing session handling.
 const googleLogin = asyncHandler(async (req, res) => {
   if (!config.google.clientIds.length) {
     throw new ApiError(500, 'Google sign-in is not configured on the server');
   }
   const idToken = String(req.body.id_token || '').trim();
-  if (!idToken) throw new ApiError(400, 'id_token is required');
+  const accessToken = String(req.body.access_token || '').trim();
+  if (!idToken && !accessToken) throw new ApiError(400, 'id_token or access_token is required');
 
   let payload;
   try {
-    const ticket = await googleClient.verifyIdToken({
-      idToken,
-      audience: config.google.clientIds, // only tokens issued for OUR app pass
-    });
-    payload = ticket.getPayload();
+    if (idToken) {
+      const ticket = await googleClient.verifyIdToken({
+        idToken,
+        audience: config.google.clientIds, // only tokens issued for OUR app pass
+      });
+      payload = ticket.getPayload();
+    } else {
+      // tokeninfo proves the access token was issued for OUR client (audience check);
+      // userinfo (called WITH the token, so it can't be forged) gives the profile.
+      const info = await googleClient.getTokenInfo(accessToken);
+      if (!config.google.clientIds.includes(info.aud)) throw new Error('unexpected audience');
+      const profileClient = new OAuth2Client();
+      profileClient.setCredentials({ access_token: accessToken });
+      const { data } = await profileClient.request({
+        url: 'https://www.googleapis.com/oauth2/v3/userinfo',
+      });
+      payload = {
+        sub: data.sub,
+        email: data.email,
+        email_verified: data.email_verified === true || data.email_verified === 'true',
+        name: data.name,
+      };
+    }
   } catch {
     throw new ApiError(401, 'Google sign-in failed. Please try again.');
   }

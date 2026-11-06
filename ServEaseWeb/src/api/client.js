@@ -73,13 +73,14 @@ export const login = async (identifier, password) => {
 export const logout = () => clearToken();
 export const me = () => request('/auth/me');
 
-// Google sign-in: the <GoogleLogin> button hands us Google's ID token
-// (credentialResponse.credential); the backend verifies it and replies with the
-// same payload shape as /auth/login, plus needs_phone for brand-new accounts.
-export const loginWithGoogle = async (idToken) => {
+// Google sign-in: the custom gradient button on Login.jsx uses useGoogleLogin
+// (implicit popup flow), which hands us a Google ACCESS token; the backend verifies
+// it and replies with the same payload shape as /auth/login, plus needs_phone for
+// brand-new accounts.
+export const loginWithGoogle = async (accessToken) => {
   const data = await request('/auth/google', {
     method: 'POST',
-    body: { id_token: idToken },
+    body: { access_token: accessToken },
     auth: false,
   });
   setToken(data.token);
