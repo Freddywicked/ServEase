@@ -181,6 +181,28 @@ export const login = async (identifier, password) => {
 export const logout = () => AsyncStorage.removeItem(TOKEN_KEY);
 export const me = () => request('/auth/me');
 
+// Google sign-in: the native SDK (utils/googleSignIn.js) returns Google's ID
+// token; the backend verifies it (POST /auth/google) and answers with the same
+// shape as /auth/login plus needs_phone (Google accounts have no phone number
+// on first sign-in — the app then shows CompleteProfile).
+export const loginWithGoogle = async (idToken) => {
+  const data = await request('/auth/google', {
+    method: 'POST',
+    body: { id_token: idToken },
+    auth: false,
+  });
+  await AsyncStorage.setItem(TOKEN_KEY, data.token);
+  return { user: data.user, provider: data.provider, needsPhone: !!data.needs_phone };
+};
+
+// Complete-profile flow: attach a verified phone number to a Google-created
+// account. Requires the session token (request() sends it by default).
+export const requestPhoneOtp = (phone) =>
+  request('/auth/phone/request-otp', { method: 'POST', body: { phone_number: phone } });
+
+export const verifyPhoneOtp = (phone, otp) =>
+  request('/auth/phone/verify', { method: 'POST', body: { phone_number: phone, otp } });
+
 // Confirmed against provider_routes.js: the real path is /apply, and it
 // expects the files under validId/selfie/supportingDocs — see the matching
 // fix in ServiceProviderVerificationRequirements.js.

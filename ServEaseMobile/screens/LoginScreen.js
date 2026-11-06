@@ -14,6 +14,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import LinearGradient from 'react-native-linear-gradient';
 import { ACCOUNT_CREATED_KEY } from './SplashScreen';
 import { login } from '../api/client';
+import { signInWithGoogle } from '../utils/googleSignIn';
 import { useAuth, homeRouteFor } from '../context/auth_context';
 
 const INITIAL_CREDENTIALS = {
@@ -86,8 +87,39 @@ const LoginScreen = ({ navigation }) => {
         navigation.navigate('ForgotPassword');
     };
 
-    const handleGoogleSignIn = () => {
-        // TODO: integrate Google sign-in once the backend supports it.
+    // Google sign-in: the SDK returns Google's ID token, utils/googleSignIn.js
+    // swaps it for a ServEase session (POST /api/auth/google), and from here the
+    // flow is identical to password sign-in. Brand-new accounts detour to
+    // CompleteProfile to add + verify their phone number first (BR-01).
+    const handleGoogleSignIn = async () => {
+        if (submitting) return;
+        Keyboard.dismiss();
+        setErrors({});
+        setSubmitting(true);
+        try {
+            const { user, provider, needsPhone } = await signInWithGoogle();
+            setUser(user);
+            setProvider(provider);
+
+            try {
+                // An account exists on this device, so the splash can skip Get Started.
+                await AsyncStorage.setItem(ACCOUNT_CREATED_KEY, 'true');
+            } catch (storageError) {
+                // Non-fatal.
+            }
+
+            navigation.reset({
+                index: 0,
+                routes: [{ name: needsPhone ? 'CompleteProfile' : homeRouteFor(provider) }],
+            });
+        } catch (err) {
+            // Dismissing the account picker is a no-op, not an error.
+            if (!err.cancelled) {
+                setErrors({ general: err.message || 'Google sign-in failed. Please try again.' });
+            }
+            setSubmitting(false);
+        }
+        // On success the screen is replaced, so submitting stays true to block double taps.
     };
 
     const handleSignUp = () => {

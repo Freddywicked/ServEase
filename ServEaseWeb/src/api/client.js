@@ -72,6 +72,32 @@ export const login = async (identifier, password) => {
 
 export const logout = () => clearToken();
 export const me = () => request('/auth/me');
+
+// Google sign-in: the <GoogleLogin> button hands us Google's ID token
+// (credentialResponse.credential); the backend verifies it and replies with the
+// same payload shape as /auth/login, plus needs_phone for brand-new accounts.
+export const loginWithGoogle = async (idToken) => {
+  const data = await request('/auth/google', {
+    method: 'POST',
+    body: { id_token: idToken },
+    auth: false,
+  });
+  setToken(data.token);
+  return { user: data.user, provider: data.provider, needsPhone: !!data.needs_phone };
+};
+
+// Complete-profile flow (Google users have no phone number yet): request an OTP,
+// then verify it to attach the phone to the logged-in account.
+export const requestPhoneOtp = (phone) =>
+  request('/auth/phone/request-otp', { method: 'POST', body: { phone_number: phone } });
+
+export const verifyPhoneOtp = async (phone, otp) => {
+  const data = await request('/auth/phone/verify', {
+    method: 'POST',
+    body: { phone_number: phone, otp },
+  });
+  return data.user;
+};
 export const getAdminStats = () => request('/admin/stats');
 
 // Step 1 stores category keys; the backend stores and compares category NAMES

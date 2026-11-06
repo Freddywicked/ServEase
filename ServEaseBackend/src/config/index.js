@@ -108,6 +108,17 @@ const config = {
     serviceAccountPath: (env.FIREBASE_SERVICE_ACCOUNT_PATH || '').trim(),
   },
 
+  google: {
+    // OAuth 2.0 Client IDs accepted as the audience of Google ID tokens sent to
+    // POST /api/auth/google (comma-separated in .env). The Web client ID alone
+    // covers web AND mobile, because the mobile app asks Google for a token using
+    // the Web client ID as its server audience. Empty = /auth/google answers 500.
+    clientIds: (env.GOOGLE_CLIENT_IDS || '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean),
+  },
+
   // Public address of THIS server — used for PayMongo success/cancel redirect URLs.
   // MUST be set on the deployed server; when it's left at the localhost fallback,
   // payForRequest rebuilds the redirect base from the incoming request instead.

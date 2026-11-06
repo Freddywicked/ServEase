@@ -13,6 +13,20 @@ const findByEmail = async (email, columns = '*') =>
 const findByUsername = async (username, columns = '*') =>
   unwrap(await supabase.from('users').select(columns).eq('username', username).maybeSingle());
 
+// google_id is the "sub" claim of a verified Google ID token (migrations/008).
+const findByGoogleId = async (googleId, columns = '*') =>
+  unwrap(await supabase.from('users').select(columns).eq('google_id', googleId).maybeSingle());
+
+// Attach a Google account to an existing user (same verified email = same person).
+const linkGoogleId = async (id, googleId) =>
+  unwrap(await supabase.from('users').update({ google_id: googleId }).eq('user_id', id));
+
+// Complete-profile flow: set the phone number after its OTP has been verified.
+const setPhoneNumber = async (id, phoneE164) =>
+  unwrap(
+    await supabase.from('users').update({ phone_number: phoneE164 }).eq('user_id', id).select(PUBLIC_FIELDS).single()
+  );
+
 const findById = async (id) =>
   unwrap(await supabase.from('users').select(PUBLIC_FIELDS).eq('user_id', id).maybeSingle());
 
@@ -63,6 +77,9 @@ const toPublic = ({ password, password_hash, ...rest }) => rest;
 module.exports = {
   findByEmail,
   findByUsername,
+  findByGoogleId,
+  linkGoogleId,
+  setPhoneNumber,
   findById,
   findProvider,
   createCustomer,

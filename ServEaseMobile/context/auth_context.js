@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { getToken, me, logout, setOnUnauthorized } from '../api/client';
 import { setupPushNotifications, teardownPushNotifications } from '../utils/pushNotifications';
+import { signOutGoogle } from '../utils/googleSignIn';
 
 // Must match service_providers.verification_status for an approved provider
 // (same value as VERIFIED in the backend's middleware/auth.js).
@@ -72,6 +73,10 @@ export const AuthProvider = ({ children }) => {
     }, []);
 
     const signOut = useCallback(async () => {
+        // Forget the Google session too, so the next Google sign-in shows the
+        // account picker instead of silently re-using the same account.
+        // Best-effort: never blocks signing out of ServEase itself.
+        await signOutGoogle();
         // Unregister first — the call needs the auth token that logout() clears.
         await teardownPushNotifications();
         await logout();

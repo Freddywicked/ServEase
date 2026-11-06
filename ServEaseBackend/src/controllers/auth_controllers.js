@@ -1,12 +1,17 @@
 const bcrypt = require('bcryptjs');
+const { OAuth2Client } = require('google-auth-library');
 const ApiError = require('../utils/api_error');
 const asyncHandler = require('../utils/async_handler');
 const { signToken } = require('../utils/jwt');
 const { validateRegistration } = require('../utils/validators');
 const { unwrap } = require('../utils/db');
 const { supabase } = require('../config/supabase');
+const config = require('../config');
 const User = require('../models/user_model');
 const otp = require('../services/otp');
+
+const googleClient = new OAuth2Client();
+const PHONE_RE = /^(09|\+639)\d{9}$/; // same rule as utils/validators.js
 
 // BR-01: one account per email.
 const assertEmailAvailable = async (email) => {
@@ -104,4 +109,96 @@ const me = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { requestOtp, register, login, me };
+// Sign in (or sign up) with Google. The client (web button / native SDK) sends the
+// Google ID token; we verify it against our own client IDs, then find-or-create the
+// user and return the SAME response shape as /login, so both apps reuse their
+// existing session handling.
+const googleLogin = asyncHandler(async (req, res) => {
+  if (!config.google.clientIds.length) {
+    throw new ApiError(500, 'Google sign-in is not configured on the server');
+  }
+  const idToken = String(req.body.id_token || '').trim();
+  if (!idToken) throw new ApiError(400, 'id_token is required');
+
+  let payload;
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken,
+      audience: config.google.clientIds, // only tokens issued for OUR app pass
+    });
+    payload = ticket.getPayload();
+  } catch {
+    throw new ApiError(401, 'Google sign-in failed. Please try again.');
+  }
+
+  // Never trust a token whose email Google itself hasn't verified — without this,
+  // anyone could mint a token claiming somebody else's email address.
+  if (!payload?.email || payload.email_verified !== true) {
+    throw new ApiError(401, 'Your Google account email is not verified');
+  }
+  const email = payload.email.toLowerCase();
+
+  // 1) Known Google account -> log in.
+  let user = await User.findByGoogleId(payload.sub);
+  if (!user) {
+    // 2) Same email already registered with a password -> link the two (safe:
+    //    Google verified the address, so it's the same person; BR-01 holds).
+    const existing = await User.findByEmail(email);
+    if (existing) {
+      await User.linkGoogleId(existing.user_id, payload.sub);
+      user = existing;
+    } else {
+      // 3) Brand-new account (customer, BR-02). Google provides no phone/address/
+      //    birthdate/gender, so those stay NULL (migrations/008) and the client
+      //    collects the phone number next (see needs_phone below).
+      const username = await generateUsername(email);
+      user = await User.createCustomer({
+        name: String(payload.name || username).trim().slice(0, 100) || username,
+        email,
+        username,
+        google_id: payload.sub,
+      });
+    }
+  }
+
+  if (user.is_disabled) throw new ApiError(403, 'This account has been disabled. Please contact support.');
+
+  const provider = await User.findProvider(user.user_id);
+  res.json({
+    token: signToken(user),
+    user: User.toPublic(user),
+    provider: provider ? { verification_status: provider.verification_status } : null,
+    // Tells the client to open the complete-profile screen (phone + OTP).
+    needs_phone: !user.phone_number,
+  });
+});
+
+// Complete-profile step 1 (Google users): text an OTP to the phone number they
+// want to attach to their account. Authenticated; the OTP is keyed to THEIR email.
+const requestPhoneOtp = asyncHandler(async (req, res) => {
+  const phone = String(req.body.phone_number || '').trim().replace(/[\s-]/g, '');
+  if (!PHONE_RE.test(phone)) throw new ApiError(400, 'Enter a valid PH mobile number');
+  const phoneE164 = phone.startsWith('09') ? `+63${phone.slice(1)}` : phone;
+
+  await assertPhoneAvailable(phoneE164);
+  await otp.sendOtp({ email: req.user.email, phone: phoneE164 });
+  res.json({ message: 'OTP sent to your phone number' });
+});
+
+// Complete-profile step 2: a valid OTP attaches the phone number to the account.
+const verifyPhoneOtp = asyncHandler(async (req, res) => {
+  const phone = String(req.body.phone_number || '').trim().replace(/[\s-]/g, '');
+  const code = String(req.body.otp ?? '').trim();
+  if (!PHONE_RE.test(phone)) throw new ApiError(400, 'Enter a valid PH mobile number');
+  if (!/^\d{6}$/.test(code)) throw new ApiError(400, 'Please enter the 6-digit code');
+  const phoneE164 = phone.startsWith('09') ? `+63${phone.slice(1)}` : phone;
+
+  await assertPhoneAvailable(phoneE164);
+  const valid = await otp.verifyOtp(req.user.email, code, phoneE164);
+  if (!valid) throw new ApiError(400, 'Invalid or expired OTP');
+
+  const user = await User.setPhoneNumber(req.user.user_id, phoneE164);
+  res.json({ message: 'Phone number verified', user });
+});
+
+module.exports = { requestOtp, register, login, me, googleLogin, requestPhoneOtp, verifyPhoneOtp };

@@ -10,6 +10,7 @@ import SplashScreen from './screens/SplashScreen';
 import SignupScreen from './screens/SignupScreen';
 import OTPVerification from './screens/OTPVerification';
 import LoginScreen from './screens/LoginScreen';
+import CompleteProfileScreen from './screens/CompleteProfileScreen';
 import ForgotPassword from './screens/ForgotPassword';
 import OTPForgotPassword from './screens/OTPForgotPassword';
 import NewPassword from './screens/NewPassword';
@@ -77,6 +78,8 @@ const App = () => {
         <Stack.Screen name="SignupScreen" component={SignupScreen}/>
         <Stack.Screen name="OTPVerification" component={OTPVerification}/>
         <Stack.Screen name="LoginScreen" component={LoginScreen}/>
+        {/* First-time Google sign-ins land here to add + verify their phone number */}
+        <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen}/>
         <Stack.Screen name="ForgotPassword" component={ForgotPassword}/>
         <Stack.Screen name="OTPForgotPassword" component={OTPForgotPassword}/>
         <Stack.Screen name="NewPassword" component={NewPassword}/>

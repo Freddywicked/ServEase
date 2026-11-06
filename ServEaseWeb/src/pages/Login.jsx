@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { GoogleLogin } from '@react-oauth/google';
 import logo from '../assets/servease_logo.png';
 import eyeIcon from '../assets/icon_eye.png';
-import { login } from '../api/client';
+import { login, loginWithGoogle } from '../api/client';
 import { useAuth } from '../context/auth_context';
 
 const CARD_WIDTH = 659;
@@ -184,25 +185,18 @@ const styles = {
     lineHeight: '14px',
     color: '#A6A6A6',
   },
-  googleBtn: {
+  // Slot for the official Google button (it renders its own styled iframe button,
+  // per Google's branding rules — a custom-styled button can't produce ID tokens).
+  googleSlot: {
     position: 'absolute',
     top: 581,
     left: '50%',
-    boxSizing: 'border-box',
-    width: 233,
-    maxWidth: 'calc(100% - 86px)',
-    height: 56,
-    border: '1px solid rgba(0, 0, 0, 0.3)',
-    borderRadius: 8,
-    backgroundImage: 'linear-gradient(90deg, #0255AF 0%, #04A5A5 100%)',
-    color: '#FFFFFF',
-    fontFamily: "'Quicksand', sans-serif",
-    fontWeight: 700,
-    fontSize: 16,
-    lineHeight: '23px',
-    cursor: 'pointer',
     transform: 'translateX(-50%)',
-    transition: 'filter 150ms ease',
+    display: 'flex',
+    justifyContent: 'center',
+    maxWidth: 'calc(100% - 86px)',
+    overflow: 'hidden',
+    borderRadius: 8,
   },
   footerText: {
     position: 'absolute',
@@ -238,26 +232,49 @@ export default function Login() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Where a signed-in user lands, shared by the password and Google paths.
+  const routeAfterLogin = (user, provider) => {
+    if (user.role === 'admin') {
+      navigate('/admin/dashboard');
+    } else if (provider) {
+      navigate('/serviceprovider/dashboard');
+    } else {
+      navigate('/customer/dashboard');
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     try {
       const { user, provider } = await login(email, password);
       setUser(user);
-      if (user.role === 'admin') {
-        navigate('/admin/dashboard');
-      } else if (provider) {
-        navigate('/serviceprovider/dashboard');
-      } else {
-        navigate('/customer/dashboard');
-      }
+      routeAfterLogin(user, provider);
     } catch (err) {
       setError(err.message || 'Invalid email or password.');
     }
   };
 
-  const handleGoogleSignIn = () => {
-    // TODO: connect to Supabase Auth Google OAuth provider once the backend is set up
+  // credentialResponse.credential is Google's ID token (JWT) — the backend
+  // verifies it (POST /api/auth/google) and returns our own session token.
+  const handleGoogleSuccess = async (credentialResponse) => {
+    setError('');
+    try {
+      const { user, provider, needsPhone } = await loginWithGoogle(credentialResponse.credential);
+      setUser(user);
+      // Brand-new Google accounts still need a verified phone number (BR-01).
+      if (needsPhone) {
+        navigate('/complete-profile');
+        return;
+      }
+      routeAfterLogin(user, provider);
+    } catch (err) {
+      setError(err.message || 'Google sign-in failed. Please try again.');
+    }
+  };
+
+  const handleGoogleError = () => {
+    setError('Google sign-in was cancelled or failed. Please try again.');
   };
 
   return (
@@ -340,9 +357,15 @@ export default function Login() {
             <hr style={{ ...styles.dividerLine, ...styles.dividerLineRight }} />
           </div>
 
-          <button className="servease-google-btn" type="button" style={styles.googleBtn} onClick={handleGoogleSignIn}>
-            Continue with Google
-          </button>
+          <div style={styles.googleSlot}>
+            <GoogleLogin
+              onSuccess={handleGoogleSuccess}
+              onError={handleGoogleError}
+              text="continue_with"
+              shape="rectangular"
+              width="233"
+            />
+          </div>
 
           <p style={styles.footerText}>
             Don&apos;t have an account?{' '}
