@@ -15,37 +15,11 @@
 //   other: { availabilityDays, availabilityHours, companyAddress, companyName }
 // }
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-// ---------------------------------------------------------------------------
-// Adapter: the only part that depends on how api/client.js is set up.
-// Point these two at the same base URL and token storage that api/client.js uses
-// (or replace authFetch with that file's own request helper).
-// ---------------------------------------------------------------------------
-const API_URL = 'https://YOUR-BACKEND.onrender.com';
-const TOKEN_KEY = 'token';
-
-async function authFetch(path) {
-    const token = await AsyncStorage.getItem(TOKEN_KEY);
-    const res = await fetch(`${API_URL}${path}`, {
-        headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-    });
-
-    let data = null;
-    try {
-        data = await res.json();
-    } catch (e) {
-        // empty or non-JSON body
-    }
-
-    if (!res.ok) {
-        throw new Error(data?.message || data?.error || `Request failed (${res.status})`);
-    }
-    return data;
-}
+// Reuse api/client.js so this module always hits the same base URL
+// (dev: localhost via `adb reverse`, prod: the Render deployment), shares the
+// stored JWT, and gets the same timeout/error handling as every other screen.
+// client.js's BASE_URL already ends in /api, so paths below start at /providers.
+import { request } from './client';
 
 const pick = (obj, ...keys) => {
     for (const key of keys) {
@@ -98,5 +72,5 @@ export function normalizeProfile(raw) {
 }
 
 export async function fetchMyProviderProfile() {
-    return normalizeProfile(await authFetch('/api/providers/me/profile'));
+    return normalizeProfile(await request('/providers/me/profile'));
 }
