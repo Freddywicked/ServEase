@@ -161,6 +161,24 @@ const create = async ({
   return provider;
 };
 
+// Provider Edit Profile: company details and/or the availability text. Pass only the
+// fields being changed; the caller validates and normalizes the values first.
+const updateProfileDetails = async (userId, { companyName, companyAddress, availability }) => {
+  const changes = {};
+  if (companyName !== undefined) changes.company_name = companyName;
+  if (companyAddress !== undefined) changes.company_address = companyAddress;
+  if (availability !== undefined) changes.availability = availability;
+  return unwrap(
+    await supabase.from('service_providers').update(changes).eq('user_id', userId).select('user_id').single()
+  );
+};
+
+// Store the private storage path of the provider's new profile photo (POST /me/photo).
+const setProfilePhoto = async (userId, path) =>
+  unwrap(
+    await supabase.from('service_providers').update({ profile_photo: path }).eq('user_id', userId).select('user_id').single()
+  );
+
 // Provider changes how far they travel for home service (already validated 5-100 by the caller).
 const updateHomeServiceRadius = async (userId, km) =>
   unwrap(
@@ -172,4 +190,12 @@ const updateHomeServiceRadius = async (userId, km) =>
       .single()
   );
 
-module.exports = { findByUserId, findProfile, findProfilePageData, create, updateHomeServiceRadius };
+module.exports = {
+  findByUserId,
+  findProfile,
+  findProfilePageData,
+  create,
+  updateProfileDetails,
+  setProfilePhoto,
+  updateHomeServiceRadius,
+};

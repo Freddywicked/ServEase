@@ -72,7 +72,7 @@ const register = asyncHandler(async (req, res) => {
   const password_hash = await bcrypt.hash(password, 10);
   const user = await User.createCustomer({ ...fields, username, password_hash });
 
-  res.status(201).json({ token: signToken(user), user });
+  res.status(201).json({ token: signToken(user), user: await User.withPhotoUrl(user) });
 });
 
 // Login with email OR username + password.
@@ -95,7 +95,7 @@ const login = asyncHandler(async (req, res) => {
   const provider = await User.findProvider(user.user_id);
   res.json({
     token: signToken(user),
-    user: User.toPublic(user),
+    user: await User.withPhotoUrl(user),
     provider: provider ? { verification_status: provider.verification_status } : null,
   });
 });
@@ -104,7 +104,7 @@ const login = asyncHandler(async (req, res) => {
 const me = asyncHandler(async (req, res) => {
   const provider = await User.findProvider(req.user.user_id);
   res.json({
-    user: req.user,
+    user: await User.withPhotoUrl(req.user),
     provider: provider ? { verification_status: provider.verification_status } : null,
   });
 });
@@ -191,7 +191,7 @@ const googleLogin = asyncHandler(async (req, res) => {
   const provider = await User.findProvider(user.user_id);
   res.json({
     token: signToken(user),
-    user: User.toPublic(user),
+    user: await User.withPhotoUrl(user),
     provider: provider ? { verification_status: provider.verification_status } : null,
     // Tells the client to open the complete-profile screen (phone + OTP).
     needs_phone: !user.phone_number,

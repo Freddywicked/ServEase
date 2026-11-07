@@ -1,11 +1,14 @@
 const { supabase } = require('../config/supabase');
 const { unwrap } = require('../utils/db');
+const { getUserPhotoUrl } = require('../utils/storage');
 
 // The users table's primary key is user_id (see migrations/001_align_schema_with_erd.sql).
 // Only select `password_hash` when you must check it (login). Never send it to the client.
 // prefers_home_service / search_radius_km are the customer's saved defaults (migrations/radius_preferences.sql).
+// photo_url is the private storage path of the profile photo (migrations/009) — never send
+// it raw; use withPhotoUrl() to turn it into a signed, display-ready photoUrl first.
 const PUBLIC_FIELDS =
-  'user_id, name, username, email, phone_number, role, address, birthdate, gender, active_mode, prefers_home_service, search_radius_km';
+  'user_id, name, username, email, phone_number, role, address, birthdate, gender, active_mode, prefers_home_service, search_radius_km, photo_url';
 
 const findByEmail = async (email, columns = '*') =>
   unwrap(await supabase.from('users').select(columns).eq('email', email).maybeSingle());
@@ -72,7 +75,33 @@ const updatePreferences = async (id, { prefersHomeService, searchRadiusKm }) => 
   );
 };
 
+// Customer Edit Profile: email + home address. Pass only the fields being changed.
+// A duplicate email hits the unique index and db.js turns it into a 409
+// ("Email is already registered").
+const updateProfile = async (id, { email, address }) => {
+  const changes = {};
+  if (email !== undefined) changes.email = email;
+  if (address !== undefined) changes.address = address;
+  return unwrap(
+    await supabase.from('users').update(changes).eq('user_id', id).select(PUBLIC_FIELDS).single()
+  );
+};
+
+// Store the private storage path of the user's new profile photo.
+const setPhoto = async (id, path) =>
+  unwrap(
+    await supabase.from('users').update({ photo_url: path }).eq('user_id', id).select(PUBLIC_FIELDS).single()
+  );
+
 const toPublic = ({ password, password_hash, ...rest }) => rest;
+
+// Adds a display-ready `photoUrl` (signed, short-lived) and hides the raw storage path.
+// The mobile app reads user.photoUrl (camelCase); the raw path is useless to clients.
+const withPhotoUrl = async (user) => {
+  if (!user) return user;
+  const { photo_url, ...rest } = toPublic(user);
+  return { ...rest, photoUrl: await getUserPhotoUrl(photo_url) };
+};
 
 module.exports = {
   findByEmail,
@@ -85,5 +114,8 @@ module.exports = {
   createCustomer,
   setActiveMode,
   updatePreferences,
+  updateProfile,
+  setPhoto,
   toPublic,
+  withPhotoUrl,
 };

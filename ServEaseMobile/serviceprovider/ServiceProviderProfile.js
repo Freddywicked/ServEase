@@ -159,7 +159,6 @@ const ServiceProviderProfile = ({ navigation }) => {
                             }
                             style={styles.avatar}
                         />
-                        <Image source={require('../assets/icon_edit.png')} style={styles.avatarEditIcon} />
                     </TouchableOpacity>
 
                     <View style={styles.headerText}>
@@ -308,14 +307,6 @@ const styles = StyleSheet.create({
         height: 71,
         borderRadius: 36,
         backgroundColor: '#D9D9D9',
-    },
-    avatarEditIcon: {
-        position: 'absolute',
-        right: 1,
-        bottom: 5,
-        width: 16,
-        height: 16,
-        resizeMode: 'contain',
     },
     headerText: {
         flex: 1,

@@ -4,10 +4,12 @@ import {
     ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Modal, Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import LinearGradient from 'react-native-linear-gradient';
 import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
 import { useAuth } from '../context/auth_context';
 import { fetchMyProfile, updateMyProfile, uploadMyPhoto } from '../api/customerProfile';
 
+const GRADIENT = ['#0255AF', '#04A5A5']; // same as LoginScreen
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const CustomerEditProfile = ({ navigation }) => {
@@ -154,42 +156,57 @@ const CustomerEditProfile = ({ navigation }) => {
 
                     <Text style={styles.sectionTitle}>Account Details</Text>
 
-                    <Text style={styles.fieldLabel}>Email Address</Text>
-                    <TextInput
-                        style={styles.input}
-                        value={email}
-                        onChangeText={setEmail}
-                        placeholder="Email address"
-                        placeholderTextColor="#6F6F6F"
-                        keyboardType="email-address"
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        editable={!loading && !saving}
-                    />
+                    <View style={styles.field}>
+                        <Text style={styles.fieldLabel}>Email Address</Text>
+                        <View style={styles.inputWrapper}>
+                            <TextInput
+                                style={styles.input}
+                                value={email}
+                                onChangeText={setEmail}
+                                placeholder="Email address"
+                                placeholderTextColor="#B0B0B0"
+                                keyboardType="email-address"
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                                editable={!loading && !saving}
+                            />
+                        </View>
+                    </View>
 
-                    <Text style={styles.fieldLabel}>Address</Text>
-                    <TextInput
-                        style={styles.input}
-                        value={address}
-                        onChangeText={setAddress}
-                        placeholder="Address"
-                        placeholderTextColor="#6F6F6F"
-                        editable={!loading && !saving}
-                    />
+                    <View style={styles.field}>
+                        <Text style={styles.fieldLabel}>Address</Text>
+                        <View style={styles.inputWrapper}>
+                            <TextInput
+                                style={styles.input}
+                                value={address}
+                                onChangeText={setAddress}
+                                placeholder="Address"
+                                placeholderTextColor="#B0B0B0"
+                                editable={!loading && !saving}
+                            />
+                        </View>
+                    </View>
 
                     {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
                     <TouchableOpacity
-                        style={styles.doneButton}
+                        style={[styles.gradientButton, (loading || saving) && styles.buttonDisabled]}
                         onPress={handleDone}
                         disabled={loading || saving}
-                        activeOpacity={0.7}
+                        activeOpacity={0.8}
                     >
-                        {saving ? (
-                            <ActivityIndicator size="small" color="#000000" />
-                        ) : (
-                            <Text style={styles.doneText}>Done</Text>
-                        )}
+                        <LinearGradient
+                            colors={GRADIENT}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={styles.doneGradient}
+                        >
+                            {saving ? (
+                                <ActivityIndicator color="#FFFFFF" />
+                            ) : (
+                                <Text style={styles.doneText}>Done</Text>
+                            )}
+                        </LinearGradient>
                     </TouchableOpacity>
                 </ScrollView>
             </KeyboardAvoidingView>
@@ -221,87 +238,96 @@ const CustomerEditProfile = ({ navigation }) => {
 
 const styles = StyleSheet.create({
     flex: { flex: 1 },
-    safeArea: {
-        flex: 1,
-        backgroundColor: '#FFFFFF',
-    },
+    safeArea: { flex: 1, backgroundColor: '#FFFFFF' },
     scrollContent: {
-        paddingHorizontal: 24,
-        paddingTop: 40,
-        paddingBottom: 120, // clears the static bottom navbar
+        paddingHorizontal: 28,   // LoginScreen container padding
+        paddingTop: 24,
+        paddingBottom: 120,      // clears the static bottom navbar
     },
     headerTitle: {
-        fontSize: 24,
-        lineHeight: 28,
+        fontSize: 26,            // LoginScreen title
         fontWeight: '700',
-        color: '#021E79',
-        marginBottom: 27,
+        color: '#1B2A8C',
+        marginBottom: 28,
     },
     identityRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: 27,
+        marginBottom: 32,
     },
     avatar: {
-        width: 71,
-        height: 71,
-        borderRadius: 36,
+        width: 90,
+        height: 90,
+        borderRadius: 45,
         backgroundColor: '#D9D9D9',
     },
     avatarEditIcon: {
         position: 'absolute',
-        right: 1,
-        bottom: 5,
-        width: 16,
-        height: 16,
+        right: 0,
+        bottom: 4,
+        width: 24,
+        height: 24,
         resizeMode: 'contain',
     },
     identityText: {
-        marginLeft: 12,
+        marginLeft: 16,
         flexShrink: 1,
     },
     name: {
-        fontSize: 16,
-        lineHeight: 19,
+        fontSize: 20,
         fontWeight: '700',
-        color: '#484040',
+        color: '#333333',
     },
     role: {
-        fontSize: 12,
-        lineHeight: 14,
-        color: '#484040',
+        fontSize: 14,
+        color: '#555555',
         marginTop: 2,
     },
     sectionTitle: {
-        fontSize: 11,
-        lineHeight: 14,
+        fontSize: 16,
         fontWeight: '700',
-        color: '#292727',
-        marginBottom: 9,
+        color: '#333333',
+        marginBottom: 14,
     },
+    field: { marginBottom: 16 },
     fieldLabel: {
-        fontSize: 9,
-        lineHeight: 15,
-        color: '#484040',
-        marginBottom: 2,
+        fontSize: 11,            // LoginScreen label
+        fontWeight: '600',
+        color: '#555555',
+        letterSpacing: 1,
+        marginBottom: 6,
+        textTransform: 'uppercase',
+    },
+    inputWrapper: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#E0E0E0',
+        borderRadius: 10,
+        backgroundColor: '#F9F9F9',
+        paddingHorizontal: 14,
     },
     input: {
-        height: 29,
-        borderWidth: 1,
-        borderColor: '#818080',
-        borderRadius: 8,
-        backgroundColor: '#FFFFFF',
-        paddingHorizontal: 6,
-        paddingVertical: 0,
-        fontSize: 9,
-        color: '#6F6F6F',
-        marginBottom: 4,
+        flex: 1,
+        paddingVertical: 12,
+        fontSize: 14,
+        color: '#333333',
     },
     errorText: {
-        fontSize: 10,
-        color: '#C62828',
-        marginTop: 4,
+        color: '#E53935',
+        fontSize: 12,
+        textAlign: 'center',
+        marginBottom: 8,
     },
+    gradientButton: { borderRadius: 12, overflow: 'hidden', marginTop: 8 },
+    buttonDisabled: { opacity: 0.7 },
+    doneGradient: {
+        paddingVertical: 15,
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 50,
+    },
+    doneText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
     modalBackdrop: {
         flex: 1,
         backgroundColor: 'rgba(0,0,0,0.4)',
@@ -316,10 +342,9 @@ const styles = StyleSheet.create({
         elevation: 8,
     },
     modalTitle: {
-        fontSize: 16,
-        lineHeight: 20,
+        fontSize: 18,
         fontWeight: '700',
-        color: '#021E79',
+        color: '#1B2A8C',
         paddingHorizontal: 24,
         marginBottom: 8,
     },
@@ -328,27 +353,8 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
     },
     modalOptionText: {
-        fontSize: 14,
-        lineHeight: 18,
-        color: '#484040',
-    },
-    doneButton: {
-        alignSelf: 'flex-end',
-        width: 57,
-        height: 24,
-        borderWidth: 1,
-        borderColor: '#55575B',
-        borderRadius: 10,
-        backgroundColor: '#FFFFFF',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginTop: 11,
-    },
-    doneText: {
-        fontSize: 9,
-        lineHeight: 15,
-        fontWeight: '700',
-        color: '#000000',
+        fontSize: 15,
+        color: '#333333',
     },
 });
 

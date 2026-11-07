@@ -1,9 +1,11 @@
 // api/providerProfile.js
 //
-// Loads the signed-in service provider's profile for the Profile screen.
+// Loads and saves the signed-in service provider's profile for the Profile screen.
 //
-// Route this file calls (add it to provider_routes.js, above any "/:id" route):
-//   GET /api/providers/me/profile
+// Routes this file calls (provider_routes.js):
+//   GET   /api/providers/me/profile
+//   PATCH /api/providers/me/profile
+//   POST  /api/providers/me/photo
 //
 // Response shape (camelCase or snake_case both work, see normalizeProfile):
 // {
@@ -80,8 +82,8 @@ export async function fetchMyProviderProfile() {
 //   availabilityDays               -> array of 'Mon' | 'Tue' | ... | 'Sun'
 //   availabilityHours              -> string like '9:00 AM - 5:00 PM' (null clears it)
 //   companyName, companyAddress    -> provider company details
-// BACKEND: add this route next to GET /providers/me/profile (above any "/:id" route),
-// validate the email (unique), save, and return the updated profile.
+// The backend validates (email format/unique, day names, hours format), saves, and
+// returns the updated profile in the same shape as GET /providers/me/profile.
 export async function updateMyProviderProfile(fields) {
     return normalizeProfile(
         await request('/providers/me/profile', { method: 'PATCH', body: fields })
@@ -89,7 +91,8 @@ export async function updateMyProviderProfile(fields) {
 }
 
 // POST /api/providers/me/photo  (multipart, field "photo") -> { photoUrl }
-// BACKEND: store the file (e.g. Supabase Storage) and save the URL on the provider.
+// The backend stores the file in the private provider-applications bucket and saves
+// the storage path on service_providers.profile_photo; the response is a signed URL.
 export function uploadMyProviderPhoto(uri, fileName, mimeType) {
     const form = new FormData();
     form.append('photo', {

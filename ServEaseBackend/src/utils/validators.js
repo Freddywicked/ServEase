@@ -77,4 +77,4 @@ const validateRegistration = (body = {}) => {
   };
 };
 
-module.exports = { validateRegistration };
+module.exports = { validateRegistration, EMAIL_RE };

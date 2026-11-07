@@ -2,6 +2,8 @@ const ApiError = require('../utils/api_error');
 const asyncHandler = require('../utils/async_handler');
 const User = require('../models/user_model');
 const { parseRadiusKm } = require('../utils/radius');
+const { EMAIL_RE } = require('../utils/validators');
+const { uploadUserPhoto, getUserPhotoUrl } = require('../utils/storage');
 
 const MODES = ['customer', 'service_provider'];
 
@@ -9,20 +11,41 @@ const MODES = ['customer', 'service_provider'];
 const VERIFIED = 'verified';
 
 // PATCH /api/users/me — body: any of
-//   { activeMode: 'customer' | 'service_provider',
+//   { email, address,                   // account details (customer Edit Profile screen)
+//     activeMode: 'customer' | 'service_provider',
 //     prefersHomeService: boolean,      // customer's default for the Home Service choice
 //     searchRadiusKm: 5-100 }           // customer's default provider search radius
 // One account holds both roles, so activeMode only stores which side of the app the
 // account opens in; it never creates or changes a provider record.
 // Everything is validated before anything is saved, so a bad value changes nothing.
 const updateMe = asyncHandler(async (req, res) => {
-  const { activeMode, prefersHomeService, searchRadiusKm } = req.body || {};
+  const { email, address, activeMode, prefersHomeService, searchRadiusKm } = req.body || {};
+  const hasProfile = email !== undefined || address !== undefined;
   const hasMode = activeMode !== undefined;
   const hasPreferences = prefersHomeService !== undefined || searchRadiusKm !== undefined;
 
-  if (!hasMode && !hasPreferences) {
-    throw new ApiError(400, 'Send activeMode, prefersHomeService and/or searchRadiusKm');
+  if (!hasProfile && !hasMode && !hasPreferences) {
+    throw new ApiError(400, 'Send email, address, activeMode, prefersHomeService and/or searchRadiusKm');
   }
+
+  // Account details. Per-field messages land in `details`, which the mobile app shows
+  // under the matching input (err.fieldErrors in api/client.js).
+  const profile = {};
+  if (email !== undefined) {
+    const normalized = String(email).trim().toLowerCase();
+    if (!EMAIL_RE.test(normalized)) {
+      throw new ApiError(400, 'Please fix the highlighted fields', { email: 'Enter a valid email address' });
+    }
+    profile.email = normalized;
+  }
+  if (address !== undefined) {
+    const trimmed = String(address).trim();
+    if (!trimmed) {
+      throw new ApiError(400, 'Please fix the highlighted fields', { address: 'Address is required' });
+    }
+    profile.address = trimmed;
+  }
+
   if (hasMode && !MODES.includes(activeMode)) {
     throw new ApiError(400, `activeMode must be one of: ${MODES.join(', ')}`);
   }
@@ -42,11 +65,22 @@ const updateMe = asyncHandler(async (req, res) => {
   }
 
   let user = req.user;
+  if (hasProfile) user = await User.updateProfile(req.user.user_id, profile);
   if (hasMode) user = await User.setActiveMode(req.user.user_id, activeMode);
   if (hasPreferences) {
     user = await User.updatePreferences(req.user.user_id, { prefersHomeService, searchRadiusKm: radiusKm });
   }
-  res.json({ user: User.toPublic(user) });
+  res.json({ user: await User.withPhotoUrl(user) });
 });
 
-module.exports = { updateMe };
+// POST /api/users/me/photo — multipart, field "photo" -> { photoUrl }
+// The file goes to the private profile-photos bucket; users.photo_url keeps the PATH
+// and a short-lived signed URL is minted for the response (same pattern as provider photos).
+const uploadMyPhoto = asyncHandler(async (req, res) => {
+  if (!req.file) throw new ApiError(400, 'Choose a photo to upload');
+  const path = await uploadUserPhoto(req.user.user_id, req.file);
+  await User.setPhoto(req.user.user_id, path);
+  res.json({ photoUrl: await getUserPhotoUrl(path) });
+});
+
+module.exports = { updateMe, uploadMyPhoto };

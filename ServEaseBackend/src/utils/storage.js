@@ -3,9 +3,10 @@
 const supabaseModule = require('../config/supabase');
 const supabase = supabaseModule.supabase || supabaseModule;
 
-// PRIVATE buckets: provider IDs/selfies, and customers' repair photos. No public URLs.
+// PRIVATE buckets: provider IDs/selfies, customers' repair photos, profile photos. No public URLs.
 const BUCKET = 'provider-applications';
 const SERVICE_REQUEST_BUCKET = 'service-request-photos';
+const PROFILE_PHOTO_BUCKET = 'profile-photos';
 
 // Creates a bucket (private) if it doesn't exist yet. Runs once per bucket per server
 // start; later uploads reuse the result. Needs the service/secret key, which your config
@@ -70,11 +71,24 @@ const getProviderFileUrl = async (path, seconds = 60 * 10) => {
   return error ? null : data.signedUrl;
 };
 
+// The user's own profile photo (customer Edit Profile screen). users.photo_url stores
+// the returned path; sign a fresh short-lived URL whenever the app needs to display it.
+const uploadUserPhoto = (userId, file) => uploadFile(PROFILE_PHOTO_BUCKET, userId, 'photo', file);
+
+const getUserPhotoUrl = async (path, seconds = 60 * 10) => {
+  if (!path) return null;
+  const { data, error } = await supabase.storage.from(PROFILE_PHOTO_BUCKET).createSignedUrl(path, seconds);
+  return error ? null : data.signedUrl;
+};
+
 module.exports = {
   uploadProviderFile,
   uploadServiceRequestPhoto,
   getServiceRequestPhotoUrl,
   getProviderFileUrl,
+  uploadUserPhoto,
+  getUserPhotoUrl,
   BUCKET,
   SERVICE_REQUEST_BUCKET,
+  PROFILE_PHOTO_BUCKET,
 };
