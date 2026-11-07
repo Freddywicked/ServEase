@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     View,
     Text,
@@ -6,6 +6,7 @@ import {
     TouchableOpacity,
     ActivityIndicator,
     Keyboard,
+    BackHandler,
     StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,7 +22,7 @@ const PHONE_RE = /^(09|\+639)\d{9}$/;
 const GRADIENT = ['#0255AF', '#04A5A5'];
 
 const CompleteProfileScreen = ({ navigation }) => {
-    const { setUser, refreshUser } = useAuth();
+    const { setUser, refreshUser, signOut } = useAuth();
     const [phone, setPhone] = useState('');
     const [otp, setOtp] = useState('');
     const [otpSent, setOtpSent] = useState(false);
@@ -29,6 +30,30 @@ const CompleteProfileScreen = ({ navigation }) => {
     const [submitting, setSubmitting] = useState(false);
 
     const normalizedPhone = phone.trim().replace(/[\s-]/g, '');
+
+    // Bail out of phone setup. signOut() clears BOTH the saved ServEase token
+    // (loginWithGoogle stores it before needsPhone is known) and the cached Google
+    // account, so the next tap on "Continue with Google" shows the account picker
+    // instead of silently re-using the same account and looping straight back here.
+    const handleUseDifferentAccount = useCallback(async () => {
+        try {
+            await signOut();
+        } catch {
+            // Best-effort: leave the screen even if sign-out itself fails.
+        }
+        navigation.reset({ index: 0, routes: [{ name: 'LoginScreen' }] });
+    }, [signOut, navigation]);
+
+    // This screen is reached via navigation.reset, so Android Back would otherwise
+    // just exit the app and leave the half-authenticated session behind. Make it
+    // behave exactly like the "use a different account" link.
+    useEffect(() => {
+        const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+            handleUseDifferentAccount();
+            return true;
+        });
+        return () => subscription.remove();
+    }, [handleUseDifferentAccount]);
 
     const handleSendCode = async () => {
         Keyboard.dismiss();
@@ -153,6 +178,10 @@ const CompleteProfileScreen = ({ navigation }) => {
                         </Text>
                     </>
                 )}
+
+                <Text style={styles.link} onPress={handleUseDifferentAccount}>
+                    Use a different Google account
+                </Text>
             </View>
         </SafeAreaView>
     );
