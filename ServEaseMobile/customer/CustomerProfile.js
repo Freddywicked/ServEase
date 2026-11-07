@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { Alert, View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth, VERIFIED_STATUS } from '../context/auth_context';
 
@@ -38,13 +38,22 @@ const CustomerProfile = ({ navigation }) => {
         });
     };
 
-    const handleLogout = async () => {
-        // signOut() clears the persisted token and resets user/provider to null.
-        await signOut();
-        navigation.reset({
-            index: 0,
-            routes: [{ name: 'LoginScreen' }],
-        });
+    const handleLogout = () => {
+        Alert.alert('Log out', 'Are you sure you want to log out?', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Log out',
+                style: 'destructive',
+                onPress: async () => {
+                    // signOut() clears the persisted token and resets user/provider to null.
+                    await signOut();
+                    navigation.reset({
+                        index: 0,
+                        routes: [{ name: 'LoginScreen' }],
+                    });
+                },
+            },
+        ]);
     };
 
     return (
