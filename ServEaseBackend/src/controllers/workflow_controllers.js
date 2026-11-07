@@ -67,6 +67,29 @@ const pickProviderId = (row, recipients) =>
   (recipients.find((r) => r.status === 'quoted' || r.status === 'accepted') || recipients[0] || {}).provider_id ||
   null;
 
+// ---------- payment receipt ----------
+// The receipt the apps render in the "Payment Processed" modal (mobile
+// Payment.js) and let the customer download. The receipt number is derived
+// from the payment id, so it is stable and unique without an extra column.
+// `reference` is the PayMongo payment / checkout id when one exists.
+const receiptNoOf = (paymentId) => `RCP-${String(paymentId).replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+
+const paymentReceipt = async (row, payment) => {
+  const recipients = await Request.listRecipients(row.request_id);
+  const providerId = pickProviderId(row, recipients);
+  const users = await Request.findUsersByIds([row.customer_id, providerId].filter(Boolean));
+  return {
+    receiptNo: receiptNoOf(payment.payment_id),
+    requestNumber: refOf(row),
+    paidAt: payment.created_at,
+    customerName: users[row.customer_id]?.name || 'Customer',
+    providerName: users[providerId]?.name || 'Service provider',
+    total: Number(payment.amount),
+    method: payment.method,
+    reference: payment.paymongo_payment_id || payment.checkout_session_id || '',
+  };
+};
+
 // ============================ NOTIFICATIONS ============================
 
 // GET /api/notifications?limit -> { notifications: [{ id, type, message, requestId, readAt, createdAt }] }
@@ -459,7 +482,9 @@ const payForRequest = asyncHandler(async (req, res) => {
         requestId: row.request_id,
       });
     }
-    return res.status(201).json({ payment: { id: payment.payment_id, amount, method, stage, status: 'paid' } });
+    return res.status(201).json({
+      payment: { id: payment.payment_id, amount, method, stage, status: 'paid', receipt: await paymentReceipt(row, payment) },
+    });
   }
 
   // ---- PayMongo Checkout Session ----
@@ -525,6 +550,9 @@ const getPaymentStatus = asyncHandler(async (req, res) => {
       amount: Number(current.amount),
       method: current.method,
       stage: current.stage,
+      // The receipt is only attached once the payment is confirmed — it is what
+      // the app's "Payment Processed" modal renders (names, receipt no., ...).
+      ...(current.status === 'paid' ? { receipt: await paymentReceipt(row, current) } : {}),
     },
   });
 });
