@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { payForServiceRequest, getPaymentStatus, getPaymentDue } from '../api/servicerequest_api';
+import { useAuth } from '../context/auth_context';
 
 // How often / how long the screen re-checks the payment after the customer comes
 // back from the PayMongo checkout page.
@@ -140,9 +141,10 @@ const Payment = ({ navigation, route }) => {
     // Only for 'additional': which payment request is being paid.
     const paymentRequestId = route?.params?.paymentRequestId;
     const amount = route?.params?.amount ?? 0;
-    // Receipt details. Names/fee fall back to route params until the backend returns them
-    // (see buildReceipt).
-    const customerName = route?.params?.customerName;
+    // Receipt details. Names/fee fall back to route params (and the logged-in
+    // user for the customer) until the backend returns them (see buildReceipt).
+    const { user } = useAuth();
+    const customerName = route?.params?.customerName || user?.name;
     const providerName = route?.params?.providerName;
     const stageCopy = STAGE_COPY[paymentStage] || STAGE_COPY.initial;
 
@@ -191,17 +193,21 @@ const Payment = ({ navigation, route }) => {
     })}`;
 
     // Builds the receipt from whatever the backend returned for the payment (payment
-    // status / payment response). BACKEND: ideally return a `receipt` object, e.g.
+    // status / payment response). The backend attaches a `receipt` object:
     //   { receiptNo, requestNumber, paidAt, customerName, providerName,
     //     subtotal, serviceFee, total, method, reference }
-    // Anything missing falls back to what this screen already knows.
+    // Anything missing falls back to what this screen already knows; the receipt
+    // number can always be derived from the payment id (same rule as the backend).
     // NOTE: this assumes `dueAmount` is the TOTAL charged (repair amount + service fee).
     const buildReceipt = (payment, methodId) => {
         const src = payment?.receipt ?? payment ?? {};
         const total = Number(src.total ?? src.amount ?? dueAmount) || 0;
         const serviceFee = Number(src.serviceFee ?? src.service_fee ?? route?.params?.serviceFee ?? 0) || 0;
+        const fallbackReceiptNo = payment?.id
+            ? `RCP-${String(payment.id).replace(/-/g, '').slice(0, 8).toUpperCase()}`
+            : '';
         return {
-            receiptNo: src.receiptNo ?? src.receipt_number ?? '',
+            receiptNo: src.receiptNo ?? src.receipt_number ?? fallbackReceiptNo,
             requestNumber: src.requestNumber ?? src.request_number ?? requestNumber,
             datePaid: formatReceiptDate(src.paidAt ?? src.paid_at),
             paymentType: stageCopy.type,
@@ -250,8 +256,7 @@ const Payment = ({ navigation, route }) => {
             Alert.alert('Receipt saved', 'The receipt image was saved to your gallery.');
         } catch (error) {
             console.warn('Save receipt failed:', error);
-            // The reason is included in the alert while we debug; remove it once saving works.
-            Alert.alert('Could not save receipt', String(error?.message || error));
+            Alert.alert('Could not save receipt', 'Please try again.');
         } finally {
             setIsSavingReceipt(false);
         }

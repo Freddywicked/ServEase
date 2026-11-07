@@ -252,6 +252,7 @@ const Track = ({ navigation, route }) => {
                 setApprovedPayment({
                     requestId: request.requestId,
                     requestNumber: request.requestNumber,
+                    providerName: request.providerName,
                     paymentRequestId: request.paymentRequestId,
                     amount: request.paymentAmount,
                 }),
@@ -299,6 +300,7 @@ const Track = ({ navigation, route }) => {
         navigation.navigate(ROUTES.PAYMENT, {
             requestId: payment.requestId,
             requestNumber: payment.requestNumber,
+            providerName: payment.providerName,
             paymentStage: 'additional',
             paymentRequestId: payment.paymentRequestId,
             amount: payment.amount,
@@ -319,6 +321,7 @@ const Track = ({ navigation, route }) => {
         navigation.navigate(ROUTES.PAYMENT, {
             requestId: request.requestId,
             requestNumber: request.requestNumber,
+            providerName: request.providerName,
             paymentStage: 'final',
             amount: request.finalAmount,
         });

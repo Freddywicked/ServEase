@@ -120,6 +120,7 @@ const RequestDetails = ({ navigation, route }) => {
         navigation.navigate(ROUTES.PAYMENT, {
             requestId,
             requestNumber: detail?.requestNumber,
+            providerName: detail?.providerName,
             paymentStage: 'initial',
             amount: Math.round(((detail?.total ?? 0) * INITIAL_FEE_PERCENT) / 100 * 100) / 100,
         });

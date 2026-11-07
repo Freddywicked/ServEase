@@ -33,25 +33,6 @@ const Chip = ({ label }) => (
     </View>
 );
 
-const Field = ({ label, children, style }) => (
-    <View style={[styles.field, style]}>
-        <Text style={styles.fieldLabel}>{label}</Text>
-        {children}
-    </View>
-);
-
-const EditButton = ({ onPress, label }) => (
-    <TouchableOpacity
-        style={styles.editButton}
-        onPress={onPress}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-    >
-        <Text style={styles.editButtonText}>Edit</Text>
-    </TouchableOpacity>
-);
-
 const ReviewCard = ({ review, width }) => (
     <View style={[styles.reviewCard, { width }]}>
         <Text style={styles.reviewName}>{review.reviewer}</Text>
@@ -65,7 +46,7 @@ const ServiceProviderProfile = ({ navigation }) => {
     const { width } = useWindowDimensions();
     const { signOut } = useAuth();
 
-    // The profile comes from the backend (api/providerProfile.js), never hard-coded.
+    // Everything shown here comes from the backend (api/providerProfile.js), never hard-coded.
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -90,9 +71,8 @@ const ServiceProviderProfile = ({ navigation }) => {
 
     const reviewCardWidth = width - SIDE * 2;
 
-    const goToEdit = (section) => {
-        // section: 'photo' | 'account' | 'other'
-        navigation.navigate('EditServiceProviderProfile', { section, profile });
+    const goToEdit = () => {
+        navigation.navigate('ServiceProviderEditProfile');
     };
 
     const handleSwitchToCustomer = () => {
@@ -152,7 +132,7 @@ const ServiceProviderProfile = ({ navigation }) => {
         );
     }
 
-    const { aiSummary, account, other } = profile;
+    const { aiSummary } = profile;
     const reviewLabel = profile.reviewCount === 1 ? 'review' : 'reviews';
 
     return (
@@ -165,7 +145,12 @@ const ServiceProviderProfile = ({ navigation }) => {
 
                 {/* Header: avatar + name */}
                 <View style={styles.headerRow}>
-                    <View style={styles.avatarWrap}>
+                    <TouchableOpacity
+                        activeOpacity={0.8}
+                        onPress={goToEdit}
+                        accessibilityRole="button"
+                        accessibilityLabel="Edit profile photo"
+                    >
                         <Image
                             source={
                                 profile.photoUrl
@@ -174,23 +159,14 @@ const ServiceProviderProfile = ({ navigation }) => {
                             }
                             style={styles.avatar}
                         />
-                        <TouchableOpacity
-                            style={styles.avatarEdit}
-                            onPress={() => goToEdit('photo')}
-                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                            accessibilityRole="button"
-                            accessibilityLabel="Change profile photo"
-                        >
-                            <Image
-                                source={require('../assets/icon_edit_profile.png')}
-                                style={styles.avatarEditIcon}
-                            />
-                        </TouchableOpacity>
-                    </View>
+                        <Image source={require('../assets/icon_edit.png')} style={styles.avatarEditIcon} />
+                    </TouchableOpacity>
 
                     <View style={styles.headerText}>
-                        <Text style={styles.name} numberOfLines={1}>{profile.fullName || '—'}</Text>
-                        <Text style={styles.specialty} numberOfLines={1}>{profile.specialty || '—'}</Text>
+                        <Text style={styles.name} numberOfLines={1}>{profile.fullName || ''}</Text>
+                        {profile.specialty ? (
+                            <Text style={styles.specialty} numberOfLines={1}>{profile.specialty}</Text>
+                        ) : null}
                         {profile.yearsExperience != null && (
                             <Text style={styles.experience}>
                                 {profile.yearsExperience} {Number(profile.yearsExperience) === 1 ? 'year' : 'years'} experience
@@ -247,44 +223,13 @@ const ServiceProviderProfile = ({ navigation }) => {
                     )}
                 </ScrollView>
 
-                {/* Account Details */}
-                <View style={styles.card}>
-                    <Text style={styles.cardTitle}>Account Details</Text>
-                    <View style={styles.accountRow}>
-                        <Field label="Email Address" style={styles.accountColumn}>
-                            <Text style={styles.fieldValue} numberOfLines={1}>{account.email || '—'}</Text>
-                        </Field>
-                        <Field label="Address" style={styles.accountColumn}>
-                            <Text style={styles.fieldValue} numberOfLines={1}>{account.address || '—'}</Text>
-                        </Field>
-                        <EditButton onPress={() => goToEdit('account')} label="Edit account details" />
-                    </View>
-                </View>
-
-                {/* Other Details */}
-                <View style={styles.card}>
-                    <Text style={styles.cardTitle}>Other Details</Text>
-                    <View style={styles.otherRow}>
-                        <Field label="Availability" style={styles.otherColumn}>
-                            <Text style={styles.fieldValue}>{other.availabilityDays || '—'}</Text>
-                            {other.availabilityHours ? (
-                                <Text style={styles.fieldValue}>{other.availabilityHours}</Text>
-                            ) : null}
-                        </Field>
-                        <Field label="Company Address" style={styles.otherColumn}>
-                            <Text style={styles.fieldValue}>{other.companyAddress || '—'}</Text>
-                        </Field>
-                        <Field label="Company Name" style={styles.otherColumn}>
-                            <Text style={styles.fieldValue}>{other.companyName || '—'}</Text>
-                        </Field>
-                    </View>
-                    <View style={styles.otherEditWrap}>
-                        <EditButton onPress={() => goToEdit('other')} label="Edit other details" />
-                    </View>
-                </View>
-
-                {/* Switch account / Log out */}
+                {/* Edit Profile / Switch to Customer / Log out */}
                 <View style={styles.menuList}>
+                    <TouchableOpacity style={styles.menuItem} onPress={goToEdit}>
+                        <Image source={require('../assets/icon_edit_profile.png')} style={styles.menuIcon} />
+                        <Text style={styles.menuLabel}>Edit Profile</Text>
+                    </TouchableOpacity>
+
                     <TouchableOpacity style={styles.menuItem} onPress={handleSwitchToCustomer}>
                         <Image source={require('../assets/icon_switch_account.png')} style={styles.menuIcon} />
                         <Text style={styles.menuLabel}>Switch to Customer</Text>
@@ -312,15 +257,15 @@ const styles = StyleSheet.create({
     },
     scrollContent: {
         paddingHorizontal: SIDE,
-        paddingTop: 16,
-        paddingBottom: 24,
+        paddingTop: 40,
+        paddingBottom: 120, // clears the static bottom navbar
     },
     headerTitle: {
         fontSize: 24,
         lineHeight: 28,
         fontWeight: '700',
         color: '#021E79',
-        marginBottom: 28,
+        marginBottom: 27,
     },
 
     // Error state
@@ -358,30 +303,18 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
     },
-    avatarWrap: {
-        width: 71,
-        height: 71,
-    },
     avatar: {
         width: 71,
         height: 71,
         borderRadius: 36,
         backgroundColor: '#D9D9D9',
     },
-    avatarEdit: {
-        position: 'absolute',
-        right: -2,
-        bottom: -2,
-        width: 22,
-        height: 22,
-        borderRadius: 11,
-        backgroundColor: '#FFFFFF',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
     avatarEditIcon: {
-        width: 14,
-        height: 14,
+        position: 'absolute',
+        right: 1,
+        bottom: 5,
+        width: 16,
+        height: 16,
         resizeMode: 'contain',
     },
     headerText: {
@@ -399,19 +332,19 @@ const styles = StyleSheet.create({
         lineHeight: 14,
         fontStyle: 'italic',
         color: '#484040',
-        marginTop: 4,
+        marginTop: 5,
     },
     experience: {
         fontSize: 12,
         lineHeight: 14,
         color: '#484040',
-        marginTop: 4,
+        marginTop: 3,
     },
 
     // AI Summary Insights
     insights: {
         marginTop: 14,
-        paddingHorizontal: 12,
+        paddingLeft: 12,
     },
     insightsTitle: {
         fontSize: 12,
@@ -424,7 +357,7 @@ const styles = StyleSheet.create({
         flexWrap: 'wrap',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginTop: 4,
+        marginTop: 5,
     },
     insightsFeedback: {
         fontSize: 12,
@@ -523,91 +456,25 @@ const styles = StyleSheet.create({
         marginTop: 3,
     },
 
-    // Detail cards
-    card: {
-        marginTop: 10,
-        paddingHorizontal: 13,
-        paddingTop: 12,
-        paddingBottom: 10,
-        borderWidth: 1,
-        borderColor: '#818080',
-        borderRadius: 10,
-        backgroundColor: '#FFFFFF',
-    },
-    cardTitle: {
-        fontSize: 11,
-        lineHeight: 14,
-        fontWeight: '700',
-        color: '#292727',
-    },
-    field: {
-        marginTop: 10,
-    },
-    fieldLabel: {
-        fontSize: 9,
-        lineHeight: 15,
-        color: '#484040',
-    },
-    fieldValue: {
-        fontSize: 9,
-        lineHeight: 15,
-        fontWeight: '700',
-        color: '#000000',
-    },
-    accountRow: {
-        flexDirection: 'row',
-        alignItems: 'flex-end',
-    },
-    accountColumn: {
-        flex: 1,
-        marginRight: 8,
-    },
-    otherRow: {
-        flexDirection: 'row',
-    },
-    otherColumn: {
-        flex: 1,
-        marginRight: 8,
-    },
-    otherEditWrap: {
-        alignItems: 'flex-end',
-        marginTop: 4,
-    },
-    editButton: {
-        width: 52,
-        height: 24,
-        borderWidth: 1,
-        borderColor: '#55575B',
-        borderRadius: 10,
-        backgroundColor: '#FFFFFF',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    editButtonText: {
-        fontSize: 9,
-        fontWeight: '700',
-        color: '#000000',
-    },
-
-    // Switch account / Log out (same look as CustomerProfile)
+    // Edit Profile / Switch to Customer / Log out
     menuList: {
-        marginTop: 12,
-        paddingLeft: 12,
+        marginTop: 15,
+        paddingLeft: 2,
     },
     menuItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 10,
+        paddingVertical: 4,
     },
     menuIcon: {
-        width: 27,
-        height: 27,
+        width: 24,
+        height: 24,
         resizeMode: 'contain',
         marginRight: 12,
     },
     menuLabel: {
-        fontSize: 13,
-        lineHeight: 16,
+        fontSize: 14,
+        lineHeight: 17,
         color: '#484040',
     },
 });

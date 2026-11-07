@@ -74,3 +74,28 @@ export function normalizeProfile(raw) {
 export async function fetchMyProviderProfile() {
     return normalizeProfile(await request('/providers/me/profile'));
 }
+
+// PATCH /api/providers/me/profile  (send only the fields that changed)
+//   email, address                 -> the account's email / address
+//   availabilityDays               -> array of 'Mon' | 'Tue' | ... | 'Sun'
+//   availabilityHours              -> string like '9:00 AM - 5:00 PM' (null clears it)
+//   companyName, companyAddress    -> provider company details
+// BACKEND: add this route next to GET /providers/me/profile (above any "/:id" route),
+// validate the email (unique), save, and return the updated profile.
+export async function updateMyProviderProfile(fields) {
+    return normalizeProfile(
+        await request('/providers/me/profile', { method: 'PATCH', body: fields })
+    );
+}
+
+// POST /api/providers/me/photo  (multipart, field "photo") -> { photoUrl }
+// BACKEND: store the file (e.g. Supabase Storage) and save the URL on the provider.
+export function uploadMyProviderPhoto(uri, fileName, mimeType) {
+    const form = new FormData();
+    form.append('photo', {
+        uri,
+        name: fileName || 'profile.jpg',
+        type: mimeType || 'image/jpeg',
+    });
+    return request('/providers/me/photo', { method: 'POST', body: form });
+}
