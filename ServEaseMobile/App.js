@@ -32,6 +32,7 @@ import MessageCustomer from './customer/MessageCustomer';
 import ConversationCustomer from './customer/ConversationCustomer';
 import History from './customer/History';
 import CustomerProfile from './customer/CustomerProfile';
+import CustomerEditProfile from './customer/CustomerEditProfile';
 import ServiceProviderDashboard from './serviceprovider/ServiceProviderDashboard';
 import IncomingServiceRequest from './serviceprovider/IncomingServiceRequest';
 import Jobs from './serviceprovider/Jobs';
@@ -42,6 +43,7 @@ import MessageServiceProvider from './serviceprovider/MessageServiceProvider';
 import ConversationServiceProvider from './serviceprovider/ConversationServiceProvider';
 import Earnings from './serviceprovider/Earnings';
 import ServiceProviderProfile from './serviceprovider/ServiceProviderProfile';
+import ServiceProviderEditProfile from './serviceprovider/ServiceProviderEditProfile';
 
 const Stack = createNativeStackNavigator();
 // Lets the navbar (rendered outside the stack) navigate and know the focused screen.
@@ -101,6 +103,7 @@ const App = () => {
         <Stack.Screen name="ConversationCustomer" component={ConversationCustomer}/>
         <Stack.Screen name="History" component={History}/>
         <Stack.Screen name="CustomerProfile" component={CustomerProfile}/>
+        <Stack.Screen name="CustomerEditProfile" component={CustomerEditProfile}/>
         <Stack.Screen name="ServiceProviderDashboard" component={ServiceProviderDashboard}/>
         <Stack.Screen name="IncomingServiceRequest" component={IncomingServiceRequest}/>
         <Stack.Screen name="Jobs" component={Jobs}/>
@@ -111,6 +114,7 @@ const App = () => {
         <Stack.Screen name="ConversationServiceProvider" component={ConversationServiceProvider}/>
         <Stack.Screen name="Earnings" component={Earnings}/>
         <Stack.Screen name="ServiceProviderProfile" component={ServiceProviderProfile}/>
+        <Stack.Screen name="ServiceProviderEditProfile" component={ServiceProviderEditProfile}/>
       </Stack.Navigator>
     </View>
     {/* Outside the stack, so it stays put while screens animate */}
