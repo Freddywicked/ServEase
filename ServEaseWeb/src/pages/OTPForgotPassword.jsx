@@ -4,6 +4,7 @@ import logo from '../assets/servease_logo.png';
 import { forgotPassword, verifyResetOtp } from '../api/client';
 
 const OTP_LENGTH = 6;
+// Same stage as OTPVerification.jsx so both OTP screens line up exactly.
 const DESIGN_WIDTH = 1440;
 const DESIGN_HEIGHT = 1024;
 
@@ -31,7 +32,7 @@ const styles = {
   },
   logo: {
     position: 'absolute',
-    top: 89,
+    top: 75,
     left: '50%',
     width: 263,
     height: 263,
@@ -41,7 +42,7 @@ const styles = {
   },
   heading: {
     position: 'absolute',
-    top: 380,
+    top: 366,
     left: 0,
     right: 0,
     height: 49,
@@ -57,10 +58,9 @@ const styles = {
   },
   subheading: {
     position: 'absolute',
-    top: 464,
+    top: 472,
     left: 0,
     right: 0,
-    height: 30,
     fontFamily: "'Plus Jakarta Sans', sans-serif",
     fontWeight: 700,
     fontSize: 24,
@@ -72,14 +72,14 @@ const styles = {
   form: { position: 'absolute', inset: 0 },
   otpRow: {
     position: 'absolute',
-    top: 527,
+    top: 534,
     left: '50%',
     display: 'flex',
     gap: 16,
     transform: 'translateX(-50%)',
   },
   otpBox: {
-    width: 64.5,
+    width: 64,
     height: 71,
     padding: 0,
     textAlign: 'center',
@@ -95,7 +95,7 @@ const styles = {
   },
   resendRow: {
     position: 'absolute',
-    top: 620,
+    top: 618,
     left: 0,
     right: 0,
     display: 'flex',
@@ -104,7 +104,7 @@ const styles = {
     gap: 6,
     fontFamily: "'Roboto', sans-serif",
     fontWeight: 700,
-    fontSize: 20,
+    fontSize: 16,
     lineHeight: '23px',
     color: '#484040',
     margin: 0,
@@ -116,16 +116,16 @@ const styles = {
     cursor: 'pointer',
     fontFamily: "'Roboto', sans-serif",
     fontWeight: 700,
-    fontSize: 20,
+    fontSize: 16,
     lineHeight: '23px',
     color: '#2E86FF',
   },
   primaryBtn: {
     position: 'absolute',
-    top: 675,
+    top: 656,
     left: '50%',
     boxSizing: 'border-box',
-    width: 467,
+    width: 'min(519px, calc(100vw - 40px))',
     height: 62,
     border: '1px solid rgba(0, 0, 0, 0.3)',
     borderRadius: 8,
@@ -141,7 +141,7 @@ const styles = {
   },
   statusText: {
     position: 'absolute',
-    top: 749,
+    top: 734,
     left: 0,
     right: 0,
     textAlign: 'center',
@@ -206,6 +206,7 @@ export default function OTPForgotPassword() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (verifying) return;
     setError('');
     setInfo('');
     setVerifying(true);
