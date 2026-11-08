@@ -5,7 +5,7 @@ import CustomerSidebar from '../components/CustomerSidebar';
 import gcashLogo from '../assets/gcash_logo.png';
 import qrphLogo from '../assets/qrph_logo.png';
 import cardLogo from '../assets/cc_logo.png';
-import receiptLogo from '../assets/logo_servease.png'; // ServEase logo shown on the receipt
+import receiptLogo from '../assets/servease_logo.png'; // ServEase logo shown on the receipt
 import { getPaymentDue, getPaymentStatus, payForRequest } from '../api/client';
 
 /* =====================================================================================
