@@ -14,11 +14,21 @@ async function request(path, { method = 'GET', body, auth = true } = {}) {
     if (token) headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body ? (isForm ? body : JSON.stringify(body)) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body ? (isForm ? body : JSON.stringify(body)) : undefined,
+    });
+  } catch (networkErr) {
+    // fetch itself only throws on network/CORS failures — never on HTTP errors.
+    // Give a readable message instead of the browser's cryptic "Failed to fetch".
+    const err = new Error('Cannot reach the server. It may be starting up — please wait a moment and try again.');
+    err.status = 0;
+    err.cause = networkErr;
+    throw err;
+  }
 
   const data = await res.json().catch(() => null);
 
@@ -72,6 +82,34 @@ export const login = async (identifier, password) => {
 
 export const logout = () => clearToken();
 export const me = () => request('/auth/me');
+
+// --- Forgot password flow (Forgot Password -> OTP -> New Password) ---
+// Mirrors ServEaseMobile/api/passwordReset.js; same endpoints and payload shapes.
+// Step 1: backend emails a one-time code. Resolves { message, resendAfter }.
+// (Answers the same way for unknown emails, so addresses can't be probed.)
+export const forgotPassword = (email) =>
+  request('/auth/forgot-password', {
+    method: 'POST',
+    body: { email: email.trim().toLowerCase() },
+    auth: false,
+  });
+
+// Step 2: backend checks the code. Resolves { resetToken, expiresIn }.
+export const verifyResetOtp = (email, otp) =>
+  request('/auth/verify-reset-otp', {
+    method: 'POST',
+    body: { email: email.trim().toLowerCase(), otp },
+    auth: false,
+  });
+
+// Step 3: backend saves the new password. Resolves { message }.
+// The backend looks the reset token up by email, so email is required too.
+export const resetPassword = (email, resetToken, password) =>
+  request('/auth/reset-password', {
+    method: 'POST',
+    body: { email: email.trim().toLowerCase(), resetToken, password },
+    auth: false,
+  });
 
 // Google sign-in: the custom gradient button on Login.jsx uses useGoogleLogin
 // (implicit popup flow), which hands us a Google ACCESS token; the backend verifies

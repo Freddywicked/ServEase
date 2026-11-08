@@ -254,6 +254,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [scale, setScale] = useState(() =>
     Math.min(1, window.innerWidth / CARD_WIDTH, window.innerHeight / CARD_HEIGHT),
   );
@@ -279,13 +280,17 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     setError('');
+    setSubmitting(true);
     try {
       const { user, provider } = await login(email, password);
       setUser(user);
       routeAfterLogin(user, provider);
     } catch (err) {
       setError(err.message || 'Invalid email or password.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -328,8 +333,9 @@ export default function Login() {
           box-shadow: 0 0 0 2px rgba(2, 85, 175, 0.12);
         }
         .servease-auth-link:hover { text-decoration: underline; }
-        .servease-primary-btn:hover,
+        .servease-primary-btn:hover:not(:disabled),
         .servease-google-btn:hover { filter: brightness(1.04); }
+        .servease-primary-btn:disabled { opacity: 0.7; cursor: not-allowed; }
         .servease-primary-btn:active { transform: translateY(1px); }
         .servease-google-btn:active { translate: 0 1px; }
       `}</style>
@@ -390,7 +396,14 @@ export default function Login() {
 
           {error && <p style={styles.errorText}>{error}</p>}
 
-          <button className="servease-primary-btn" type="submit" style={styles.primaryBtn}>Sign in</button>
+          <button
+            className="servease-primary-btn"
+            type="submit"
+            style={styles.primaryBtn}
+            disabled={submitting}
+          >
+            {submitting ? 'Signing in...' : 'Sign in'}
+          </button>
 
           <div style={styles.dividerRow}>
             <hr style={{ ...styles.dividerLine, ...styles.dividerLineLeft }} />

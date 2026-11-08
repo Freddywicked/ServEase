@@ -4,6 +4,9 @@ import Signup from './pages/Signup'
 import VerifyOTP from './pages/OTPVerification'
 import RoleSelection from './pages/RoleSelection'
 import CompleteProfile from './pages/CompleteProfile'
+import ForgotPassword from './pages/ForgotPassword'
+import OTPForgotPassword from './pages/OTPForgotPassword'
+import NewPassword from './pages/NewPassword'
 import ServiceCategory from './serviceprovider/ServiceCategory'
 import VerificationRequirements from './serviceprovider/VerificationRequirements'
 import AdminDashboard from './admin/AdminDashboard'
@@ -43,7 +46,11 @@ function App() {
         <Route path="/role-selection" element={<RoleSelection />} />
         {/* First-time Google sign-ins land here to add + verify their phone number */}
         <Route path="/complete-profile" element={<CompleteProfile />} />
-        
+        {/* Forgot password flow: request code -> verify code -> set new password */}
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/forgot-password/verify" element={<OTPForgotPassword />} />
+        <Route path="/forgot-password/new-password" element={<NewPassword />} />
+
 
         {/* Admin */}
         <Route path="/admin/dashboard" element={<AdminDashboard />} />
