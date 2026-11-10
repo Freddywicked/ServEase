@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
 import starIcon from '../assets/icon_star.png';
@@ -73,27 +73,54 @@ export default function RecommendServiceProvider() {
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  // Ids of every provider already shown on this visit, so "Find another Service
+  // Provider" refreshes the list with providers the customer hasn't seen yet
+  // instead of navigating away (same behaviour as the mobile app).
+  const seenIdsRef = useRef(new Set());
+
+  // Always re-fetches from the backend: the ranked list (category match first,
+  // then rating, then distance, with availability for the request's preferred
+  // schedule) is computed server-side for this draft request. With findAnother,
+  // providers already shown are left out; once every provider has been seen the
+  // rotation restarts from the best matches, never a less relevant set.
+  const loadProviders = useCallback(
+    async ({ findAnother = false } = {}) => {
+      if (!requestId) return;
+      setStatus('loading');
+      setNotice('');
+      try {
+        const data = await getRecommendedProviders(requestId);
+        const ranked = (data?.providers ?? []).map(toProviderCard);
+        if (!findAnother) seenIdsRef.current.clear();
+
+        let next = findAnother ? ranked.filter((p) => !seenIdsRef.current.has(p.id)) : ranked;
+        let restarted = false;
+        if (findAnother && next.length === 0 && ranked.length > 0) {
+          seenIdsRef.current.clear();
+          next = ranked;
+          restarted = true;
+        }
+
+        next.forEach((p) => seenIdsRef.current.add(p.id));
+        setProviders(next);
+        // The providers the backend recommends (recommended: true) start selected.
+        setSelectedIds(new Set(next.filter((p) => p.recommended).map((p) => p.id)));
+        if (restarted) {
+          setNotice("You've seen every available service provider — showing the best matches again.");
+        }
+        setStatus('done');
+      } catch {
+        setStatus('error');
+      }
+    },
+    [requestId]
+  );
 
   useEffect(() => {
-    if (!requestId) return undefined;
-    let cancelled = false;
-    setStatus('loading');
-    getRecommendedProviders(requestId)
-      .then((data) => {
-        if (cancelled) return;
-        const list = (data?.providers ?? []).map(toProviderCard);
-        setProviders(list);
-        // The providers the backend recommends (recommended: true) start selected.
-        setSelectedIds(new Set(list.filter((p) => p.recommended).map((p) => p.id)));
-        setStatus('done');
-      })
-      .catch(() => {
-        if (!cancelled) setStatus('error');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [requestId]);
+    loadProviders();
+  }, [loadProviders]);
 
   if (!requestId) return <Navigate to="/customer/requests/new" replace />;
 
@@ -129,9 +156,11 @@ export default function RecommendServiceProvider() {
     }
   };
 
-  // Browse the full provider list instead of the recommended shortlist.
+  // Stay on this screen and show the next set of providers: re-fetch the ranked
+  // list from the backend, leaving out the ones already shown (see loadProviders).
   const handleFindAnother = () => {
-    navigate('/customer/providers');
+    if (status === 'loading' || submitting) return;
+    loadProviders({ findAnother: true });
   };
 
   return (
@@ -241,6 +270,11 @@ export default function RecommendServiceProvider() {
         </div>
 
         <div className="mt-12 flex max-w-[927px] flex-col items-center lg:mt-[49px]">
+          {notice && (
+            <p className="m-0 mb-3 text-center font-[Roboto] text-[12px] text-[#817C7C]">
+              {notice}
+            </p>
+          )}
           {submitError && (
             <p role="alert" className="m-0 mb-3 text-center font-[Roboto] text-[13px] text-[#B91C1C]">
               {submitError}
@@ -257,9 +291,10 @@ export default function RecommendServiceProvider() {
           <button
             type="button"
             onClick={handleFindAnother}
-            className="mt-[18px] cursor-pointer border-0 bg-transparent p-0 font-[Quicksand] text-[16px] font-medium leading-[20px] text-[#3C3A3A] underline"
+            disabled={status === 'loading' || submitting}
+            className="mt-[18px] cursor-pointer border-0 bg-transparent p-0 font-[Quicksand] text-[16px] font-medium leading-[20px] text-[#3C3A3A] underline disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Find another Service Provider
+            {status === 'loading' ? 'Finding another service provider…' : 'Find another Service Provider'}
           </button>
         </div>
       </div>
