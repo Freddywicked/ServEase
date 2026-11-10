@@ -27,10 +27,12 @@ const getAdmin = () => {
       return null;
     }
     // Lazy require: firebase-admin is heavy and only needed once pushing is on.
+    // v14 CJS exports: cert/initializeApp live at the top level (no .credential),
+    // and messaging comes from the firebase-admin/messaging subpath.
     const firebaseAdmin = require('firebase-admin');
     const credential = raw
-      ? firebaseAdmin.credential.cert(JSON.parse(raw))
-      : firebaseAdmin.credential.cert(require(path.resolve(filePath)));
+      ? firebaseAdmin.cert(JSON.parse(raw))
+      : firebaseAdmin.cert(require(path.resolve(filePath)));
     firebaseAdmin.initializeApp({ credential });
     admin = firebaseAdmin;
   } catch (err) {
@@ -53,7 +55,7 @@ const sendPushToUser = async (userId, { title, body, data = {} }) => {
   const tokens = await Workflow.listDeviceTokens(userId);
   if (!tokens.length) return;
 
-  const response = await firebaseAdmin.messaging().sendEachForMulticast({
+  const response = await require('firebase-admin/messaging').getMessaging().sendEachForMulticast({
     tokens,
     // `notification` renders in the system tray when the app is backgrounded/quit;
     // `data` reaches the JS handlers (foreground) for in-app refreshes.
