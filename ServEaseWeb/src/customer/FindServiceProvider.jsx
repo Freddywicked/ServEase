@@ -136,7 +136,7 @@ export default function FindServiceProvider() {
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(STATUS_OPTIONS[0].value);
-  const [categoryFilter, setCategoryFilter] = useState('automotive');
+  const [categoryFilter, setCategoryFilter] = useState(CATEGORY_OPTIONS[0].value);
 
   // Live provider list from the backend. The server does the search + filtering;
   // typing is debounced so every keystroke does not fire a request.
