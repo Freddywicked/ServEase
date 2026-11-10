@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Check } from 'lucide-react';
+import { Check, ChevronDown, Search } from 'lucide-react';
 import CustomerSidebar from '../components/CustomerSidebar';
 import { openChat } from '../components/MessagingWidget';
 import {
@@ -17,21 +17,82 @@ import {
    card (cardType: diagnosis | quotation | schedule | payment | timeline | completed |
    declined) into the shape the card components render.
 
+   Figma layout (Track / SR - SENT / SR - APPROVED):
+     - Search bar + two dropdowns: "Categories" and "Status".
+     - Status: All | Pending | Active | Completed | Closed
+         Pending   -> backend group "sent"
+         Active    -> backend groups "approved" (sub-tab "Quotations") and
+                      "ongoing" (sub-tab "On-going")
+         Completed -> backend group "done"
+         Closed    -> backend group "declined"
+     - Categories: All | IT-Related Devices | Phone Devices | Automotive | Home.
+       Filtering uses the category the backend sends on each card
+       (card.serviceCategory / card.category / card.categoryName) — see pickCategory().
+
    Actions:
      schedule proposal     -> POST /api/service-requests/:id/schedule-proposals/:pid/accept|reject
      additional payment    -> POST /api/service-requests/:id/payment-requests/:pid/approve|reject
+     negotiate             -> opens the chat with the provider (no extra endpoint)
      quotation review      -> MyRequestDetails.jsx (/customer/requests/:requestId)
      final payment         -> Payment.jsx (/customer/requests/:requestId/payment)
    ===================================================================================== */
 
+// Backend groups (keys of the getTrackingCards() response).
+const GROUP_ORDER = ['sent', 'approved', 'ongoing', 'done', 'declined'];
 
-const TABS = [
-  { key: 'sent', label: 'Sent' },
-  { key: 'approved', label: 'Approved' },
-  { key: 'ongoing', label: 'On-going' },
-  { key: 'declined', label: 'Declined' },
-  { key: 'done', label: 'Done' },
+// Status dropdown (Figma): which backend groups each status shows.
+const STATUS_OPTIONS = [
+  { key: 'all', label: 'All' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'active', label: 'Active' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'closed', label: 'Closed' },
 ];
+const STATUS_GROUPS = {
+  all: GROUP_ORDER,
+  pending: ['sent'],
+  active: ['approved', 'ongoing'],
+  completed: ['done'],
+  closed: ['declined'],
+};
+
+// Sub-tabs shown under the "Active" status (Figma SR - APPROVED).
+const ACTIVE_SUBTABS = [
+  { key: 'approved', label: 'Quotations' },
+  { key: 'ongoing', label: 'On-going' },
+];
+
+// Notifications deep-link here with ?tab=sent|approved|ongoing|declined|done.
+const TAB_TO_VIEW = {
+  sent: { status: 'pending' },
+  approved: { status: 'active', sub: 'approved' },
+  ongoing: { status: 'active', sub: 'ongoing' },
+  done: { status: 'completed' },
+  declined: { status: 'closed' },
+};
+
+// Categories dropdown (Figma).
+const CATEGORY_OPTIONS = [
+  { key: 'all', label: 'All' },
+  { key: 'it', label: 'IT-Related Devices' },
+  { key: 'phone', label: 'Phone Devices' },
+  { key: 'automotive', label: 'Automotive' },
+  { key: 'home', label: 'Home' },
+];
+
+// The category text the backend sends -> one of the dropdown keys above.
+const categoryKeyOf = (text) => {
+  const t = String(text || '').toLowerCase();
+  if (!t) return '';
+  if (/phone/.test(t)) return 'phone';
+  if (/auto|vehicle|\bcar\b|motor/.test(t)) return 'automotive';
+  if (/home|plumb|carpent|electric|appliance|handyman/.test(t)) return 'home';
+  if (/\bit\b|computer|laptop|device/.test(t)) return 'it';
+  return '';
+};
+
+const pickCategory = (card) =>
+  card.serviceCategory ?? card.category ?? card.categoryName ?? card.category_name ?? '';
 
 const TIMELINE_LABELS = [
   'Request received',
@@ -88,17 +149,18 @@ const mapCard = (tab) => (card) => {
     status: tab,
     providerId: card.providerId,
     providerName: card.providerName,
+    category: pickCategory(card),
   };
   switch (card.cardType) {
     case 'quotation':
       return {
         ...base,
         kind: 'quotation',
-        badge: card.statusLabel || 'New Quotation',
+        badge: card.statusLabel || 'Approve Quote?',
         quotation: {
           reason: card.notes || '',
           items: [
-            { label: 'Labor', amount: card.laborCost },
+            { label: 'Labor Cost', amount: card.laborCost },
             ...(Number(card.partsCost) > 0 ? [{ label: 'Parts/Items', amount: card.partsCost }] : []),
           ],
           total: card.total,
@@ -137,8 +199,9 @@ const mapCard = (tab) => (card) => {
         timeline: mapTimeline(card.timeline || [], false),
       };
     case 'completed': {
-      // Provider marked the job completed. It is only finished (Done tab) once the customer
-      // paid the remaining balance; until then it stays On-going with "Proceed to Payment".
+      // Provider marked the job completed. It is only finished (Completed status) once the
+      // customer paid the remaining balance; until then it stays Active > On-going with
+      // "Proceed to Payment".
       const isPaid = Boolean(card.isPaid ?? card.paid ?? card.paymentStatus === 'paid');
       return {
         ...base,
@@ -152,47 +215,71 @@ const mapCard = (tab) => (card) => {
       };
     }
     case 'declined':
-      return { ...base, kind: 'summary', declinedReason: card.reason || null };
+      return {
+        ...base,
+        kind: 'summary',
+        badge: card.statusLabel || 'Declined',
+        declinedReason: card.reason || null,
+      };
     case 'diagnosis':
     default:
       return {
         ...base,
         kind: 'summary',
+        badge: card.statusLabel || 'Pending',
         probableCause: card.probableCause || null,
-        confidence: card.confidencePercent ?? 0,
+        confidence: card.confidencePercent ?? null,
       };
   }
 };
 
 const formatAmount = (n) =>
-  n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const formatPeso = (n) => `₱${formatAmount(n)}`;
+  Number(n || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Everything on a card that the search box looks at.
+const searchText = (r) =>
+  [
+    r.id,
+    r.providerName,
+    r.category,
+    r.badge,
+    r.probableCause,
+    r.declinedReason,
+    r.quotation?.reason,
+    r.schedule?.reason,
+    r.schedule?.dateTime,
+    r.additionalPayment?.note,
+    ...(r.timeline || []).map((s) => s.label),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
 
 /* ------------------------------------ small UI parts ------------------------------------ */
 
-// Accept/Approve buttons are green (#167713) and Decline/Reject buttons red (#C62828).
-const BUTTON_VARIANTS = {
-  default: 'border-[#B1A8A8] bg-[#FFFDFD] text-[#414141] hover:bg-[#F3F3F3]',
-  accept: 'border-[#167713] bg-[#167713] text-white hover:bg-[#126010]',
-  decline: 'border-[#C62828] bg-[#C62828] text-white hover:bg-[#A82020]',
+// Status pill at the top-right of a card (Figma: Pending #DAC855, Approve Quote? #BB8157,
+// In progress #577FBB).
+const PILL_COLORS = {
+  pending: '#DAC855',
+  quotation: '#BB8157',
+  progress: '#577FBB',
+  completed: '#167713',
+  declined: '#C62828',
 };
 
-function SmallButton({ children, onClick, variant = 'default', className = '' }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`h-[26px] cursor-pointer rounded-[8px] border px-4 font-[Inter] text-[11px] font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0255AF] ${BUTTON_VARIANTS[variant]} ${className}`}
-    >
-      {children}
-    </button>
-  );
-}
+const pillColorOf = (request) => {
+  if (request.kind === 'quotation' || request.kind === 'schedule') return PILL_COLORS.quotation;
+  if (request.kind === 'additional_payment') return PILL_COLORS.progress;
+  if (request.kind === 'progress') {
+    return request.status === 'done' ? PILL_COLORS.completed : PILL_COLORS.progress;
+  }
+  return request.status === 'declined' ? PILL_COLORS.declined : PILL_COLORS.pending;
+};
 
-function Badge({ children, color }) {
+function Pill({ children, color }) {
   return (
     <span
-      className="flex-none rounded-[4px] px-2 py-[3px] font-[Inter] text-[10px] font-bold leading-[12px] text-white"
+      className="-mr-[6px] inline-flex h-[24px] min-w-[85px] flex-none items-center justify-center whitespace-nowrap rounded-[20px] border border-[#B1A8A8] px-4 font-[Quicksand] text-[14px] font-medium leading-[24px] text-white"
       style={{ backgroundColor: color }}
     >
       {children}
@@ -200,10 +287,39 @@ function Badge({ children, color }) {
   );
 }
 
-const BADGE_BLUE = '#4B78BD';
-const BADGE_BROWN = '#B08968';
+// Outlined white button (Message, Proceed to Payment, Find Service Provider).
+function OutlineButton({ children, onClick, className = '' }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`box-border h-[31px] min-w-[90px] cursor-pointer rounded-[10px] border border-[#B1A8A8] bg-[#FFFDFD] px-5 font-[Inter] text-[12px] font-bold leading-[20px] text-[#414141] hover:bg-[#F3F3F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0255AF] ${className}`}
+    >
+      {children}
+    </button>
+  );
+}
 
-function CardShell({ children, onClick, label }) {
+// Filled 100x30 action buttons (Figma: Approve #167713, Negotiate #DEBF6A, Decline #C62828).
+const ACTION_COLORS = {
+  approve: 'bg-[#167713] hover:bg-[#126010]',
+  negotiate: 'bg-[#DEBF6A] hover:bg-[#CFAF55]',
+  decline: 'bg-[#C62828] hover:bg-[#A82020]',
+};
+
+function ActionButton({ children, onClick, tone }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`box-border h-[30px] w-[100px] cursor-pointer rounded-[10px] border border-[#B1A8A8] font-[Inter] text-[12px] font-bold leading-[20px] text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0255AF] ${ACTION_COLORS[tone]}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function CardShell({ children, onClick, label, padding = 'px-[22px] pb-4 pt-[12px]' }) {
   const clickable = typeof onClick === 'function';
   return (
     <article
@@ -212,7 +328,7 @@ function CardShell({ children, onClick, label }) {
       role={clickable ? 'button' : undefined}
       tabIndex={clickable ? 0 : undefined}
       aria-label={clickable ? label : undefined}
-      className={`box-border w-full max-w-[876px] rounded-[10px] border border-[#818080] bg-white px-[19px] py-4 ${
+      className={`box-border w-full rounded-[10px] border border-[#818080] bg-white ${padding} ${
         clickable ? 'cursor-pointer hover:bg-[#FAFCFF]' : ''
       }`}
     >
@@ -221,12 +337,20 @@ function CardShell({ children, onClick, label }) {
   );
 }
 
-function CardTitle({ id }) {
+function CardTitle({ id, large = false }) {
   return (
-    <h3 className="m-0 font-[Inter] text-[15px] font-bold leading-[26px] text-[#292727]">
+    <h3
+      className={`m-0 font-[Inter] font-bold text-[#292727] ${
+        large ? 'text-[16px] leading-[27px]' : 'text-[15px] leading-[26px]'
+      }`}
+    >
       Request #{id}
     </h3>
   );
+}
+
+function Divider({ className = '' }) {
+  return <div className={`border-t border-black/40 ${className}`} />;
 }
 
 // done = blue + check; pending = grey; completed = darker grey (until the balance is paid).
@@ -265,179 +389,272 @@ function Timeline({ steps }) {
   );
 }
 
+/* ------------------------------------ filter controls ------------------------------------ */
+
+// Figma "Categories" / "Status" dropdown: 173x49, 14px radius, list drops down from the
+// control. `value` null = nothing picked yet, so the placeholder label shows.
+function FilterDropdown({ placeholder, options, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  // Close when clicking outside or pressing Escape.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onMouseDown = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  const selected = options.find((o) => o.key === value);
+
+  return (
+    <div ref={ref} className={`relative h-[49px] w-[173px] flex-none ${open ? 'z-30' : ''}`}>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={placeholder}
+        onClick={() => setOpen((o) => !o)}
+        className="relative z-10 box-border flex h-full w-full cursor-pointer items-center justify-between rounded-[14px] border border-[#7E7A7A] bg-white px-5 text-left font-[Inter] text-[14px] font-semibold leading-[24px] tracking-[-0.3125px] text-[#484040]"
+      >
+        <span className="truncate">{selected ? selected.label : placeholder}</span>
+        <ChevronDown
+          size={16}
+          strokeWidth={2.5}
+          color="#000"
+          className={`ml-2 flex-none transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {open && (
+        <ul
+          role="listbox"
+          aria-label={placeholder}
+          className="absolute left-0 top-[36px] z-0 m-0 box-border flex w-full list-none flex-col gap-[7px] rounded-b-[14px] rounded-t-[1px] border border-[#B4A9A9] bg-white px-5 pb-[10px] pt-[26px]"
+        >
+          {options.map((option) => (
+            <li key={option.key} role="option" aria-selected={option.key === value}>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(option.key);
+                  setOpen(false);
+                }}
+                className={`block h-[24px] w-full cursor-pointer truncate border-none bg-transparent p-0 text-left font-[Inter] text-[14px] leading-[24px] tracking-[-0.3125px] text-[#484040] hover:text-[#005FCA] ${
+                  option.key === value ? 'font-semibold' : 'font-medium'
+                }`}
+              >
+                {option.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------------ request cards ------------------------------------ */
 
-// "Sent" and "Declined" tabs (AI probable cause + confidence bar)
+// "Pending" (sent) and "Closed" (declined) — AI probable cause + confidence
 function SummaryCard({ request, onFindProvider }) {
+  const declined = request.status === 'declined';
   return (
-    <CardShell>
-      <CardTitle id={request.id} />
-      <p className="m-0 mt-[6px] font-[Inter] text-[14px] leading-[17px] text-[#484040]">
-        sent to <strong>{request.providerName}</strong>
-      </p>
-      {request.declinedReason !== undefined && request.status === 'declined' ? (
+    <CardShell padding="px-[22px] pb-[19px] pt-[12px]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <CardTitle id={request.id} large />
+          <p className="m-0 font-[Inter] text-[14px] leading-[17px] text-[#484040]">
+            sent to <strong>{request.providerName}</strong>
+          </p>
+        </div>
+        <div className="mt-[5px]">
+          <Pill color={pillColorOf(request)}>{request.badge}</Pill>
+        </div>
+      </div>
+
+      <Divider className="mt-2" />
+
+      {declined ? (
         <>
-          <p className="m-0 mt-[11px] font-[Inter] text-[13px] leading-[16px] text-[#484040]">
+          <p className="m-0 mt-[13px] font-[Inter] text-[13px] leading-[16px] text-[#484040]">
             Declined by the service provider
           </p>
-          <p className="m-0 mt-[2px] font-[Inter] text-[14px] leading-[17px] text-[#484040]">
+          <p className="m-0 mt-2 font-[Inter] text-[20px] font-bold leading-[24px] text-[#484040]">
             {request.declinedReason || 'No reason given.'}
           </p>
+          <div className="mt-3 flex justify-end">
+            <OutlineButton onClick={onFindProvider}>Find Service Provider</OutlineButton>
+          </div>
         </>
       ) : (
         <>
-          <p className="m-0 mt-[11px] font-[Inter] text-[13px] leading-[16px] text-[#484040]">
+          <p className="m-0 mt-[13px] font-[Inter] text-[13px] leading-[16px] text-[#484040]">
             Probable Cause
           </p>
-          <p className="m-0 mt-[2px] font-[Inter] text-[16px] font-bold leading-[19px] text-[#484040]">
+          <p className="m-0 mt-2 font-[Inter] text-[20px] font-bold leading-[24px] text-[#484040]">
             {request.probableCause || 'Waiting for the provider to review the request'}
           </p>
-          <div className="mt-[9px] flex items-center gap-[14px]">
-            <div className="h-[10px] max-w-[742px] flex-1 overflow-hidden rounded-[10px] bg-[#D9D9D9]">
-              <div
-                className="h-full rounded-[10px] bg-[#0255AF]"
-                style={{ width: `${request.confidence}%` }}
-              />
-            </div>
-            <span className="w-[34px] font-[Inter] text-[10px] leading-[12px] text-[#484040]">
-              {request.confidence}%
-            </span>
-          </div>
-          <p className="m-0 mt-[6px] font-[Inter] text-[13px] leading-[16px] text-[#484040]">
-            Confidence based on similar reported cases
-          </p>
+          {request.probableCause && request.confidence != null && (
+            <p className="m-0 mt-[6px] font-[Inter] text-[13px] font-bold leading-[16px] text-[#5F5A5A]">
+              {request.confidence}% AI Confidence based on similar reported cases
+            </p>
+          )}
         </>
-      )}
-      {request.status === 'declined' && (
-        <div className="mt-3 flex justify-end">
-          <SmallButton onClick={onFindProvider}>Find Service Provider</SmallButton>
-        </div>
       )}
     </CardShell>
   );
 }
 
-// "Approved" tab — provider sent a quotation (click to review it)
+// "Active > Quotations" — provider sent a quotation (click to review it)
 function QuotationCard({ request, onOpen }) {
   const { quotation } = request;
   return (
-    <CardShell onClick={onOpen} label={`Review quotation for request ${request.id}`}>
+    <CardShell
+      onClick={onOpen}
+      label={`Review quotation for request ${request.id}`}
+      padding="px-5 pb-4 pt-[10px]"
+    >
       <div className="flex items-start justify-between gap-3">
-        <CardTitle id={request.id} />
-        <Badge color={BADGE_BROWN}>{request.badge}</Badge>
+        <div className="min-w-0">
+          <CardTitle id={request.id} />
+          <p className="m-0 font-[Inter] text-[14px] leading-[24px] text-[#5B5959]">
+            {request.providerName} sent a quotation
+          </p>
+        </div>
+        <Pill color={pillColorOf(request)}>{request.badge}</Pill>
       </div>
-      <p className="m-0 font-[Inter] text-[13px] leading-[16px] text-[#484040]">
-        {request.providerName} sent a quotation
-      </p>
-      <div className="mt-3 flex justify-between font-[Inter] text-[12px] leading-[16px] text-[#484040]">
-        <span className="font-bold">Labor Cost</span>
-        <span>{formatAmount(quotation.items[0].amount)}</span>
-      </div>
-      <div className="mt-[6px] flex justify-between border-t border-[#292727] pt-[6px] font-[Inter] text-[12px] font-bold leading-[16px] text-[#292727]">
-        <span>Total</span>
-        <span>{formatPeso(quotation.total)}</span>
+
+      <div className="mt-[2px]">
+        {quotation.items.map((item) => (
+          <div
+            key={item.label}
+            className="flex justify-between font-[Inter] text-[12px] leading-[20px]"
+          >
+            <span className="font-bold text-[#191818]">{item.label}</span>
+            <span className="text-[#5B5959]">{formatAmount(item.amount)}</span>
+          </div>
+        ))}
+        <Divider className="my-1" />
+        <div className="flex justify-between font-[Inter] text-[12px] font-bold leading-[20px]">
+          <span className="text-[#191818]">Total</span>
+          <span className="text-[#5B5959]">{formatAmount(quotation.total)}</span>
+        </div>
       </div>
     </CardShell>
   );
 }
 
-// "Approved" tab — provider proposed a new schedule
+// "Active > Quotations" — provider proposed a new schedule
 function ScheduleCard({ request, onAccept, onReject }) {
   const { schedule } = request;
   return (
-    <CardShell>
+    <CardShell padding="px-5 pb-4 pt-[10px]">
       <div className="flex items-start justify-between gap-3">
-        <CardTitle id={request.id} />
-        <Badge color={BADGE_BROWN}>{request.badge}</Badge>
+        <div className="min-w-0">
+          <CardTitle id={request.id} />
+          <p className="m-0 font-[Inter] text-[14px] leading-[24px] text-[#5B5959]">
+            {request.providerName} sent a new schedule
+          </p>
+        </div>
+        <Pill color={pillColorOf(request)}>{request.badge}</Pill>
       </div>
-      <p className="m-0 font-[Inter] text-[13px] leading-[16px] text-[#484040]">
-        {request.providerName} sent a new schedule
-      </p>
-      <p className="m-0 mt-3 text-center font-[Inter] text-[14px] font-bold leading-[17px] text-[#292727]">
+      <p className="m-0 mt-3 text-center font-[Inter] text-[14px] font-bold leading-[24px] text-[#292727]">
         {schedule.dateTime}
       </p>
-      <p className="m-0 mt-3 font-[Inter] text-[12px] font-bold leading-[16px] text-[#292727]">
+      <p className="m-0 mt-2 font-[Inter] text-[12px] font-bold leading-[20px] text-[#191818]">
         Reason for New Schedule
       </p>
-      <p className="m-0 font-[Inter] text-[12px] leading-[16px] text-[#5B5959]">
+      <p className="m-0 font-[Inter] text-[12px] leading-[20px] text-[#5B5959]">
         {schedule.reason}
       </p>
-      <div className="mt-3 flex justify-end gap-2">
-        <SmallButton variant="accept" onClick={onAccept}>Accept</SmallButton>
-        <SmallButton variant="decline" onClick={onReject}>Reject</SmallButton>
+      <div className="mt-3 flex justify-end gap-[9px]">
+        <ActionButton tone="approve" onClick={onAccept}>Accept</ActionButton>
+        <ActionButton tone="decline" onClick={onReject}>Reject</ActionButton>
       </div>
     </CardShell>
   );
 }
 
-// "On-going" tab — provider asks for an additional payment
-function AdditionalPaymentCard({ request, onApprove, onDecline, onMessage }) {
+// "Active > On-going" — provider asks for an additional payment
+function AdditionalPaymentCard({ request, onApprove, onNegotiate, onDecline, onMessage }) {
   const { additionalPayment } = request;
   return (
-    <CardShell>
+    <CardShell padding="px-[22px] pb-3 pt-[10px]">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <CardTitle id={request.id} />
-          <p className="m-0 font-[Inter] text-[13px] leading-[16px] text-[#484040]">
+          <p className="m-0 font-[Inter] text-[14px] leading-[22px] text-[#5B5959]">
             {request.providerName}
           </p>
         </div>
-        <Badge color={BADGE_BLUE}>{request.badge}</Badge>
+        <Pill color={pillColorOf(request)}>{request.badge}</Pill>
       </div>
 
-      <div className="mt-3 rounded-[6px] border border-[#EBDD9A] bg-[#FFF8D6] px-4 py-3">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="m-0 font-[Inter] text-[13px] font-bold leading-[16px] text-[#B7791F]">
-              Additional payment needed
-            </p>
-            <p className="m-0 mt-[2px] font-[Inter] text-[11px] leading-[14px] text-[#5B5959]">
-              {additionalPayment.note}
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="m-0 font-[Inter] text-[15px] font-bold leading-[18px] text-[#414141]">
-              ₱ {additionalPayment.amount.toLocaleString('en-PH')}
-            </p>
-            <p className="m-0 font-[Inter] text-[10px] leading-[12px] text-[#7C7979]">
-              Due for approval
-            </p>
-          </div>
+      <div className="mt-[6px] box-border flex items-center justify-between gap-4 rounded-[10px] border border-[#B1A8A8] bg-[#FFFED3] px-3 py-2">
+        <div className="min-w-0">
+          <p className="m-0 font-[Inter] text-[12px] font-bold leading-[20px] text-[#BB8157]">
+            Additional payment needed
+          </p>
+          <p className="m-0 font-[Inter] text-[10px] leading-[17px] text-[#292727]">
+            {additionalPayment.note}
+          </p>
         </div>
-        <div className="mt-3 flex justify-end gap-2">
-          <SmallButton variant="accept" onClick={onApprove}>Approve</SmallButton>
-          <SmallButton variant="decline" onClick={onDecline}>Decline</SmallButton>
+        <div className="flex-none text-center">
+          <p className="m-0 font-[Inter] text-[14px] font-bold leading-[24px] text-[#292727]">
+            ₱ {Number(additionalPayment.amount || 0).toLocaleString('en-PH')}
+          </p>
+          <p className="m-0 font-[Inter] text-[10px] leading-[17px] text-[#292727]">
+            due for approval
+          </p>
         </div>
       </div>
 
-      <div className="mt-3 flex justify-end border-t border-[#D9D9D9] pt-3">
-        <SmallButton onClick={onMessage}>Message</SmallButton>
+      <div className="mt-[10px] flex justify-end gap-[9px]">
+        <ActionButton tone="approve" onClick={onApprove}>Approve</ActionButton>
+        <ActionButton tone="negotiate" onClick={onNegotiate}>Negotiate</ActionButton>
+        <ActionButton tone="decline" onClick={onDecline}>Decline</ActionButton>
+      </div>
+
+      <Divider className="mt-3" />
+      <div className="mt-[10px] flex justify-end">
+        <OutlineButton onClick={onMessage}>Message</OutlineButton>
       </div>
     </CardShell>
   );
 }
 
-// "On-going" and "Done" tabs — progress timeline
+// "Active > On-going" and "Completed" — progress timeline
 function ProgressCard({ request, onPayFinal, onMessage }) {
   return (
-    <CardShell>
+    <CardShell padding="px-[22px] pb-3 pt-[10px]">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <CardTitle id={request.id} />
-          <p className="m-0 font-[Inter] text-[13px] leading-[16px] text-[#484040]">
+          <p className="m-0 font-[Inter] text-[14px] leading-[22px] text-[#5B5959]">
             {request.providerName}
           </p>
         </div>
-        <Badge color={BADGE_BLUE}>{request.badge}</Badge>
+        <Pill color={pillColorOf(request)}>{request.badge}</Pill>
       </div>
 
       <Timeline steps={request.timeline} />
 
-      <div className="flex justify-end gap-2 border-t border-[#D9D9D9] pt-3">
+      <Divider />
+      <div className="mt-[10px] flex justify-end gap-2">
         {request.awaitingPayment && (
-          <SmallButton onClick={onPayFinal}>Proceed to Payment</SmallButton>
+          <OutlineButton onClick={onPayFinal}>Proceed to Payment</OutlineButton>
         )}
-        <SmallButton onClick={onMessage}>Message</SmallButton>
+        <OutlineButton onClick={onMessage}>Message</OutlineButton>
       </div>
     </CardShell>
   );
@@ -448,37 +665,39 @@ function ProgressCard({ request, onPayFinal, onMessage }) {
 export default function TrackRequest() {
   const navigate = useNavigate();
 
-  // Notifications deep-link here with ?tab=sent|approved|ongoing|declined|done.
+  // Filters. status / category = null until the customer picks one (placeholder label shows
+  // and everything is listed). `activeSub` is the sub-tab under the "Active" status.
   const [searchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab');
-  const isValidTab = (key) => TABS.some((tab) => tab.key === key);
-  const [activeTab, setActiveTab] = useState(isValidTab(tabFromUrl) ? tabFromUrl : 'sent');
+  const initialView = TAB_TO_VIEW[tabFromUrl] || {};
+  const [status, setStatus] = useState(initialView.status ?? null);
+  const [activeSub, setActiveSub] = useState(initialView.sub ?? 'approved');
+  const [category, setCategory] = useState(null);
   useEffect(() => {
-    if (isValidTab(tabFromUrl)) setActiveTab(tabFromUrl);
-  }, [tabFromUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+    const view = TAB_TO_VIEW[tabFromUrl];
+    if (!view) return;
+    setStatus(view.status);
+    if (view.sub) setActiveSub(view.sub);
+  }, [tabFromUrl]);
 
   const [search, setSearch] = useState('');
-  const [cardsByTab, setCardsByTab] = useState({
-    sent: [],
-    approved: [],
-    ongoing: [],
-    declined: [],
-    done: [],
-  });
+  const [cardsByTab, setCardsByTab] = useState(
+    Object.fromEntries(GROUP_ORDER.map((key) => [key, []]))
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // GET /api/service-requests/tracking — one call fills every tab.
+  // GET /api/service-requests/tracking — one call fills every group.
   const load = useCallback(async () => {
     setError('');
     try {
       const groups = await getTrackingCards();
       const mapped = {};
-      TABS.forEach(({ key }) => {
+      GROUP_ORDER.forEach((key) => {
         mapped[key] = (groups?.[key] ?? []).map(mapCard(key));
       });
-      // An unpaid completed job belongs in On-going; a paid one in Done (mapCard sets `status`).
-      const regrouped = Object.fromEntries(TABS.map(({ key }) => [key, []]));
+      // An unpaid completed job belongs in On-going; a paid one in Completed (mapCard sets `status`).
+      const regrouped = Object.fromEntries(GROUP_ORDER.map((key) => [key, []]));
       Object.values(mapped)
         .flat()
         .forEach((card) => regrouped[card.status in regrouped ? card.status : 'sent'].push(card));
@@ -494,12 +713,18 @@ export default function TrackRequest() {
     load();
   }, [load]);
 
+  const statusKey = status ?? 'all';
+  const showSubTabs = statusKey === 'active';
+  const filtersActive = statusKey !== 'all' || (category && category !== 'all') || search.trim();
+
   const visibleRequests = useMemo(() => {
+    const groups = showSubTabs ? [activeSub] : STATUS_GROUPS[statusKey] ?? GROUP_ORDER;
     const q = search.trim().toLowerCase();
-    const list = cardsByTab[activeTab] ?? [];
-    if (!q) return list;
-    return list.filter((r) => JSON.stringify(r).toLowerCase().includes(q));
-  }, [cardsByTab, activeTab, search]);
+    return groups
+      .flatMap((key) => cardsByTab[key] ?? [])
+      .filter((r) => !category || category === 'all' || categoryKeyOf(r.category) === category)
+      .filter((r) => !q || searchText(r).includes(q));
+  }, [cardsByTab, statusKey, showSubTabs, activeSub, category, search]);
 
   const goToPayment = (request, amount, paymentType) => {
     navigate(`/customer/requests/${request.id}/payment`, {
@@ -563,6 +788,7 @@ export default function TrackRequest() {
         <AdditionalPaymentCard
           request={request}
           onApprove={() => handleAdditionalPayment(request, true)}
+          onNegotiate={() => handleMessage(request)}
           onDecline={() => handleAdditionalPayment(request, false)}
           onMessage={() => handleMessage(request)}
         />
@@ -584,57 +810,101 @@ export default function TrackRequest() {
 
   return (
     <CustomerSidebar>
-      <div className="box-border px-[42px] pb-10 pt-[25px]">
-        <h1 className="m-0 flex h-[68px] items-center font-[Quicksand] text-[48px] font-bold leading-[32px] text-[#005FCA]">
-          My Requests
-        </h1>
+      <div className="min-h-full bg-[#FAFAFA]">
+        <div className="box-border px-[42px] pb-10 pt-[25px]">
+          <h1 className="m-0 flex h-[68px] items-center font-[Quicksand] text-[48px] font-bold leading-[32px] text-[#005FCA]">
+            My Requests
+          </h1>
 
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search request details...."
-          aria-label="Search request details"
-          className="mt-[21px] box-border h-[54px] w-full max-w-[876px] rounded-[8px] border-none bg-[#D2D2D2] px-[25px] font-[Poppins] text-[16px] font-medium text-black outline-none placeholder:text-black/[0.34] focus-visible:ring-2 focus-visible:ring-[#0255AF]"
-        />
+          <div className="max-w-[1068px]">
+            {/* Search + Categories + Status */}
+            <div className="mt-[17px] flex flex-wrap items-start gap-x-[15px] gap-y-3">
+              <div className="relative h-[49px] min-w-[240px] flex-1">
+                <Search
+                  size={20}
+                  color="#393939"
+                  className="pointer-events-none absolute left-[22px] top-1/2 -translate-y-1/2"
+                />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search request"
+                  aria-label="Search request"
+                  className="box-border h-full w-full rounded-[14px] border border-[#7E7A7A] bg-white pl-[67px] pr-4 font-[Inter] text-[16px] font-medium leading-[24px] tracking-[-0.3125px] text-[#292727] outline-none placeholder:text-[#718096] focus-visible:border-[#0255AF] focus-visible:ring-1 focus-visible:ring-[#0255AF]"
+                />
+              </div>
 
-        <div className="mt-[21px] flex flex-wrap gap-1" role="group" aria-label="Request status">
-          {TABS.map((tab) => {
-            const active = tab.key === activeTab;
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                aria-pressed={active}
-                onClick={() => setActiveTab(tab.key)}
-                className={`h-[29px] w-[102px] cursor-pointer rounded-full border border-[#B1A8A8] font-[Quicksand] text-[13px] font-medium ${
-                  active ? 'bg-[#021E79] text-white' : 'bg-white text-[#414141] hover:bg-[#F3F3F3]'
-                }`}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
+              <div className="flex gap-2">
+                <FilterDropdown
+                  placeholder="Categories"
+                  options={CATEGORY_OPTIONS}
+                  value={category}
+                  onChange={setCategory}
+                />
+                <FilterDropdown
+                  placeholder="Status"
+                  options={STATUS_OPTIONS}
+                  value={status}
+                  onChange={setStatus}
+                />
+              </div>
+            </div>
 
-        {error && (
-          <p role="alert" className="m-0 mt-4 font-[Inter] text-[13px] text-[#B91C1C]">
-            {error}
-          </p>
-        )}
+            {/* Active > Quotations | On-going */}
+            {showSubTabs && (
+              <div role="tablist" aria-label="Active requests" className="mt-[18px] flex">
+                {ACTIVE_SUBTABS.map((tab) => {
+                  const on = tab.key === activeSub;
+                  return (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={on}
+                      onClick={() => setActiveSub(tab.key)}
+                      className="flex-1 cursor-pointer border-none bg-transparent p-0 text-center"
+                    >
+                      <span
+                        className={`block h-[29px] font-[Quicksand] text-[17px] leading-[29px] text-[#292727] ${
+                          on ? 'font-bold' : 'font-medium'
+                        }`}
+                      >
+                        {tab.label}
+                      </span>
+                      <span
+                        className={`mt-[10px] block h-[3px] rounded-[10px] ${
+                          on ? 'bg-[#18315B]' : 'bg-[#D9D9D9]'
+                        }`}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
-        <div className="mt-[34px] flex flex-col gap-5">
-          {loading ? (
-            <p className="m-0 font-[Inter] text-[14px] text-[#7C7979]">Loading your requests…</p>
-          ) : visibleRequests.length === 0 ? (
-            <p className="m-0 font-[Inter] text-[14px] text-[#7C7979]">
-              No requests to show here yet.
-            </p>
-          ) : (
-            visibleRequests.map((request) => (
-              <div key={request.cardId}>{renderCard(request)}</div>
-            ))
-          )}
+            {error && (
+              <p role="alert" className="m-0 mt-4 font-[Inter] text-[13px] text-[#B91C1C]">
+                {error}
+              </p>
+            )}
+
+            <div className={`flex flex-col gap-[18px] ${showSubTabs ? 'mt-[30px]' : 'mt-[37px]'}`}>
+              {loading ? (
+                <p className="m-0 font-[Inter] text-[14px] text-[#7C7979]">Loading your requests…</p>
+              ) : visibleRequests.length === 0 ? (
+                <p className="m-0 font-[Inter] text-[14px] text-[#7C7979]">
+                  {filtersActive
+                    ? 'No requests match your search or filters.'
+                    : 'No requests to show here yet.'}
+                </p>
+              ) : (
+                visibleRequests.map((request) => (
+                  <div key={request.cardId}>{renderCard(request)}</div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </CustomerSidebar>
