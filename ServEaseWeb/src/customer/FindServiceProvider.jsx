@@ -22,6 +22,29 @@ const CATEGORY_OPTIONS = [
   { value: 'home', label: 'Home', query: { category: 'Home Repair Services' } },
 ];
 
+// The provider's location comes from the provider's own account (stored by the backend).
+// The API may send it ready-made (locationName / address / location) or as separate parts
+// (street, barangay, city, ...). Whatever arrives is shown; nothing is invented here.
+const clean = (v) => (typeof v === 'string' ? v.trim() : '');
+const resolveLocation = (p = {}) => {
+  const direct = [
+    p.locationName,
+    p.location_name,
+    p.address,
+    p.companyAddress,
+    p.company_address,
+    typeof p.location === 'string' ? p.location : '',
+  ]
+    .map(clean)
+    .find(Boolean);
+  if (direct) return direct;
+  const src = p.location && typeof p.location === 'object' ? p.location : p;
+  return [src.street, src.barangay, src.city, src.municipality, src.province]
+    .map(clean)
+    .filter(Boolean)
+    .join(', ');
+};
+
 function SearchIcon() {
   return (
     <svg
@@ -43,7 +66,7 @@ function SearchIcon() {
 
 function ChevronIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-none">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-none">
       <path d="m6 9 6 6 6-6" />
     </svg>
   );
@@ -51,7 +74,7 @@ function ChevronIcon() {
 
 function PinIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#292727" strokeWidth="1.5" aria-hidden="true" className="opacity-90">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#292727" strokeWidth="1.5" aria-hidden="true" className="opacity-[0.88]">
       <path d="M12 22s-7-6.4-7-12a7 7 0 0 1 14 0c0 5.6-7 12-7 12Z" />
       <circle cx="12" cy="10" r="2.6" />
     </svg>
@@ -68,7 +91,7 @@ function CheckBadgeIcon({ size = 13 }) {
 }
 
 // Dropdown that opens a list right under its button (Figma: "Available" / "Automotive" filters).
-function FilterDropdown({ label, options, value, onChange }) {
+function FilterDropdown({ label, options, value, onChange, className = '' }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -92,14 +115,14 @@ function FilterDropdown({ label, options, value, onChange }) {
   const selected = options.find((o) => o.value === value) || options[0];
 
   return (
-    <div ref={ref} className={`relative h-[49px] w-full flex-none sm:w-[173px] ${open ? 'z-30' : 'z-10'}`}>
+    <div ref={ref} className={`relative h-[49px] w-full flex-none sm:w-[173px] ${open ? 'z-30' : 'z-10'} ${className}`}>
       <button
         type="button"
         aria-label={label}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="relative z-10 box-border flex h-[49px] w-full cursor-pointer items-center justify-between rounded-[14px] border border-[#7E7A7A] bg-white px-5 text-left font-[Inter] text-[14px] font-semibold leading-[24px] tracking-[-0.3125px] text-[#484040]"
+        className="relative z-10 box-border flex h-[49px] w-full cursor-pointer items-center justify-between rounded-[14px] border border-[#7E7A7A] bg-white pl-5 pr-[5px] text-left font-[Inter] text-[14px] font-semibold leading-[24px] tracking-[-0.3125px] text-[#484040]"
       >
         <span className="truncate">{selected.label}</span>
         <ChevronIcon />
@@ -161,7 +184,7 @@ export default function FindServiceProvider() {
           let list = (data?.providers ?? []).map((p) => ({
             id: p.id,
             name: p.name,
-            address: p.locationName || '',
+            address: resolveLocation(p),
             rating: p.rating ?? null, // null = no reviews yet
             verified: Boolean(p.verified),
             available: Boolean(p.available),
@@ -184,20 +207,18 @@ export default function FindServiceProvider() {
   }, [search, statusFilter, categoryFilter]);
 
   const handleViewProfile = (providerId) => {
-    // TODO (backend-ready): carry along request context if needed, e.g.
-    // navigate(`/customer/providers/${providerId}`, { state: { requestId, diagnosis } });
     navigate(`/customer/providers/${providerId}`);
   };
 
   return (
     <CustomerSidebar>
-      <div className="box-border px-4 py-6 sm:px-9">
+      <div className="box-border px-4 py-6 sm:px-[42px]">
         <h1 className="m-0 flex min-h-[68px] items-center font-[Quicksand] text-[32px] font-bold leading-tight text-[#005FCA] sm:text-[40px] lg:text-[48px] lg:leading-[32px]">
           Service Providers
         </h1>
 
-        {/* Search bar + the two filter dropdowns (Figma: one row, 49px high) */}
-        <div className="mt-[19px] flex max-w-[1068px] flex-col gap-[10px] sm:flex-row sm:items-start">
+        {/* Search bar (699px) + the two filter dropdowns (173px each), one row, 49px high */}
+        <div className="mt-[17px] flex max-w-[1068px] flex-col gap-[10px] sm:flex-row sm:items-start sm:gap-0">
           <div className="relative h-[49px] min-w-0 flex-1">
             <SearchIcon />
             <input
@@ -210,12 +231,14 @@ export default function FindServiceProvider() {
             />
           </div>
           <FilterDropdown
+            className="sm:ml-[15px]"
             label="Filter by availability"
             options={STATUS_OPTIONS}
             value={statusFilter}
             onChange={setStatusFilter}
           />
           <FilterDropdown
+            className="sm:ml-2"
             label="Filter by category"
             options={CATEGORY_OPTIONS}
             value={categoryFilter}
@@ -238,11 +261,11 @@ export default function FindServiceProvider() {
               }}
               className="relative box-border h-[98px] w-full min-w-[340px] cursor-pointer rounded-[20px] border border-[#818080] bg-white font-[SF_Pro,system-ui,sans-serif] text-[#484040]"
             >
-              <div className="absolute right-[15px] top-[9px] flex gap-[4px]">
+              <div className="absolute right-[14px] top-[9px] flex gap-[4px]">
                 {provider.verified && (
                   <span className="flex h-[21px] w-[74px] items-center rounded-[10px] bg-[rgba(2,85,175,0.46)] pl-[9px] text-[11px] leading-[13px] text-[#0255AF]">
                     <CheckBadgeIcon />
-                    <span className="ml-[5px]">Verified</span>
+                    <span className="ml-[3px]">Verified</span>
                   </span>
                 )}
                 {provider.available && (
@@ -256,23 +279,23 @@ export default function FindServiceProvider() {
                 {provider.name}
               </p>
 
-              {/* Location: pin icon + the provider's address, right under the name */}
+              {/* Location from the provider's account: pin + address, right under the name */}
               {provider.address && (
                 <>
-                  <div className="absolute left-[22px] top-[38px]">
+                  <div className="absolute left-[19px] top-[39px]">
                     <PinIcon />
                   </div>
-                  <p className="absolute left-[44px] top-[39px] m-0 max-w-[calc(100%-70px)] truncate text-[13px] leading-[16px]">
+                  <p className="absolute left-[41px] top-[38px] m-0 max-w-[calc(100%-70px)] truncate text-[13px] leading-[16px]">
                     {provider.address}
                   </p>
                 </>
               )}
 
-              <p className="absolute left-[22px] top-[62px] m-0 text-[11px] leading-[13px]">
+              <p className="absolute left-[22px] top-[61px] m-0 text-[11px] leading-[13px]">
                 Reviews ({provider.rating ?? 'New'})
               </p>
 
-              <span className="absolute left-[calc(50%-15px)] top-[78px] -translate-x-1/2 text-center text-[9px] leading-[11px] underline">
+              <span className="absolute left-[calc(50%-20px)] top-[75px] -translate-x-1/2 text-center text-[9px] leading-[11px] underline">
                 View Profile
               </span>
             </div>
