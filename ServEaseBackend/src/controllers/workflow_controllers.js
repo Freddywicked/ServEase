@@ -1478,7 +1478,9 @@ const browseProviders = asyncHandler(async (req, res) => {
       rating: rating ? Math.round(rating.rating * 10) / 10 : null,
       reviewCount: rating?.reviewCount || 0,
       experienceYears: p.years_of_experience ?? null,
-      locationName: p.company_address || '',
+      // Fall back to the provider's user-account address when no company address
+      // was saved — same convention as recommendedForDraft / nearby providers.
+      locationName: p.company_address || users[p.user_id]?.address || '',
       availabilitySchedule: p.availability || '',
       offersHomeServices: Boolean(p.offers_home_service),
       // How far (km) this provider travels for home service; null = not offered / not set.
@@ -1538,7 +1540,7 @@ const getProviderDetails = asyncHandler(async (req, res) => {
       verified: true,
       available: !unavailable.has(p.user_id),
       experienceYears: p.years_of_experience ?? null,
-      locationName: p.company_address || '',
+      locationName: p.company_address || users[p.user_id]?.address || '',
       availabilitySchedule: p.availability || '',
       workplace: p.company_name || '',
       offersHomeServices: Boolean(p.offers_home_service),
