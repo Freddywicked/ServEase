@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import ServiceProviderSidebar from '../components/ServiceProviderSidebar.jsx';
+import UserAvatar from '../components/UserAvatar.jsx';
 import * as api from '../api/client';
 import { useAuth } from '../context/auth_context';
-import avatarCircle from '../assets/icon_bigellipse.png';
 import starIcon from '../assets/icon_star.png';
 
 // Returns the first non-empty value found under any of the given keys of `source`.
@@ -214,8 +214,9 @@ function EditButton({ onClick, className = '' }) {
 }
 
 // Blue banner + white strip with the avatar, name and Edit button.
-function ProfileBanner({ name, onEdit }) {
-  const letter = (name || '').trim()[0]?.toUpperCase() || '';
+// photoUrl is the signed URL from GET /api/auth/me (user.photoUrl); UserAvatar
+// falls back to the initial circle when the account has no photo.
+function ProfileBanner({ name, photoUrl, onEdit }) {
   return (
     <div className="relative">
       <div className="box-border h-[142px] rounded-b-[1px] rounded-t-[10px] border border-b-0 border-black/[0.14] bg-[#7DABDD]" />
@@ -226,10 +227,13 @@ function ProfileBanner({ name, onEdit }) {
         <EditButton onClick={onEdit} className="absolute right-[34px] top-[21px]" />
       </div>
 
-      <div className="absolute left-[27px] top-[82px] flex h-[121px] w-[121px] items-center justify-center">
-        <img src={avatarCircle} alt="" className="absolute inset-0 h-full w-full" />
-        <span className="relative font-[Inter] text-[64px] font-bold leading-[77px] text-white">{letter}</span>
-      </div>
+      <UserAvatar
+        name={name}
+        src={photoUrl}
+        sizeClass="h-[121px] w-[121px]"
+        textClass="text-[64px] leading-[77px]"
+        className="absolute left-[27px] top-[82px]"
+      />
     </div>
   );
 }
@@ -444,7 +448,7 @@ export default function ServiceProviderProfile() {
         </h1>
 
         <div className="mt-[17px]">
-          <ProfileBanner name={user.name} onEdit={handleEditProfile} />
+          <ProfileBanner name={user.name} photoUrl={profile.photoUrl} onEdit={handleEditProfile} />
         </div>
 
         <div className="font-[SF_Pro,system-ui,sans-serif] text-[#484040]">

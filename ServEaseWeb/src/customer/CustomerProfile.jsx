@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
+import UserAvatar from '../components/UserAvatar.jsx';
 import { me } from '../api/client';
 import { useAuth } from '../context/auth_context';
-import avatarCircle from '../assets/icon_bigellipse.png';
 import formIconWhite from '../assets/icon_form_white.png';
 
 // Returns the first non-empty value found under any of the given keys of `source`.
@@ -45,8 +45,9 @@ function EditButton({ onClick, className = '' }) {
 }
 
 // Blue banner + white strip with the avatar, name and Edit button.
-function ProfileBanner({ name, onEdit }) {
-  const letter = (name || '').trim()[0]?.toUpperCase() || '';
+// photoUrl is the signed URL from GET /api/auth/me (user.photoUrl); UserAvatar
+// falls back to the initial circle when the account has no photo.
+function ProfileBanner({ name, photoUrl, onEdit }) {
   return (
     <div className="relative">
       <div className="box-border h-[142px] rounded-b-[1px] rounded-t-[10px] border border-b-0 border-black/[0.14] bg-[#7DABDD]" />
@@ -57,10 +58,13 @@ function ProfileBanner({ name, onEdit }) {
         <EditButton onClick={onEdit} className="absolute right-[34px] top-[21px]" />
       </div>
 
-      <div className="absolute left-[27px] top-[82px] flex h-[121px] w-[121px] items-center justify-center">
-        <img src={avatarCircle} alt="" className="absolute inset-0 h-full w-full" />
-        <span className="relative font-[Inter] text-[64px] font-bold leading-[77px] text-white">{letter}</span>
-      </div>
+      <UserAvatar
+        name={name}
+        src={photoUrl}
+        sizeClass="h-[121px] w-[121px]"
+        textClass="text-[64px] leading-[77px]"
+        className="absolute left-[27px] top-[82px]"
+      />
     </div>
   );
 }
@@ -136,7 +140,7 @@ export default function CustomerProfile() {
         </h1>
 
         <div className="mt-[17px]">
-          <ProfileBanner name={user.name} onEdit={handleEditProfile} />
+          <ProfileBanner name={user.name} photoUrl={profile.photoUrl} onEdit={handleEditProfile} />
         </div>
 
         <section className="relative mt-[41px] box-border h-[173px] rounded-[10px] border border-black/[0.46] bg-[#FDFFFF]">

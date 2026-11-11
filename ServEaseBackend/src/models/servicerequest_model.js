@@ -134,11 +134,13 @@ const photoUrlsFor = async (requestIds) => {
 };
 
 // ---------- users / providers ----------
-// { [user_id]: { user_id, name, address } }
+// { [user_id]: { user_id, name, address, photo_url } }
+// photo_url is the private storage path of the user's profile photo — never send it
+// raw to a client; sign it first (getUserPhotoUrl), like otherPartyOf() does for chats.
 const findUsersByIds = async (userIds) => {
   const ids = [...new Set(userIds.filter(Boolean))];
   if (ids.length === 0) return {};
-  const rows = unwrap(await supabase.from('users').select('user_id, name, address').in('user_id', ids));
+  const rows = unwrap(await supabase.from('users').select('user_id, name, address, photo_url').in('user_id', ids));
   return Object.fromEntries(rows.map((u) => [u.user_id, u]));
 };
 

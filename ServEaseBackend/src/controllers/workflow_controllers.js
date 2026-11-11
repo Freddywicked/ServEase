@@ -22,7 +22,7 @@ const asyncHandler = require('../utils/async_handler');
 const Request = require('../models/servicerequest_model');
 const Workflow = require('../models/workflow_model');
 const Provider = require('../models/provider_model');
-const { getProviderFileUrl } = require('../utils/storage');
+const { getProviderFileUrl, getUserPhotoUrl } = require('../utils/storage');
 const { analyzeSentiment } = require('../utils/ai_sentiment');
 
 // The stage list the provider's Jobs screen offers; also the customer's timeline.
@@ -1178,7 +1178,13 @@ const conversationsFor = async (userId) => {
 const otherPartyOf = async (row, viewer) => {
   if (viewer === 'provider') {
     const users = await Request.findUsersByIds([row.customer_id]);
-    return { userId: row.customer_id, name: users[row.customer_id]?.name || 'Customer', photoUrl: null };
+    const customer = users[row.customer_id];
+    return {
+      userId: row.customer_id,
+      name: customer?.name || 'Customer',
+      // users.photo_url is a private storage path; sign it so the app can render it.
+      photoUrl: await getUserPhotoUrl(customer?.photo_url),
+    };
   }
   const recipients = await Request.listRecipients(row.request_id);
   const providerId = pickProviderId(row, recipients);

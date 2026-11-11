@@ -7,6 +7,7 @@ import {
   getConversationMessages,
   sendConversationMessage,
 } from '../api/client';
+import UserAvatar from './UserAvatar';
 
 /* =====================================================================================
    MESSAGING WIDGET — floating chat for every customer and service provider screen
@@ -70,7 +71,13 @@ export const openChat = (participant) =>
 // GET /api/conversations/:id/messages marks the thread read for the viewer.
 const toConversation = (c) => ({
   id: c.id,
-  participant: { id: c.participantId, name: c.name, online: Boolean(c.isOnline) },
+  participant: {
+    id: c.participantId,
+    name: c.name,
+    // Signed profile-photo URL from the backend (null when the person has no photo).
+    avatarUrl: c.avatarUrl || null,
+    online: Boolean(c.isOnline),
+  },
   unreadCount: c.hasUnread ? 1 : 0,
   // Preview line for the list; the full history loads when the chat is opened.
   // The list endpoint sends no timestamp, so sentAt stays null (the UI hides it).
@@ -126,6 +133,7 @@ const messagesService = {
         participant: {
           id: participant.id || null,
           name: participant.name || 'Conversation',
+          avatarUrl: participant.avatarUrl || null,
           online: false,
         },
         unreadCount: 0,
@@ -164,19 +172,9 @@ const sortByLatest = (list) =>
   });
 
 /* ------------------------------ small UI parts ------------------------------ */
-
-function Avatar({ name, sizeClass, textClass, dot = false }) {
-  return (
-    <span
-      className={`relative flex flex-none items-center justify-center rounded-full bg-[#0255AF] font-[Inter] font-bold text-white ${sizeClass} ${textClass}`}
-    >
-      {name?.[0]?.toUpperCase()}
-      {dot && (
-        <span className="absolute right-0 top-0 h-[14px] w-[14px] rounded-full border-2 border-white bg-[#D32F2F]" />
-      )}
-    </span>
-  );
-}
+// Avatars come from the shared UserAvatar component: it renders the person's real
+// profile photo (participant.avatarUrl, signed by the backend) and falls back to
+// their initial when there is no photo or the signed URL expired.
 
 /* ------------------------------ widget ------------------------------ */
 
@@ -378,8 +376,9 @@ export default function MessagingWidget({ viewer = 'customer' }) {
                     onClick={() => openConversation(c.id)}
                     className="flex w-full cursor-pointer items-center gap-4 rounded-[8px] border-none bg-transparent px-0 py-[9px] text-left hover:bg-[#F6FAFF]"
                   >
-                    <Avatar
+                    <UserAvatar
                       name={c.participant.name}
+                      src={c.participant.avatarUrl}
                       sizeClass="h-[56px] w-[56px]"
                       textClass="text-[24px]"
                       dot={unread}
@@ -501,9 +500,14 @@ export default function MessagingWidget({ viewer = 'customer' }) {
             onClick={() => openConversation(c.id)}
             aria-label={`${c.participant.name}, ${c.unreadCount} unread message${c.unreadCount > 1 ? 's' : ''}`}
             title={c.participant.name}
-            className="relative flex h-[67px] w-[67px] cursor-pointer items-center justify-center rounded-full border-none bg-[#0255AF] p-0 font-[Inter] text-[28px] font-bold text-white"
+            className="relative h-[67px] w-[67px] cursor-pointer rounded-full border-none bg-transparent p-0"
           >
-            {c.participant.name[0].toUpperCase()}
+            <UserAvatar
+              name={c.participant.name}
+              src={c.participant.avatarUrl}
+              sizeClass="h-[67px] w-[67px]"
+              textClass="text-[28px]"
+            />
             <span className="absolute -right-[2px] -top-[2px] flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-[#D32F2F] px-1 font-[Inter] text-[12px] font-bold leading-none text-white">
               {c.unreadCount}
             </span>

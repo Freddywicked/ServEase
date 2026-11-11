@@ -18,6 +18,7 @@ import formIcon from '../assets/icon_form.png';
 import switchAccountIcon from '../assets/icon_switch_account.png';
 import MessagingWidget from './MessagingWidget';
 import Notifications from './Notifications';
+import UserAvatar from './UserAvatar';
 
 const EXPANDED_WIDTH = 229;
 const COLLAPSED_WIDTH = 84;
@@ -169,9 +170,14 @@ export default function CustomerSidebar({ children, initials }) {
               aria-expanded={menuOpen}
               className="flex cursor-pointer items-center gap-3 border-none bg-transparent p-0"
             >
-              <span className="flex h-[50px] w-[50px] flex-none items-center justify-center rounded-full bg-[#0255AF] font-[Inter] text-[24px] font-bold leading-[29px] text-white">
-                {avatarInitials}
-              </span>
+              {/* Profile photo from the backend (user.photoUrl); falls back to the initial */}
+              <UserAvatar
+                name={user?.name}
+                src={user?.photoUrl}
+                initials={avatarInitials}
+                sizeClass="h-[50px] w-[50px]"
+                textClass="text-[24px] leading-[29px]"
+              />
 
               <span className="hidden flex-col items-start text-left sm:flex">
                 <span className="font-[Inter] text-[16px] font-bold leading-[19px] text-black">

@@ -17,6 +17,7 @@ import dropdownIcon from '../assets/icon_dropdown.png';
 import switchAccountIcon from '../assets/icon_switch_account.png';
 import MessagingWidget from './MessagingWidget';
 import Notifications from './Notifications';
+import UserAvatar from './UserAvatar';
 
 const EXPANDED_WIDTH = 229;
 const COLLAPSED_WIDTH = 84;
@@ -138,9 +139,14 @@ export default function ServiceProviderSidebar({ children, initials }) {
               aria-expanded={menuOpen}
               className="flex cursor-pointer items-center gap-3 border-none bg-transparent p-0"
             >
-              <span className="flex h-[50px] w-[50px] flex-none items-center justify-center rounded-full bg-[#0255AF] font-[Inter] text-[24px] font-bold leading-[29px] text-white">
-                {shownInitials}
-              </span>
+              {/* Profile photo from the backend (user.photoUrl); falls back to the initials */}
+              <UserAvatar
+                name={user?.name}
+                src={user?.photoUrl}
+                initials={shownInitials}
+                sizeClass="h-[50px] w-[50px]"
+                textClass="text-[24px] leading-[29px]"
+              />
 
               <span className="hidden flex-col items-start text-left sm:flex">
                 <span className="font-[Inter] text-[16px] font-bold leading-[19px] text-black">
