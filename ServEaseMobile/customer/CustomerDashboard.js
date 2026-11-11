@@ -11,90 +11,73 @@ import { formatTimeAgo } from '../utils/formatters';
 import NotificationsModal from '../components/NotificationsModal';
 import { DashboardSection, DashboardItem, DashboardEmpty } from '../components/DashboardSection';
 
-const PREVIEW_LIMIT = 2; // each container previews two rows, like the design
+const PREVIEW_LIMIT = 2; // Each container previews up to two rows
 
-// "Roof Leakage | #SR-0000"
-const historyTitle = (item) => `${item.category} | #${item.id}`;
+// Formatter to match Figma design: "Category | #SR-0000"
+const formatRequestTitle = (item) => {
+    if (!item) return '';
+    const category = item.category || item.categoryName || 'Service Request';
+    const id = item.id || item.requestId || '0000';
+    return `${category} | #${id}`;
+};
 
 const CustomerDashboard = ({ navigation, route }) => {
-    // `user` and `provider` come from auth_context (populated on login, kept in sync via
-    // refreshUser()). `provider` is null until an application exists, then looks like
-    // { verification_status }, e.g. 'pending' or 'verified'.
     const { user, provider, refreshUser } = useAuth();
     const resetDraft = useServiceRequestDraftStore((state) => state.resetDraft);
     const customerName = user?.name || 'Customer';
-    const applicationStatus = provider?.verification_status ?? null; // null | 'pending' | 'verified' | 'rejected'
+    const applicationStatus = provider?.verification_status ?? null;
 
-    const [activeRepair, setActiveRepair] = useState(null);
+    const [activeRepairs, setActiveRepairs] = useState([]);
     const [recentHistory, setRecentHistory] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [loadFailed, setLoadFailed] = useState(false);
     const [notificationsVisible, setNotificationsVisible] = useState(false);
     const scrollRef = useRef(null);
 
-    // Loads the active repair + a short preview of the customer's history from the backend.
-    // Runs every time the dashboard regains focus, so a request just sent from the
-    // Create Service Request flow shows up as soon as the customer lands back here.
-    // (Notifications are NOT shown on the dashboard — NotificationsModal fetches and
-    // displays them only when the bell is pressed.)
     const loadDashboardData = useCallback(async () => {
         setLoadFailed(false);
         const [repairResult, historyResult] = await Promise.allSettled([
             getActiveRepair(),
-            getMyServiceRequests(), // newest first
+            getMyServiceRequests(),
         ]);
-        if (repairResult.status === 'fulfilled') setActiveRepair(repairResult.value);
-        if (historyResult.status === 'fulfilled') setRecentHistory(historyResult.value.slice(0, PREVIEW_LIMIT));
-        if (repairResult.status === 'rejected' || historyResult.status === 'rejected') setLoadFailed(true);
+
+        if (repairResult.status === 'fulfilled' && repairResult.value) {
+            // Support both an array of active repairs or a single object response
+            const activeData = Array.isArray(repairResult.value)
+                ? repairResult.value
+                : [repairResult.value];
+            setActiveRepairs(activeData.slice(0, PREVIEW_LIMIT));
+        } else {
+            setActiveRepairs([]);
+        }
+
+        if (historyResult.status === 'fulfilled' && historyResult.value) {
+            setRecentHistory(historyResult.value.slice(0, PREVIEW_LIMIT));
+        }
+
+        if (repairResult.status === 'rejected' || historyResult.status === 'rejected') {
+            setLoadFailed(true);
+        }
         setIsLoading(false);
     }, []);
 
     useFocusEffect(
         useCallback(() => {
             loadDashboardData();
-        }, [loadDashboardData]),
+        }, [loadDashboardData])
     );
 
     useEffect(() => {
-        // Coming straight from submitting a Service Provider application —
-        // ServiceProviderVerificationRequirements.js already calls refreshUser() after a
-        // successful submit, so this is just a safety net.
         if (route?.params?.pendingApproval && applicationStatus == null) {
-            refreshUser().catch(() => {
-                // Non-fatal: the banner just won't show until the next refreshUser() call.
-            });
+            refreshUser().catch(() => {});
         }
-
-        // BACKEND-READY: poll (or subscribe via Firebase Cloud Messaging) for the Service
-        // Provider application status so the pending banner clears once the admin approves.
-        //
-        // const interval = setInterval(() => {
-        //   refreshUser().catch(() => {});
-        // }, 30000);
-        // return () => clearInterval(interval);
     }, [route?.params?.pendingApproval, applicationStatus, refreshUser]);
 
-    // PROVIDER COMMUNICATION (comment block): subscribe to the customer's active request so
-    // the "Active Repair" container refreshes the moment the provider submits a QUOTATION or
-    // declines. Uncomment once serviceRequestApi.js's Realtime helpers are enabled.
-    //
-    // useEffect(() => {
-    //     if (!activeRepair?.requestId) return undefined;
-    //     const unsubscribe = subscribeToServiceRequest(activeRepair.requestId, () => {
-    //         loadDashboardData();
-    //     });
-    //     return unsubscribe;
-    // }, [activeRepair?.requestId, loadDashboardData]);
-    //
-    // (import { subscribeToServiceRequest } from '../api/serviceRequestApi';)
-
     const handleCreateServiceRequest = () => {
-        // Always start a new request from a clean draft.
         resetDraft();
         navigation.navigate(ROUTES.CREATE_SERVICE_REQUEST);
     };
 
-    // The bell toggles the dropdown. Scroll to the top first so it opens right under the header.
     const handleNotificationsPress = () => {
         if (!notificationsVisible) scrollRef.current?.scrollTo({ y: 0, animated: false });
         setNotificationsVisible((visible) => !visible);
@@ -103,13 +86,16 @@ const CustomerDashboard = ({ navigation, route }) => {
     const goToTrack = () => navigation.navigate(ROUTES.TRACK);
     const goToHistory = () => navigation.navigate('History');
 
-    const activeItems = activeRepair
-        ? [{ id: activeRepair.requestId ?? 'active-repair', title: activeRepair.statusLabel ?? activeRepair.requestStatus, summary: '' }]
-        : [];
+    // Format active items to match Figma: Title + Summary text
+    const activeItems = activeRepairs.map((item) => ({
+        id: item.id || item.requestId,
+        title: formatRequestTitle(item),
+        summary: item.summary || item.description || item.problemDescription || 'No summary available.',
+    }));
 
     const historyItems = recentHistory.map((item) => ({
         id: item.id,
-        title: historyTitle(item),
+        title: formatRequestTitle(item),
         summary: `${item.status} · ${formatTimeAgo(item.createdAt)}`,
     }));
 
@@ -156,6 +142,7 @@ const CustomerDashboard = ({ navigation, route }) => {
 
                 <View style={styles.divider} />
 
+                {/* Active Repair Section matching Figma layout */}
                 <DashboardSection title="Active Repair" onActionPress={goToTrack} style={[styles.firstSection, styles.sectionHeight]}>
                     {isLoading || activeItems.length === 0 ? (
                         <DashboardEmpty
@@ -176,6 +163,7 @@ const CustomerDashboard = ({ navigation, route }) => {
                     )}
                 </DashboardSection>
 
+                {/* History Section */}
                 <DashboardSection title="History" onActionPress={goToHistory} style={[styles.nextSection, styles.sectionHeight]}>
                     {isLoading || historyItems.length === 0 ? (
                         <DashboardEmpty
@@ -262,7 +250,7 @@ const styles = StyleSheet.create({
         borderRadius: 8,
         borderWidth: 1,
         borderColor: 'rgba(0, 0, 0, 0.3)',
-        marginHorizontal: -1, // Figma: the button is 354 wide, the containers 352
+        marginHorizontal: -1,
         alignItems: 'center',
         justifyContent: 'center',
     },
