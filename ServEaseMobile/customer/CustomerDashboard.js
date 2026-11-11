@@ -11,9 +11,10 @@ import { formatTimeAgo } from '../utils/formatters';
 import NotificationsModal from '../components/NotificationsModal';
 import { DashboardSection, DashboardItem, DashboardEmpty } from '../components/DashboardSection';
 
-const PREVIEW_LIMIT = 2; // Each container previews up to two rows
+// Preview limit set to 5 items per container
+const PREVIEW_LIMIT = 5;
 
-// Formatter to match Figma design: "Category | #SR-0000"
+// Formatter to match design: "Category | #SR-0000"
 const formatRequestTitle = (item) => {
     if (!item) return '';
     const category = item.category || item.categoryName || 'Service Request';
@@ -42,7 +43,6 @@ const CustomerDashboard = ({ navigation, route }) => {
         ]);
 
         if (repairResult.status === 'fulfilled' && repairResult.value) {
-            // Support both an array of active repairs or a single object response
             const activeData = Array.isArray(repairResult.value)
                 ? repairResult.value
                 : [repairResult.value];
@@ -86,7 +86,6 @@ const CustomerDashboard = ({ navigation, route }) => {
     const goToTrack = () => navigation.navigate(ROUTES.TRACK);
     const goToHistory = () => navigation.navigate('History');
 
-    // Format active items to match Figma: Title + Summary text
     const activeItems = activeRepairs.map((item) => ({
         id: item.id || item.requestId,
         title: formatRequestTitle(item),
@@ -142,8 +141,8 @@ const CustomerDashboard = ({ navigation, route }) => {
 
                 <View style={styles.divider} />
 
-                {/* Active Repair Section matching Figma layout */}
-                <DashboardSection title="Active Repair" onActionPress={goToTrack} style={[styles.firstSection, styles.sectionHeight]}>
+                {/* Active Repair Container (Displays up to 5 items) */}
+                <DashboardSection title="Active Repair" onActionPress={goToTrack} style={styles.firstSection}>
                     {isLoading || activeItems.length === 0 ? (
                         <DashboardEmpty
                             loading={isLoading}
@@ -163,8 +162,8 @@ const CustomerDashboard = ({ navigation, route }) => {
                     )}
                 </DashboardSection>
 
-                {/* History Section */}
-                <DashboardSection title="History" onActionPress={goToHistory} style={[styles.nextSection, styles.sectionHeight]}>
+                {/* History Container (Displays up to 5 items) */}
+                <DashboardSection title="History" onActionPress={goToHistory} style={styles.nextSection}>
                     {isLoading || historyItems.length === 0 ? (
                         <DashboardEmpty
                             loading={isLoading}
@@ -263,9 +262,6 @@ const styles = StyleSheet.create({
         height: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.4)',
         marginTop: 23,
-    },
-    sectionHeight: {
-        minHeight: 148,
     },
     firstSection: {
         marginTop: 32,

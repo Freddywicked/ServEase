@@ -16,8 +16,6 @@ import { formatAiSuggestion } from '../utils/formatters';
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-// Bookable hourly slots, 9:00 AM through 4:00 PM (working hours end at 5:00 PM, so the
-// last slot starts at 4:00 PM). Change the range here.
 const FIRST_HOUR = 9;
 const LAST_HOUR = 16;
 const TIME_SLOTS = Array.from({ length: LAST_HOUR - FIRST_HOUR + 1 }, (_, index) => {
@@ -27,14 +25,12 @@ const TIME_SLOTS = Array.from({ length: LAST_HOUR - FIRST_HOUR + 1 }, (_, index)
     return { value: `${String(hour).padStart(2, '0')}:00`, label: `${display}:00 ${suffix}` };
 });
 
-// 'YYYY-MM-DD' in local time — the format used to store/send unavailable dates.
 const toDateKey = (date) => {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${date.getFullYear()}-${month}-${day}`;
 };
 
-// Cells for one month grid: leading nulls for the empty days before the 1st.
 const buildMonthCells = (year, month) => {
     const leading = new Date(year, month, 1).getDay();
     const total = new Date(year, month + 1, 0).getDate();
@@ -45,11 +41,9 @@ const buildMonthCells = (year, month) => {
     return cells;
 };
 
-const PREVIEW_LIMIT = 2; // each container previews two rows, like the design
+// Updated: Previews up to 5 items per section dynamically
+const PREVIEW_LIMIT = 5;
 
-// The three stat boxes above the calendar button. Values come from `stats` in
-// GET /provider/dashboard; several key spellings are accepted so a backend rename
-// doesn't blank the boxes. A missing value shows '–'.
 const STAT_CARDS = [
     { label: 'Active jobs', keys: ['activeJobs', 'active_jobs', 'active'] },
     { label: 'This month', keys: ['thisMonth', 'this_month', 'jobsThisMonth', 'completedThisMonth'] },
@@ -68,32 +62,39 @@ const formatStat = (value, decimals) => {
     return decimals ? Number(value).toFixed(decimals) : String(Number(value));
 };
 
-// "Roof Leakage | #SR-0000"
-const rowTitle = (item) => `${item.customerName || 'Service Request'} | #${item.requestNumber}`;
+// Standardized Title Helper: "Customer Name | #SR-XXXX"
+const rowTitle = (item) => {
+    const customer = item.customerName || item.customer_name || item.name || 'Service Request';
+    const reqNum = item.requestNumber || item.requestId || item.id || '0000';
+    return `${customer} | #${reqNum}`;
+};
+
+// Extract Summary from dynamic backend properties
+const rowSummary = (item) => {
+    if (!item) return '';
+    return (
+        item.problemDescription ||
+        item.summary ||
+        item.description ||
+        item.statusLabel ||
+        item.status ||
+        formatAiSuggestion(item.aiDiagnosis) ||
+        'No details provided.'
+    );
+};
 
 const ServiceProviderDashboard = ({ navigation }) => {
-    // `user` (name, email, ...) and `provider` ({ verification_status }) come from
-    // auth_context. The provider's own details (years, specializations, ...) come
-    // from GET /api/providers/me. Once the admin approves the application on the
-    // web dashboard, refreshUser() returns 'verified' and the screen updates.
-    //
-    // Stats, active repair, notifications and pending requests come from
-    // GET /provider/dashboard — the provider's view of the SERVICE_REQUEST rows that
-    // customers send from the Create Service Request flow. A request a customer just
-    // sent shows up under PENDING REQUESTS (and as a notification) as soon as this
-    // screen is focused.
     const { user, provider, refreshUser } = useAuth();
     const isVerified = provider?.verification_status === VERIFIED_STATUS;
 
     const [profile, setProfile] = useState(null);
     const [categoryOptions, setCategoryOptions] = useState([]);
-    const [stats, setStats] = useState(null); // null until loaded -> cards show '–'
-    const [activeRepair, setActiveRepair] = useState(null);
+    const [stats, setStats] = useState(null);
+    const [activeRepairs, setActiveRepairs] = useState([]); // Array to handle up to 5 active jobs
     const [notifications, setNotifications] = useState([]);
     const [pendingRequests, setPendingRequests] = useState([]);
     const [loadFailed, setLoadFailed] = useState(false);
 
-    // Calendar modal state. `unavailableSlots` holds 'YYYY-MM-DDTHH:00' strings.
     const [calendarVisible, setCalendarVisible] = useState(false);
     const [viewMonth, setViewMonth] = useState(() => {
         const now = new Date();
@@ -104,16 +105,9 @@ const ServiceProviderDashboard = ({ navigation }) => {
     const [selectedTime, setSelectedTime] = useState(null);
     const [savingDate, setSavingDate] = useState(false);
 
-    // Bell -> NotificationsModal, and the summary shown in the EARNINGS container.
     const [notificationsVisible, setNotificationsVisible] = useState(false);
-    const [earningsSummary, setEarningsSummary] = useState(null); // null until loaded / on failure
+    const [earningsSummary, setEarningsSummary] = useState(null);
 
-    // The provider's title is the first of their saved specializations that is a service category.
-    // Registration stores specialization names as free text mixed with chosen services
-    // ("Phone Repair", "Home Repair Services", a custom service ...), so the category-level
-    // names come from GET /categories (`specializationNames` per category) instead of a
-    // hard-coded list. Compared case-insensitively — the admin screens already treat
-    // "Phone Repair" and "Phone repair" as the same category.
     const categoryNames = categoryOptions
         .flatMap((option) => option.specializationNames ?? [option.label])
         .map((name) => name.toLowerCase());
@@ -125,33 +119,37 @@ const ServiceProviderDashboard = ({ navigation }) => {
         try {
             const data = await getProviderProfile();
             setProfile(data?.provider ?? null);
-        } catch (error) {
-            // Keep the last known data. A 401 is already handled by api/client
-            // (token cleared + setOnUnauthorized callback).
-        }
+        } catch (error) {}
     }, []);
 
     const loadCategories = useCallback(async () => {
         try {
             setCategoryOptions(await getCategories());
-        } catch (error) {
-            // Non-fatal: the title just falls back to 'Service Provider'.
-        }
+        } catch (error) {}
     }, []);
 
     const loadDashboard = useCallback(async () => {
         try {
             const data = await getProviderDashboard();
             setStats(data.stats ?? null);
-            setActiveRepair(data.activeRepair ?? null);
+            
+            // Flexibly extract active repair data (array or single object from API response)
+            if (data.activeRepair) {
+                const repairs = Array.isArray(data.activeRepair) ? data.activeRepair : [data.activeRepair];
+                setActiveRepairs(repairs.slice(0, PREVIEW_LIMIT));
+            } else if (data.activeRepairs) {
+                setActiveRepairs(data.activeRepairs.slice(0, PREVIEW_LIMIT));
+            } else {
+                setActiveRepairs([]);
+            }
+
             setNotifications(data.notifications ?? []);
-            setPendingRequests(data.pendingRequests ?? []);
+            setPendingRequests((data.pendingRequests ?? []).slice(0, PREVIEW_LIMIT));
             setLoadFailed(false);
         } catch (error) {
             if (error.status === 403) {
-                // Not verified yet: nothing to show, and the banner below already explains why.
                 setStats(null);
-                setActiveRepair(null);
+                setActiveRepairs([]);
                 setNotifications([]);
                 setPendingRequests([]);
                 setLoadFailed(false);
@@ -166,22 +164,17 @@ const ServiceProviderDashboard = ({ navigation }) => {
         loadCategories();
     }, [loadProfile, loadCategories]);
 
-    // Loads the dashboard on mount and every time this screen regains focus, so new
-    // customer requests and quotation updates appear when the provider comes back.
     useFocusEffect(
         useCallback(() => {
             loadDashboard();
         }, [loadDashboard]),
     );
 
-    // EARNINGS container: summary from GET /provider/earnings, refreshed on every focus.
     const loadEarningsSummary = useCallback(async () => {
         try {
             const data = await getProviderEarnings();
             setEarningsSummary(data?.summary ?? null);
-        } catch (error) {
-            // Keep the last known figures. A 401 is already handled by api/client.
-        }
+        } catch (error) {}
     }, []);
 
     useFocusEffect(
@@ -190,41 +183,21 @@ const ServiceProviderDashboard = ({ navigation }) => {
         }, [loadEarningsSummary]),
     );
 
-    // Re-sync whenever this screen comes into focus, so an admin approval shows
-    // up without logging out and back in.
     useEffect(() => {
         const unsubscribe = navigation.addListener('focus', async () => {
             try {
                 await refreshUser();
-            } catch (error) {
-                // Non-fatal: keep showing the last known data.
-            }
+            } catch (error) {}
             loadProfile();
         });
         return unsubscribe;
     }, [navigation, refreshUser, loadProfile]);
 
-    // ---------------------------------------------------------------------
-    // PROVIDER COMMUNICATION (comment block): live updates. Refresh the cards the moment a
-    // customer sends this provider a request, without waiting for the next focus.
-    // Uncomment once serviceRequestApi.js's Realtime helpers are enabled (needs the mobile
-    // Supabase client). `provider.id` is this provider's id.
-    //
-    // useEffect(() => {
-    //     if (!isVerified || !provider?.id) return undefined;
-    //     return subscribeToIncomingRequests(provider.id, () => loadDashboard());
-    // }, [isVerified, provider?.id, loadDashboard]);
-    //
-    // (import { subscribeToIncomingRequests } from '../api/serviceRequestApi';)
-    // ---------------------------------------------------------------------
-
     const loadUnavailableSlots = useCallback(async () => {
         try {
             const data = await getProviderUnavailableSlots();
             setUnavailableSlots(data?.slots ?? []);
-        } catch (error) {
-            // Keep the last known dates.
-        }
+        } catch (error) {}
     }, []);
 
     const handleManageCalendar = () => {
@@ -246,8 +219,6 @@ const ServiceProviderDashboard = ({ navigation }) => {
         setSelectedTime(null);
     };
 
-    // makeAvailable = true removes the selected date + time slot from the
-    // unavailable list; false adds it. Persisted on the backend, then reflected locally.
     const handleSetAvailability = async (makeAvailable) => {
         if (!selectedDate || !selectedTime || savingDate) return;
         const slotKey = `${selectedDate}T${selectedTime}`;
@@ -266,7 +237,6 @@ const ServiceProviderDashboard = ({ navigation }) => {
         }
     };
 
-    // The bell toggles the notifications dropdown.
     const handleNotificationsPress = () => {
         setNotificationsVisible((visible) => !visible);
     };
@@ -283,15 +253,19 @@ const ServiceProviderDashboard = ({ navigation }) => {
         navigation.navigate(ROUTES.INCOMING_SERVICE_REQUEST);
     };
 
-    const pendingItems = pendingRequests.slice(0, PREVIEW_LIMIT).map((item) => ({
-        id: item.id,
+    // Format pending items dynamically with title and summary
+    const pendingItems = pendingRequests.map((item) => ({
+        id: item.id || item.requestId,
         title: rowTitle(item),
-        summary: formatAiSuggestion(item.aiDiagnosis) || '',
+        summary: rowSummary(item),
     }));
 
-    const activeItems = activeRepair
-        ? [{ id: 'active-repair', title: activeRepair.customerName || 'Active Repair', summary: activeRepair.statusLabel || '' }]
-        : [];
+    // Format active repairs dynamically with title and summary
+    const activeItems = activeRepairs.map((item) => ({
+        id: item.id || item.requestId || 'active-repair',
+        title: rowTitle(item),
+        summary: rowSummary(item),
+    }));
 
     const todayKey = toDateKey(new Date());
     const monthCells = buildMonthCells(viewMonth.getFullYear(), viewMonth.getMonth());
@@ -360,6 +334,7 @@ const ServiceProviderDashboard = ({ navigation }) => {
 
                 <View style={styles.divider} />
 
+                {/* Pending Request Section (Up to 5 items) */}
                 <DashboardSection title="Pending Request" onActionPress={handlePendingRequestPress} style={styles.firstSection}>
                     {pendingItems.length > 0 ? (
                         pendingItems.map((item, index) => (
@@ -376,6 +351,7 @@ const ServiceProviderDashboard = ({ navigation }) => {
                     )}
                 </DashboardSection>
 
+                {/* Active Repair Section (Up to 5 items) */}
                 <DashboardSection title="Active Repair" onActionPress={handleActiveRepairPress} style={styles.nextSection}>
                     {activeItems.length > 0 ? (
                         activeItems.map((item, index) => (
@@ -392,9 +368,9 @@ const ServiceProviderDashboard = ({ navigation }) => {
                     )}
                 </DashboardSection>
 
+                {/* Earnings Section */}
                 <DashboardSection
                     title="Earnings"
-                   
                     onActionPress={handleEarningsPress}
                     style={[styles.nextSection, styles.earningsSection]}
                 >
@@ -452,7 +428,6 @@ const ServiceProviderDashboard = ({ navigation }) => {
                                 }
                                 const key = toDateKey(date);
                                 const isPast = key < todayKey;
-                                // Count only slots that still exist, so a stale 5:00 PM entry can't mark a day as fully blocked.
                                 const blockedCount = TIME_SLOTS.filter((slot) => unavailableSlots.includes(`${key}T${slot.value}`)).length;
                                 const isUnavailable = blockedCount >= TIME_SLOTS.length;
                                 const isPartial = blockedCount > 0 && !isUnavailable;
@@ -674,11 +649,9 @@ const styles = StyleSheet.create({
         marginTop: 18,
     },
     firstSection: {
-        minHeight: 124,
         marginTop: 14,
     },
     nextSection: {
-        minHeight: 124,
         marginTop: 10,
     },
     earningsSection: {
