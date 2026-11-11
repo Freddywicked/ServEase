@@ -83,6 +83,15 @@ export const login = async (identifier, password) => {
 export const logout = () => clearToken();
 export const me = () => request('/auth/me');
 
+// Update the signed-in customer's account details and return the updated user.
+export const updateProfile = async ({ email, address }) => {
+  const data = await request('/users/me', {
+    method: 'PATCH',
+    body: { email, address },
+  });
+  return data.user;
+};
+
 // --- Forgot password flow (Forgot Password -> OTP -> New Password) ---
 // Mirrors ServEaseMobile/api/passwordReset.js; same endpoints and payload shapes.
 // Step 1: backend emails a one-time code. Resolves { message, resendAfter }.
