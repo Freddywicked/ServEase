@@ -214,8 +214,8 @@ function EditButton({ onClick, className = '' }) {
 }
 
 // Blue banner + white strip with the avatar, name and Edit button.
-// photoUrl is the signed URL from GET /api/auth/me (user.photoUrl); UserAvatar
-// falls back to the initial circle when the account has no photo.
+// photoUrl is the signed URL from GET /api/providers/me/profile, with the account
+// photo (user.photoUrl) as fallback; UserAvatar shows the initial when there is no photo.
 function ProfileBanner({ name, photoUrl, onEdit }) {
   return (
     <div className="relative">
@@ -227,13 +227,16 @@ function ProfileBanner({ name, photoUrl, onEdit }) {
         <EditButton onClick={onEdit} className="absolute right-[34px] top-[21px]" />
       </div>
 
-      <UserAvatar
-        name={name}
-        src={photoUrl}
-        sizeClass="h-[121px] w-[121px]"
-        textClass="text-[64px] leading-[77px]"
-        className="absolute left-[27px] top-[82px]"
-      />
+      {/* Positioned wrapper keeps the avatar overlapping the banner; UserAvatar itself
+          renders in normal flow inside it. */}
+      <div className="absolute left-[27px] top-[82px]">
+        <UserAvatar
+          name={name}
+          src={photoUrl}
+          sizeClass="h-[121px] w-[121px]"
+          textClass="text-[64px] leading-[77px]"
+        />
+      </div>
     </div>
   );
 }
@@ -298,6 +301,7 @@ export default function ServiceProviderProfile() {
   const [provider, setProvider] = useState(undefined); // undefined = still loading, null = never applied
   const [availabilityByDate, setAvailabilityByDate] = useState(null); // null = not loaded
   const [account, setAccount] = useState(null); // user fields returned by GET /api/me (may have more than useAuth)
+  const [providerPhotoUrl, setProviderPhotoUrl] = useState(null); // signed URL from GET /api/providers/me/profile
   const [loadError, setLoadError] = useState('');
 
   // Feedback summary + reviews for this provider.
@@ -337,6 +341,23 @@ export default function ServiceProviderProfile() {
       cancelled = true;
     };
   }, [user]);
+
+  // The provider photo is stored on the provider record (service_providers.profile_photo),
+  // not in users.photo_url, so GET /api/auth/me cannot supply it. Use the same provider
+  // profile endpoint as the mobile app and keep the account photo as a fallback.
+  useEffect(() => {
+    if (!provider) return undefined;
+    let cancelled = false;
+    api
+      .getMyProviderProfile()
+      .then((data) => {
+        if (!cancelled) setProviderPhotoUrl(data?.photoUrl || null);
+      })
+      .catch(() => {}); // keep the account photo / initial fallback when unavailable
+    return () => {
+      cancelled = true;
+    };
+  }, [provider]);
 
   // Availability the provider saved from "Manage your Calendar" on the dashboard. Fetched every
   // time the profile opens, so changes made on the calendar show up here.
@@ -448,7 +469,7 @@ export default function ServiceProviderProfile() {
         </h1>
 
         <div className="mt-[17px]">
-          <ProfileBanner name={user.name} photoUrl={profile.photoUrl} onEdit={handleEditProfile} />
+          <ProfileBanner name={user.name} photoUrl={providerPhotoUrl || profile.photoUrl} onEdit={handleEditProfile} />
         </div>
 
         <div className="font-[SF_Pro,system-ui,sans-serif] text-[#484040]">

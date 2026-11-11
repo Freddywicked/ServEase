@@ -4,8 +4,9 @@ import { useState } from 'react';
    USER AVATAR — shared profile picture for the header, profile banners and messaging
    -------------------------------------------------------------------------------------
    Shows the person's real profile photo when the backend gives us a display-ready URL
-   (user.photoUrl from GET /api/auth/me, or conversation.avatarUrl from
-   GET /api/conversations — both are short-lived signed URLs minted by ServEaseBackend).
+   (user.photoUrl from GET /api/auth/me, provider photoUrl from
+   GET /api/providers/me/profile, or conversation.avatarUrl from
+   GET /api/conversations — all are short-lived signed URLs minted by ServEaseBackend).
    Falls back to the blue initial circle from the Figma design when there is no photo or
    the signed URL has expired / fails to load, so a broken image is never shown.
    ===================================================================================== */
@@ -26,7 +27,11 @@ export default function UserAvatar({
 
   return (
     <span
-      className={`relative flex flex-none items-center justify-center overflow-hidden rounded-full bg-[#0255AF] font-[Inter] font-bold text-white ${sizeClass} ${textClass} ${className}`}
+      // `relative` is only needed to anchor the unread dot. It must NOT be applied
+      // unconditionally: in Tailwind's generated CSS `relative` comes after `absolute`,
+      // so it would override an `absolute` passed via className (e.g. the profile
+      // banners) and the avatar would drop into normal flow below the banner.
+      className={`${dot ? 'relative ' : ''}flex flex-none items-center justify-center overflow-hidden rounded-full bg-[#0255AF] font-[Inter] font-bold text-white ${sizeClass} ${textClass} ${className}`}
     >
       {showPhoto ? (
         <img

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { LogOut } from 'lucide-react';
-import { logout } from '../api/client';
+import { getMyProviderProfile, logout } from '../api/client';
 import { useAuth } from '../context/auth_context';
 import useSidebarCollapsed from '../hooks/SidebarCollapse';
 import fullLogo from '../assets/servease_web_sidebar.png';
@@ -67,6 +67,7 @@ const NAV_ITEMS = [
 export default function ServiceProviderSidebar({ children, initials }) {
   const [collapsed, setCollapsed] = useSidebarCollapsed();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [providerPhotoUrl, setProviderPhotoUrl] = useState(null);
   const menuRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
@@ -76,6 +77,21 @@ export default function ServiceProviderSidebar({ children, initials }) {
   const width = collapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH;
 
   // Collapsed state lives in useSidebarCollapsed, so it survives tab changes (remounts).
+
+  // Provider photos are stored on service_providers.profile_photo rather than users.photo_url.
+  // Load the signed provider photo URL here as well, so the header matches the profile banner.
+  useEffect(() => {
+    if (!user) return undefined;
+    let cancelled = false;
+    getMyProviderProfile()
+      .then((data) => {
+        if (!cancelled) setProviderPhotoUrl(data?.photoUrl || null);
+      })
+      .catch(() => {}); // fall back to the account photo / initials
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   // Close the account dropdown when clicking outside of it or pressing Escape.
   useEffect(() => {
@@ -139,10 +155,10 @@ export default function ServiceProviderSidebar({ children, initials }) {
               aria-expanded={menuOpen}
               className="flex cursor-pointer items-center gap-3 border-none bg-transparent p-0"
             >
-              {/* Profile photo from the backend (user.photoUrl); falls back to the initials */}
+              {/* Prefer the provider profile photo; fall back to the account photo / initials */}
               <UserAvatar
                 name={user?.name}
-                src={user?.photoUrl}
+                src={providerPhotoUrl || user?.photoUrl}
                 initials={shownInitials}
                 sizeClass="h-[50px] w-[50px]"
                 textClass="text-[24px] leading-[29px]"

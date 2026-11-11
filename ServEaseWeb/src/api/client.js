@@ -361,6 +361,10 @@ export const getNotifications = () => request('/notifications');
 export const markNotificationRead = (notificationId) =>
   request(`/notifications/${encodeURIComponent(notificationId)}/read`, { method: 'POST' });
 
+// The logged-in provider's own profile. photoUrl is a signed URL for
+// service_providers.profile_photo (the photo uploaded through the provider profile editor).
+export const getMyProviderProfile = () => request('/providers/me/profile');
+
 // --- Browse service providers (Find Service Providers / provider profile) ---
 
 // -> { providers: [{ id, name, specialty, specialities, verified, available, rating,

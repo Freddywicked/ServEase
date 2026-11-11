@@ -58,13 +58,16 @@ function ProfileBanner({ name, photoUrl, onEdit }) {
         <EditButton onClick={onEdit} className="absolute right-[34px] top-[21px]" />
       </div>
 
-      <UserAvatar
-        name={name}
-        src={photoUrl}
-        sizeClass="h-[121px] w-[121px]"
-        textClass="text-[64px] leading-[77px]"
-        className="absolute left-[27px] top-[82px]"
-      />
+      {/* Positioned wrapper keeps the avatar overlapping the banner; UserAvatar itself
+          renders in normal flow inside it. */}
+      <div className="absolute left-[27px] top-[82px]">
+        <UserAvatar
+          name={name}
+          src={photoUrl}
+          sizeClass="h-[121px] w-[121px]"
+          textClass="text-[64px] leading-[77px]"
+        />
+      </div>
     </div>
   );
 }
@@ -116,15 +119,11 @@ export default function CustomerProfile() {
   const address = pickFirst(profile, ADDRESS_KEYS);
 
   const handleEditProfile = () => {
-    // TODO (backend-ready): open the edit form for the profile (name / photo), then save it, e.g.
-    // await api.updateProfile({ name });   // PATCH /api/me
-    console.log('Edit profile clicked');
+    navigate('/customer/profile/edit');
   };
 
   const handleEditAccount = () => {
-    // TODO (backend-ready): open the edit form for the account details, then save it, e.g.
-    // await api.updateProfile({ email, phone, address });   // PATCH /api/me
-    console.log('Edit account details clicked');
+    navigate('/customer/profile/edit');
   };
 
   const handleApply = () => {
