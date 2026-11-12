@@ -7,6 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 // marks the thread read for whichever side opens it.
 import { getConversationMessages, sendConversationMessage } from '../api/providerWork_api';
 import { COLORS } from '../constants/theme';
+import { closeConversation, openConversation } from '../utils/chatUnread';
 import { POLL_INTERVAL_MS, SENDER, TEXT } from '../constants/messaging';
 
 const formatTimestamp = (iso) => {
@@ -52,10 +53,16 @@ const ConversationCustomer = ({ navigation, route }) => {
     // replies appear without leaving the screen.
     useFocusEffect(
         useCallback(() => {
+            // This thread is now being read: it no longer counts as unread, and replies
+            // that arrive while it is open are not counted either.
+            openConversation(conversationId);
             loadMessages().finally(() => setLoading(false));
             const timer = setInterval(loadMessages, POLL_INTERVAL_MS);
-            return () => clearInterval(timer);
-        }, [loadMessages]),
+            return () => {
+                clearInterval(timer);
+                closeConversation(conversationId);
+            };
+        }, [loadMessages, conversationId]),
     );
 
     useEffect(() => {
@@ -73,8 +80,11 @@ const ConversationCustomer = ({ navigation, route }) => {
         setSending(true);
         try {
             const data = await sendConversationMessage(conversationId, text);
-            const saved = data?.message;
-            setMessages((prev) => prev.map((m) => (m.id === tempId ? saved : m)));
+            if (data?.message) {
+                setMessages((prev) => prev.map((m) => (m.id === tempId ? data.message : m)));
+            } else {
+                loadMessages();
+            }
         } catch (error) {
             setMessages((prev) => prev.filter((m) => m.id !== tempId));
             setDraft(text);
@@ -145,7 +155,7 @@ const ConversationCustomer = ({ navigation, route }) => {
                     value={draft}
                     onChangeText={setDraft}
                 />
-                <TouchableOpacity onPress={handleSend} activeOpacity={0.8}>
+                <TouchableOpacity onPress={handleSend} activeOpacity={0.8} disabled={sending}>
                     <LinearGradient
                         colors={[COLORS.primary, COLORS.primaryGradientEnd]}
                         start={{ x: 0, y: 0 }}

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Image, Text, TouchableOpacity, Keyboard, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useChatUnreadCount, useChatUnreadPolling } from '../utils/chatUnread';
 
 const NAVY = '#18315B';
 
@@ -43,6 +44,13 @@ const ServiceProviderNavBar = ({ navigationRef, routeName }) => {
     const insets = useSafeAreaInsets();
     const activeTab = ACTIVE_TAB_BY_ROUTE[routeName];
 
+    // Real-time unread-conversation count, polled from the backend (see utils/chatUnread.js).
+    // Polls only while the bar is visible (i.e. the user is signed in on a tab screen).
+    useChatUnreadPolling(!!activeTab);
+    const unreadChatCount = useChatUnreadCount();
+    // Add more tabs here later (e.g. a Requests count) without touching the render code.
+    const badgeCounts = { MessageServiceProvider: unreadChatCount };
+
     // Hide the bar while the keyboard is open (chat, notes and cost inputs), so it
     // doesn't ride up on top of the keyboard.
     const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -69,17 +77,25 @@ const ServiceProviderNavBar = ({ navigationRef, routeName }) => {
             <View style={styles.bar}>
                 {TAB_ITEMS.map((tab) => {
                     const isActive = tab.key === activeTab;
+                    const badgeCount = badgeCounts[tab.key] || 0;
                     return (
                         <TouchableOpacity
                             key={tab.key}
                             style={styles.tabItem}
                             onPress={() => handlePress(tab.key)}
                             accessibilityRole="button"
-                            accessibilityLabel={tab.label}
+                            accessibilityLabel={badgeCount > 0 ? `${tab.label}, ${badgeCount} unread` : tab.label}
                             accessibilityState={{ selected: isActive }}
                         >
-                            <View style={[styles.iconWrap, isActive && styles.iconWrapActive]}>
-                                <Image source={tab.inactiveIcon} style={[styles.icon, tab.iconStyle, isActive && styles.iconActive]} />
+                            <View style={styles.iconSlot}>
+                                <View style={[styles.iconWrap, isActive && styles.iconWrapActive]}>
+                                    <Image source={tab.inactiveIcon} style={[styles.icon, tab.iconStyle, isActive && styles.iconActive]} />
+                                </View>
+                                {badgeCount > 0 && (
+                                    <View style={styles.badge}>
+                                        <Text style={styles.badgeText}>{badgeCount > 99 ? '99+' : badgeCount}</Text>
+                                    </View>
+                                )}
                             </View>
                             <Text style={styles.label}>{tab.label}</Text>
                         </TouchableOpacity>
@@ -136,6 +152,32 @@ const styles = StyleSheet.create({
     // which can carry its own square background and show up as a square behind the circle).
     iconActive: {
         tintColor: '#FFFFFF',
+    },
+    // Red unread badge, sits on the top-right of the icon circle (outside the clipped circle).
+    iconSlot: {
+        width: 32,
+        height: 32,
+    },
+    badge: {
+        position: 'absolute',
+        top: -6,
+        right: -9,
+        minWidth: 18,
+        height: 18,
+        borderRadius: 9,
+        paddingHorizontal: 4,
+        backgroundColor: '#C62828',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1.5,
+        borderColor: '#FFFFFF',
+        zIndex: 2,
+    },
+    badgeText: {
+        fontSize: 11,
+        lineHeight: 14,
+        fontWeight: '700',
+        color: '#FFFFFF',
     },
     label: {
         fontSize: 12,

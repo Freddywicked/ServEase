@@ -6,7 +6,8 @@ import { useFocusEffect } from '@react-navigation/native';
 // is role-aware, so a customer gets their threads with service providers here.
 import { getConversations } from '../api/providerWork_api';
 import { COLORS } from '../constants/theme';
-import { ROUTES, TEXT } from '../constants/messaging';
+import { openConversation, syncUnreadFromConversations } from '../utils/chatUnread';
+import { POLL_INTERVAL_MS, ROUTES, TEXT } from '../constants/messaging';
 
 const MessageCustomer = ({ navigation }) => {
     // Conversation shape (GET /conversations): { id ('SR-0007'), name, avatarUrl,
@@ -19,7 +20,9 @@ const MessageCustomer = ({ navigation }) => {
     const loadConversations = useCallback(async () => {
         try {
             const data = await getConversations();
-            setConversations(data?.conversations ?? []);
+            const list = data?.conversations ?? [];
+            setConversations(list);
+            syncUnreadFromConversations(list); // keeps the navbar number in step with the list
             setLoadFailed(false);
         } catch (error) {
             // Keep the last known list. A 401 is already handled by api/client.
@@ -32,6 +35,10 @@ const MessageCustomer = ({ navigation }) => {
     useFocusEffect(
         useCallback(() => {
             loadConversations().finally(() => setLoading(false));
+            // Keep polling while the list is on screen so new messages and unread dots
+            // arrive in real time.
+            const timer = setInterval(loadConversations, POLL_INTERVAL_MS);
+            return () => clearInterval(timer);
         }, [loadConversations]),
     );
 
@@ -41,17 +48,24 @@ const MessageCustomer = ({ navigation }) => {
         setRefreshing(false);
     };
 
+    const handleOpenConversation = (conversation) => {
+        // Opening a thread marks it read: its dot goes away and the navbar number drops by one.
+        if (conversation.hasUnread) {
+            setConversations((prev) => prev.map((c) => (c.id === conversation.id ? { ...c, hasUnread: false } : c)));
+        }
+        openConversation(conversation.id);
+        navigation.navigate(ROUTES.CONVERSATION_CUSTOMER, {
+            conversationId: conversation.id,
+            contactName: conversation.name,
+            jobTitle: conversation.jobTitle,
+            isOnline: conversation.isOnline,
+        });
+    };
+
     const renderMessageItem = ({ item }) => (
         <TouchableOpacity
             style={styles.card}
-            onPress={() =>
-                navigation.navigate(ROUTES.CONVERSATION_CUSTOMER, {
-                    conversationId: item.id,
-                    contactName: item.name,
-                    jobTitle: item.jobTitle,
-                    isOnline: item.isOnline,
-                })
-            }
+            onPress={() => handleOpenConversation(item)}
         >
             {item.avatarUrl ? (
                 <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />

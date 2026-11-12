@@ -8,6 +8,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { getConversationMessages, sendConversationMessage } from '../api/providerWork_api';
 import { formatDateTime } from '../utils/provider_formatters';
 import { COLORS } from '../constants/theme';
+import { closeConversation, openConversation } from '../utils/chatUnread';
 import { POLL_INTERVAL_MS, SENDER, TEXT } from '../constants/messaging';
 
 const ConversationServiceProvider = ({ navigation, route }) => {
@@ -45,10 +46,16 @@ const ConversationServiceProvider = ({ navigation, route }) => {
     // replies appear without leaving the screen.
     useFocusEffect(
         useCallback(() => {
+            // This thread is now being read: it no longer counts as unread, and replies
+            // that arrive while it is open are not counted either.
+            openConversation(conversationId);
             loadMessages().finally(() => setLoading(false));
             const timer = setInterval(loadMessages, POLL_INTERVAL_MS);
-            return () => clearInterval(timer);
-        }, [loadMessages]),
+            return () => {
+                clearInterval(timer);
+                closeConversation(conversationId);
+            };
+        }, [loadMessages, conversationId]),
     );
 
     useEffect(() => {

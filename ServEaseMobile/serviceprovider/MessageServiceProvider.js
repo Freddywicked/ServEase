@@ -4,7 +4,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { getConversations } from '../api/providerWork_api';
 import { COLORS } from '../constants/theme';
-import { AVATAR_URL_PATTERN, ROUTES, TEXT } from '../constants/messaging';
+import { openConversation, syncUnreadFromConversations } from '../utils/chatUnread';
+import { AVATAR_URL_PATTERN, POLL_INTERVAL_MS, ROUTES, TEXT } from '../constants/messaging';
 
 const MessageServiceProvider = ({ navigation }) => {
     // Conversations come from GET /conversations (see api/providerWorkApi.js for the shape).
@@ -16,7 +17,9 @@ const MessageServiceProvider = ({ navigation }) => {
     const loadConversations = useCallback(async () => {
         try {
             const data = await getConversations();
-            setConversations(data?.conversations ?? []);
+            const list = data?.conversations ?? [];
+            setConversations(list);
+            syncUnreadFromConversations(list); // keeps the navbar number in step with the list
             setLoadFailed(false);
         } catch (error) {
             // Keep the last known list. A 401 is already handled by api/client.
@@ -28,6 +31,10 @@ const MessageServiceProvider = ({ navigation }) => {
     useFocusEffect(
         useCallback(() => {
             loadConversations().finally(() => setLoading(false));
+            // Keep polling while the list is on screen so new messages and unread dots
+            // arrive in real time.
+            const timer = setInterval(loadConversations, POLL_INTERVAL_MS);
+            return () => clearInterval(timer);
         }, [loadConversations]),
     );
 
@@ -38,6 +45,11 @@ const MessageServiceProvider = ({ navigation }) => {
     };
 
     const handleOpenConversation = (conversation) => {
+        // Opening a thread marks it read: its dot goes away and the navbar number drops by one.
+        if (conversation.hasUnread) {
+            setConversations((prev) => prev.map((c) => (c.id === conversation.id ? { ...c, hasUnread: false } : c)));
+        }
+        openConversation(conversation.id);
         navigation.navigate(ROUTES.CONVERSATION_PROVIDER, {
             conversationId: conversation.id,
             contactName: conversation.name,
