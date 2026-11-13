@@ -192,8 +192,8 @@ export default function VerifyOTP() {
       // Backend verifies the code that was sent to the chosen channel, then creates the account.
       const user = await register(form, code, otpChannel);
       setUser(user);
-      // Brand-new account: let them pick Customer or Service Provider.
-      navigate('/role-selection');
+      // Brand-new account: straight to the Customer Dashboard (role selection was removed).
+      navigate('/customer/dashboard');
     } catch (err) {
       setError(err.message || 'Verification failed. Please try again.');
     } finally {

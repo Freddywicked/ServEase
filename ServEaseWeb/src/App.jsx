@@ -3,7 +3,6 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 import SendOTP from './pages/SendOTP'
 import VerifyOTP from './pages/OTPVerification'
-import RoleSelection from './pages/RoleSelection'
 import CompleteProfile from './pages/CompleteProfile'
 import ForgotPassword from './pages/ForgotPassword'
 import OTPForgotPassword from './pages/OTPForgotPassword'
@@ -47,7 +46,6 @@ function App() {
         {/* Signup -> choose where to receive the OTP (SMS / email) -> verify the code */}
         <Route path="/send-otp" element={<SendOTP />} />
         <Route path="/verify-otp" element={<VerifyOTP />} />
-        <Route path="/role-selection" element={<RoleSelection />} />
         {/* First-time Google sign-ins land here to add + verify their phone number */}
         <Route path="/complete-profile" element={<CompleteProfile />} />
         {/* Forgot password flow: request code -> verify code -> set new password */}
