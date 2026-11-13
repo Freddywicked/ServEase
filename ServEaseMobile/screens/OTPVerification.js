@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
     View,
     Image,
@@ -13,16 +13,26 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACCOUNT_CREATED_KEY } from './SplashScreen';
 import { requestOtp, register } from '../api/client';
 import { useAuth } from '../context/auth_context';
+import { isValidChannel, maskedDestination } from '../utils/otpChannel';
 
 const OTP_LENGTH = 6;
 const RESEND_COOLDOWN_SECONDS = 30; // matches otp.resendCooldownSeconds on the backend
 
 const OTPVerification = ({ navigation, route }) => {
     const { setUser } = useAuth();
-    const form = route.params?.form;
+    const baseForm = route.params?.form;
+    const channel = route.params?.channel; // 'sms' | 'email', chosen on SendOTP
 
-    // Only reachable from SignupScreen, which passes `fromSignup: true` and the form.
-    const isAccountCreation = route.params?.fromSignup === true && !!form;
+    // Only reachable from SendOTP, which passes `fromSignup: true`, the form and the channel.
+    const isAccountCreation = route.params?.fromSignup === true && !!baseForm && isValidChannel(channel);
+
+    // The chosen channel travels with the form so the backend sends the code to the
+    // phone (sms) or the email (email) the user provided, and verifies against the same one.
+    const form = useMemo(
+        () => (baseForm ? { ...baseForm, otpChannel: channel } : null),
+        [baseForm, channel]
+    );
+    const destination = isAccountCreation ? maskedDestination(channel, baseForm) : '';
 
     const [otp, setOtp] = useState(Array(OTP_LENGTH).fill(''));
     const [error, setError] = useState('');
@@ -31,6 +41,7 @@ const OTPVerification = ({ navigation, route }) => {
     const [sendFieldErrors, setSendFieldErrors] = useState(null);
     const [cooldown, setCooldown] = useState(0);
     const [verifying, setVerifying] = useState(false);
+    const [focusedIndex, setFocusedIndex] = useState(-1);
 
     const inputRefs = useRef([]);
     const hasRequestedRef = useRef(false);
@@ -43,9 +54,9 @@ const OTPVerification = ({ navigation, route }) => {
 
     useEffect(() => {
         if (!isAccountCreation) {
-            navigation.replace('SignupScreen');
+            navigation.replace(baseForm ? 'SendOTP' : 'SignupScreen', baseForm ? { form: baseForm } : undefined);
         }
-    }, [isAccountCreation, navigation]);
+    }, [isAccountCreation, baseForm, navigation]);
 
     const sendOtp = useCallback(async () => {
         setSendStatus('sending');
@@ -87,6 +98,12 @@ const OTPVerification = ({ navigation, route }) => {
         const params = { serverErrors: sendFieldErrors };
         if (typeof navigation.popTo === 'function') navigation.popTo('SignupScreen', params);
         else navigation.navigate('SignupScreen', params);
+    };
+
+    // Back to the SendOTP screen to pick the other channel.
+    const handleChangeMethod = () => {
+        if (navigation.canGoBack()) navigation.goBack();
+        else navigation.replace('SendOTP', { form: baseForm });
     };
 
     const handleChange = (text, index) => {
@@ -156,17 +173,17 @@ const OTPVerification = ({ navigation, route }) => {
             <View style={styles.container}>
                 <Image source={require('../assets/logo_servease.png')} style={styles.logo} />
                 <Text style={styles.title}>Create your account</Text>
-                <Text style={styles.subtitle}>Verify your Phone number</Text>
+                <Text style={styles.subtitle}>Verify your identity</Text>
 
                 {sendStatus === 'sending' && (
                     <View style={styles.statusRow}>
                         <ActivityIndicator size="small" color="#0255AF" />
-                        <Text style={styles.statusInline}>  Sending a code to {form.phone}...</Text>
+                        <Text style={styles.statusInline}>  Sending the 6-digit code to {destination}...</Text>
                     </View>
                 )}
                 {sendStatus === 'sent' && (
                     <Text style={styles.statusText}>
-                        Enter the 6-digit code sent to <Text style={styles.bold}>{form.phone}</Text>.
+                        Enter the 6-digit code sent to <Text style={styles.bold}>{destination}</Text>.
                     </Text>
                 )}
                 {sendStatus === 'failed' && (
@@ -174,6 +191,7 @@ const OTPVerification = ({ navigation, route }) => {
                         <Text style={styles.failedText}>{sendError}</Text>
                         <View style={styles.failedActions}>
                             <Text style={styles.link} onPress={sendOtp}>Try again</Text>
+                            <Text style={styles.link} onPress={handleChangeMethod}>Change method</Text>
                             <Text style={styles.link} onPress={handleEditDetails}>Edit details</Text>
                         </View>
                     </View>
@@ -186,12 +204,15 @@ const OTPVerification = ({ navigation, route }) => {
                             ref={(ref) => (inputRefs.current[index] = ref)}
                             style={[
                                 styles.otpBox,
+                                focusedIndex === index ? styles.otpBoxFocused : null,
                                 error ? styles.otpBoxError : null,
                                 !canVerify ? styles.otpBoxDisabled : null,
                             ]}
                             value={digit}
                             onChangeText={(text) => handleChange(text, index)}
                             onKeyPress={(event) => handleKeyPress(event, index)}
+                            onFocus={() => setFocusedIndex(index)}
+                            onBlur={() => setFocusedIndex((i) => (i === index ? -1 : i))}
                             keyboardType="number-pad"
                             textContentType="oneTimeCode"
                             autoComplete="sms-otp"
@@ -227,40 +248,44 @@ const OTPVerification = ({ navigation, route }) => {
 
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: '#FFFFFF' },
-    container: { flex: 1, paddingHorizontal: 28 },
-    logo: { width: 90, height: 90, resizeMode: 'contain', alignSelf: 'center', marginTop: 16 },
-    title: { fontSize: 26, fontWeight: '700', color: '#1B2A8C', textAlign: 'center', marginTop: 8, marginBottom: 24 },
-    subtitle: { fontSize: 16, fontWeight: '600', color: '#333333', marginBottom: 8 },
+    container: { flex: 1, paddingHorizontal: 36 },
+    logo: { width: 198, height: 198, resizeMode: 'contain', alignSelf: 'center' },
+    title: { fontSize: 32, lineHeight: 40, fontWeight: '700', color: '#021E79', marginTop: -14, marginBottom: 25 },
+    subtitle: { fontSize: 20, lineHeight: 25, fontWeight: '700', color: '#292727', marginBottom: 8 },
     statusRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-    statusInline: { fontSize: 13, color: '#666666' },
-    statusText: { fontSize: 13, color: '#666666', marginBottom: 16 },
+    statusInline: { fontSize: 12, color: '#626262' },
+    statusText: { fontSize: 12, color: '#626262', marginBottom: 16 },
     bold: { fontWeight: '700', color: '#333333' },
     failedBox: { backgroundColor: '#FDECEA', borderRadius: 10, padding: 12, marginBottom: 16 },
     failedText: { color: '#E53935', fontSize: 13 },
     failedActions: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
     otpRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 32 },
     otpBox: {
-        width: 48,
-        height: 56,
+        width: 46,
+        height: 52,
         borderRadius: 10,
-        backgroundColor: '#F0F0F0',
+        backgroundColor: '#D9D9D9',
         textAlign: 'center',
         fontSize: 20,
         fontWeight: '600',
         color: '#333333',
     },
+    otpBoxFocused: { borderWidth: 2, borderColor: '#1E9BF0' },
     otpBoxError: { borderWidth: 1, borderColor: '#E53935' },
     otpBoxDisabled: { opacity: 0.5 },
     errorText: { color: '#E53935', fontSize: 11, marginTop: -20, marginBottom: 16 },
     signInButton: {
         backgroundColor: '#0255AF',
         backgroundImage: 'linear-gradient(to right, #0255AF, #04A5A5)',
-        borderRadius: 12,
-        paddingVertical: 15,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.3)',
+        height: 46,
+        justifyContent: 'center',
         alignItems: 'center',
     },
     buttonDisabled: { opacity: 0.6 },
-    signInButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+    signInButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
     resendText: { textAlign: 'center', fontSize: 13, color: '#333333', marginTop: 20 },
     resendDisabled: { color: '#999999' },
     link: { color: '#2E6BE6', fontWeight: '600' },

@@ -60,6 +60,7 @@ const FIELD_MAP = {
   address: 'address',
   birthdate: 'birthdate',
   gender: 'gender',
+  otp_channel: 'otpChannel',
 };
 
 const toFormErrors = (details) => {
@@ -149,6 +150,9 @@ const toRegistrationPayload = (form) => {
   if (form.address) payload.address = form.address.trim();
   if (form.birthdate) payload.birthdate = form.birthdate; // 'YYYY-MM-DD'
   if (form.gender) payload.gender = form.gender;          // 'male' | 'female'
+  // Where the OTP is delivered, chosen on SendOTP: 'sms' (-> phone_number) or 'email' (-> email).
+  // BACKEND: /auth/request-otp and /auth/register must read `otp_channel`.
+  if (form.otpChannel) payload.otp_channel = form.otpChannel;
   return payload;
 };
 

@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import Login from './pages/Login'
 import Signup from './pages/Signup'
+import SendOTP from './pages/SendOTP'
 import VerifyOTP from './pages/OTPVerification'
 import RoleSelection from './pages/RoleSelection'
 import CompleteProfile from './pages/CompleteProfile'
@@ -43,6 +44,8 @@ function App() {
         {/* Auth */}
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        {/* Signup -> choose where to receive the OTP (SMS / email) -> verify the code */}
+        <Route path="/send-otp" element={<SendOTP />} />
         <Route path="/verify-otp" element={<VerifyOTP />} />
         <Route path="/role-selection" element={<RoleSelection />} />
         {/* First-time Google sign-ins land here to add + verify their phone number */}

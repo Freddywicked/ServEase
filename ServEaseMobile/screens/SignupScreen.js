@@ -150,7 +150,7 @@ const SignupScreen = ({ navigation, route }) => {
         }
     };
 
-    // Errors sent back from OTPVerification ("Edit details"), e.g. email already registered.
+    // Errors sent back from OTPVerification / SendOTP ("Edit details"), e.g. email already registered.
     useEffect(() => {
         const serverErrors = route.params?.serverErrors;
         if (!serverErrors) return;
@@ -169,8 +169,9 @@ const SignupScreen = ({ navigation, route }) => {
             return;
         }
 
-        // OTPVerification sends the code (requestOtp) and finishes registration (register).
-        navigation.navigate('OTPVerification', { fromSignup: true, form });
+        // SendOTP lets the user pick SMS or email; OTPVerification then sends the code
+        // (requestOtp) through that channel and finishes registration (register).
+        navigation.navigate('SendOTP', { form });
     };
 
     const openTerms = () => {

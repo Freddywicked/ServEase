@@ -8,6 +8,7 @@ import CustomerNavBar from './components/CustomerNavBar';
 import ServiceProviderNavBar from './components/ServiceProviderNavBar';
 import SplashScreen from './screens/SplashScreen';
 import SignupScreen from './screens/SignupScreen';
+import SendOTP from './screens/SendOTP';
 import OTPVerification from './screens/OTPVerification';
 import LoginScreen from './screens/LoginScreen';
 import CompleteProfileScreen from './screens/CompleteProfileScreen';
@@ -78,6 +79,7 @@ const App = () => {
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="SplashScreen" component={SplashScreen}/>
         <Stack.Screen name="SignupScreen" component={SignupScreen}/>
+        <Stack.Screen name="SendOTP" component={SendOTP}/>
         <Stack.Screen name="OTPVerification" component={OTPVerification}/>
         <Stack.Screen name="LoginScreen" component={LoginScreen}/>
         {/* First-time Google sign-ins land here to add + verify their phone number */}

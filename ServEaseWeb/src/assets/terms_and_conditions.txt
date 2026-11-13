@@ -1,0 +1,61 @@
+ServEase is a mobile and web platform that connects Customers who need repairs (IT-related devices, phones, automotive, and home repair) with independent Service Providers. ServEase is not the repair provider. Service Providers are independent and are not employees or agents of ServEase.
+
+By creating an account or using the app, you agree to these Terms and to our Privacy Policy. If you do not agree, do not use ServEase. You must be at least 18 years old and able to enter a binding agreement.
+
+1. Accounts and Roles
+You may register as a Customer or as a Service Provider.
+You must give accurate information and keep your login details secure. You are responsible for activity under your account.
+Service Providers must complete verification (identity and service credentials, as required) before accepting requests. ServEase may approve, reject, or revoke verification at its discretion.
+One person may not operate multiple accounts to avoid fees, ratings, or suspension.
+2. How a Job Works
+A Customer submits a service request, with a description and optional photos.
+Service Providers may send a quotation.
+The Customer may approve or reject a quotation. Approving it creates a binding job for the quoted scope and price.
+Progress is tracked in the app, and payments are made through the app.
+After completion, the Customer may rate the Service Provider.
+If the scope of work changes, the Service Provider must send a revised quotation through the app, and the Customer must approve it before the extra work is done.
+3. Fees and Payments
+Quotation Approval Fee (Customer): a fixed fee of ₱20 per approved quotation, shown on the quotation screen before approval and added to the initial payment. It is not charged for submitting a request or for rejecting a quotation. It is refunded if the Service Provider cancels before the repair begins.
+Service Provider Fee: 3.5% of the approved quotation total, deducted from the Service Provider's payout. This includes payment processing costs on repair payments.
+Payments are processed by PayMongo (e-wallet, card, and other supported methods). Payment processor terms also apply.
+Fees may change. We will give notice in the app before a change applies, and a change will not affect jobs already approved.
+Service Providers are responsible for their own taxes and permits.
+4. Cancellations and Refunds
+A Customer or Service Provider may cancel before the repair begins. If the Service Provider cancels, the Customer's payments and Quotation Approval Fee are refunded.
+If the work has already started, cancellation and settlement of work already performed is agreed between both parties through the app, or decided by the Admin under Section 9.
+Refund timing depends on the payment method and payment processor.
+5. Keep Everything in the App (Anti-Circumvention)
+ServEase can only verify, record, and protect activity that happens inside the app. For this reason:
+No sharing of contact details to move a job off the app. Users must not share personal contact details (phone numbers, email addresses, social media accounts, messaging handles) in chat, quotations, photos, or any other part of the app in order to arrange, continue, or complete a job outside ServEase. This applies to Service Providers and Customers. Information needed to carry out an approved job, such as the service address and schedule, is shared through the app.
+No communication or payment outside the app for jobs found through ServEase, including paying cash or by direct transfer to avoid fees.
+No protection outside the app. If a transaction is taken outside ServEase, we cannot protect either party from fraud, non-payment, or poor workmanship, and the refund and dispute process does not apply to that job.
+To help enforce this, ServEase may mask contact details, scan messages for contact details or requests to go off-platform, and flag them for Admin review.
+6. Acceptable Use
+You must not:
+give false information, fake quotations, or fake reviews;
+harass, threaten, or discriminate against other users;
+request or take payment outside the app for jobs from ServEase;
+misuse the repairman locator or collect other users' data;
+upload unlawful, harmful, or infringing content;
+interfere with the app's security or operation.
+7. Ratings, Reviews, and AI Features
+Customers may rate and review Service Providers after a completed job. Reviews must be honest and based on real experience.
+ServEase may analyze review text (sentiment analysis) to help show a Service Provider's reputation.
+Any AI-generated fault diagnosis is a suggestion with a confidence score. It is not a guaranteed or professional diagnosis, and the Service Provider's own inspection controls.
+8. Disputes
+Users should first try to settle a problem through in-app chat.
+If unresolved, either party may report the job to the Admin through the app. The Admin may review quotations, chat history, photos, repair status, and payment records, and may decide on a refund, partial refund, or release of payout.
+ServEase's decision on in-app disputes is made in good faith. This does not limit your rights under Philippine law.
+9. Location and Privacy
+Location is used for the repairman locator only with your consent, and you may turn it off in your device settings.
+ServEase collects and uses personal data as described in the Privacy Policy, in line with the Data Privacy Act of 2012 (Republic Act No. 10173). You have the rights provided by that law, including access and correction.
+10. Violations and Account Action
+If ServEase finds or reasonably suspects a violation of these Terms, it may, depending on seriousness:
+send a warning;
+temporarily suspend the account;
+permanently remove the account and verification.
+ServEase may also withhold or recover fees and unpaid payouts connected to a circumvented or fraudulent job. You may appeal an action by contacting [support email].
+12. Responsibility and Liability
+Service Providers are responsible for the quality, safety, legality, and warranty of their work. ServEase does not guarantee the quality or outcome of any repair.
+The app is provided "as is" and may have interruptions or errors. We work to keep it available but do not promise uninterrupted service.
+To the extent allowed by law, ServEase is not liable for indirect or consequential losses, or for damages caused by a Service Provider's work. Nothing here limits liability that cannot be limited by law.

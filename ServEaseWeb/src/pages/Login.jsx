@@ -1,63 +1,63 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useGoogleLogin } from '@react-oauth/google';
 import logo from '../assets/servease_logo.png';
 import eyeIcon from '../assets/icon_eye.png';
+import leftBg from '../assets/auth_left_bg.png';
 import { login, loginWithGoogle } from '../api/client';
 import { useAuth } from '../context/auth_context';
 
-const CARD_WIDTH = 659;
-const CARD_HEIGHT = 737;
-
-// The multicolor Google "G" mark, shown in a white chip on the gradient button.
-function GoogleGLogo({ size = 18 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
-      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
-      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-    </svg>
-  );
-}
-
+// Figma frame: 1440 x 1024. Left art panel = 773px (53.68%), form column = 573px wide.
 const styles = {
   page: {
     position: 'fixed',
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '100vh',
-    boxSizing: 'border-box',
-    overflow: 'hidden',
-    backgroundColor: '#EBEBEB',
+    inset: 0,
+    display: 'flex',
+    overflowX: 'hidden',
+    overflowY: 'auto',
+    backgroundColor: '#FFFEFE',
     fontFamily: "'Roboto', sans-serif",
   },
-  card: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    width: CARD_WIDTH,
-    height: CARD_HEIGHT,
-    backgroundColor: '#E2E5E8',
-    borderRadius: 30,
+  left: {
+    flex: '0 0 53.68%',
+    position: 'sticky',
+    top: 0,
+    alignSelf: 'flex-start',
+    height: '100vh',
+    backgroundColor: '#1565C0',
+    backgroundImage: `url(${leftBg})`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat',
+  },
+  right: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: '100vh',
+    display: 'flex',
+    boxSizing: 'border-box',
+    padding: '24px 53px 24px 41px',
+    backgroundColor: '#FFFEFE',
+  },
+  inner: {
+    width: '100%',
+    maxWidth: 573,
+    margin: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
   },
   logo: {
-    position: 'absolute',
-    top: 25,
-    left: '50%',
     width: 150,
     height: 150,
     display: 'block',
     objectFit: 'contain',
-    transform: 'translateX(-50%)',
+    alignSelf: 'center',
+    marginBottom: -5,
   },
   heading: {
-    position: 'absolute',
-    top: 170,
-    left: '50%',
-    width: 160,
     height: 49,
+    margin: 0,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -65,25 +65,17 @@ const styles = {
     fontWeight: 800,
     fontSize: 32,
     lineHeight: '32px',
-    letterSpacing: 0,
     color: '#021E79',
-    margin: 0,
-    transform: 'translateX(-50%)',
   },
-  form: { position: 'absolute', inset: 0 },
+  form: { display: 'flex', flexDirection: 'column', alignItems: 'stretch' },
   fieldGroup: {
-    position: 'absolute',
-    left: '6.525%',
-    right: '6.525%',
-    height: 52,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'flex-start',
     gap: 4,
+    height: 52,
     textAlign: 'left',
   },
-  emailField: { top: 248 },
-  passwordField: { top: 328 },
   label: {
     fontFamily: "'Roboto', sans-serif",
     fontWeight: 700,
@@ -128,11 +120,10 @@ const styles = {
     padding: 0,
   },
   forgotRow: {
-    position: 'absolute',
-    top: 403,
-    right: '6.525%',
+    marginTop: 23,
     height: 14,
     textAlign: 'right',
+    paddingRight: 2,
   },
   forgotLink: {
     fontFamily: "'Roboto', sans-serif",
@@ -143,22 +134,17 @@ const styles = {
     textDecoration: 'none',
   },
   errorText: {
-    position: 'absolute',
-    top: 424,
-    left: '6.525%',
-    right: '6.525%',
+    margin: '10px 0 -10px',
     fontFamily: "'Roboto', sans-serif",
     fontSize: 11,
+    lineHeight: '13px',
     color: '#E53935',
-    margin: 0,
   },
   primaryBtn: {
-    position: 'absolute',
-    top: 453,
-    left: '6.525%',
-    right: '6.525%',
     boxSizing: 'border-box',
+    width: '100%',
     height: 46,
+    marginTop: 36,
     border: '1px solid rgba(0, 0, 0, 0.3)',
     borderRadius: 8,
     backgroundImage: 'linear-gradient(90deg, #0255AF 0%, #04A5A5 100%)',
@@ -171,14 +157,11 @@ const styles = {
     transition: 'filter 150ms ease, transform 150ms ease',
   },
   dividerRow: {
-    position: 'absolute',
-    top: 541,
-    left: 120,
-    width: 430,
-    maxWidth: '65.25%',
+    marginTop: 42,
     height: 14,
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 12,
   },
   dividerLine: {
@@ -187,9 +170,8 @@ const styles = {
     border: 'none',
     borderTop: '1px solid #000000',
     opacity: 0.6,
+    minWidth: 0,
   },
-  dividerLineLeft: { flex: '0 1 192px' },
-  dividerLineRight: { flex: '0 1 202px' },
   dividerText: {
     fontFamily: "'Roboto', sans-serif",
     fontWeight: 400,
@@ -197,20 +179,16 @@ const styles = {
     lineHeight: '14px',
     color: '#A6A6A6',
   },
-  // Custom Google button: same gradient, size and width as the Sign in button, with
-  // the Google "G" in a white chip. It triggers useGoogleLogin (popup flow), which
-  // returns an access token the backend verifies — so we are free to style it.
   googleBtn: {
-    position: 'absolute',
-    top: 581,
-    left: '6.525%',
-    right: '6.525%',
     boxSizing: 'border-box',
+    alignSelf: 'center',
+    width: 233,
+    maxWidth: '100%',
+    height: 56,
+    marginTop: 26,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-    height: 46,
     border: '1px solid rgba(0, 0, 0, 0.3)',
     borderRadius: 8,
     backgroundImage: 'linear-gradient(90deg, #0255AF 0%, #04A5A5 100%)',
@@ -222,28 +200,17 @@ const styles = {
     cursor: 'pointer',
     transition: 'filter 150ms ease, transform 150ms ease',
   },
-  googleChip: {
-    flex: 'none',
+  footerText: {
+    margin: '29px 0 0',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 28,
-    height: 28,
-    borderRadius: 6,
-    backgroundColor: '#FFFFFF',
-  },
-  footerText: {
-    position: 'absolute',
-    top: 666,
-    left: 0,
-    width: '100%',
+    gap: 4,
     fontFamily: "'Roboto', sans-serif",
     fontWeight: 400,
     fontSize: 12,
     lineHeight: '14px',
     color: '#000000',
-    margin: 0,
-    textAlign: 'center',
   },
 };
 
@@ -255,17 +222,6 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [scale, setScale] = useState(() =>
-    Math.min(1, window.innerWidth / CARD_WIDTH, window.innerHeight / CARD_HEIGHT),
-  );
-
-  useEffect(() => {
-    const handleResize = () => {
-      setScale(Math.min(1, window.innerWidth / CARD_WIDTH, window.innerHeight / CARD_HEIGHT));
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
 
   // Where a signed-in user lands, shared by the password and Google paths.
   const routeAfterLogin = (user, provider) => {
@@ -316,8 +272,6 @@ export default function Login() {
     setError('Google sign-in was cancelled or failed. Please try again.');
   };
 
-  // The custom gradient button starts the same Google sign-in the official button
-  // did, but as a popup we fully control the look of.
   const startGoogleLogin = useGoogleLogin({
     onSuccess: handleGoogleSuccess,
     onError: handleGoogleError,
@@ -336,98 +290,108 @@ export default function Login() {
         .servease-primary-btn:hover:not(:disabled),
         .servease-google-btn:hover { filter: brightness(1.04); }
         .servease-primary-btn:disabled { opacity: 0.7; cursor: not-allowed; }
-        .servease-primary-btn:active { transform: translateY(1px); }
-        .servease-google-btn:active { translate: 0 1px; }
+        .servease-primary-btn:active,
+        .servease-google-btn:active { transform: translateY(1px); }
+        .servease-divider-left { flex: 0 1 192px; }
+        .servease-divider-right { flex: 0 1 202px; }
+        @media (max-width: 900px) {
+          .servease-auth-left { display: none !important; }
+          .servease-auth-right { padding: 24px 24px !important; }
+        }
       `}</style>
-      <div style={{ ...styles.card, transform: `translate(-50%, -50%) scale(${scale})` }}>
-        <img className="servease-login-logo" src={logo} alt="ServEase" style={styles.logo} />
-        <h1 className="servease-login-heading" style={styles.heading}>Welcome!</h1>
 
-        <form style={styles.form} onSubmit={handleSubmit}>
-          <div style={{ ...styles.fieldGroup, ...styles.emailField }}>
-            <label style={styles.label} htmlFor="email">Email Address</label>
-            <div className="servease-textbox" style={styles.textbox}>
-              <input
-                id="email"
-                type="email"
-                className="servease-input"
-                placeholder="Enter your email address"
-                style={styles.inputBare}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-          </div>
+      <div className="servease-auth-left" style={styles.left} aria-hidden="true" />
 
-          <div style={{ ...styles.fieldGroup, ...styles.passwordField }}>
-            <label style={styles.label} htmlFor="password">Password</label>
-            <div className="servease-textbox" style={styles.textbox}>
-              <input
-                id="password"
-                type={showPassword ? 'text' : 'password'}
-                className="servease-input"
-                placeholder="Enter your password"
-                style={styles.inputBare}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-              <button
-                type="button"
-                style={styles.eyeBtn}
-                onClick={() => setShowPassword((s) => !s)}
-                aria-label="Toggle password visibility"
-              >
-                <img
-                  src={eyeIcon}
-                  alt=""
-                  width={15}
-                  height={15}
-                  style={{ opacity: showPassword ? 1 : 0.75 }}
+      <div className="servease-auth-right" style={styles.right}>
+        <div style={styles.inner}>
+          <img className="servease-login-logo" src={logo} alt="ServEase" style={styles.logo} />
+          <h1 className="servease-login-heading" style={styles.heading}>Welcome!</h1>
+
+          <form style={{ ...styles.form, marginTop: 29 }} onSubmit={handleSubmit}>
+            <div style={styles.fieldGroup}>
+              <label style={styles.label} htmlFor="email">Email Address</label>
+              <div className="servease-textbox" style={styles.textbox}>
+                <input
+                  id="email"
+                  type="email"
+                  className="servease-input"
+                  placeholder="Enter your email address"
+                  style={styles.inputBare}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
                 />
-              </button>
+              </div>
             </div>
-          </div>
 
-          <div style={styles.forgotRow}>
-            <Link className="servease-auth-link" to="/forgot-password" style={styles.forgotLink}>Forgot password?</Link>
-          </div>
+            <div style={{ ...styles.fieldGroup, marginTop: 28 }}>
+              <label style={styles.label} htmlFor="password">Password</label>
+              <div className="servease-textbox" style={styles.textbox}>
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  className="servease-input"
+                  placeholder="Enter your password"
+                  style={styles.inputBare}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  style={styles.eyeBtn}
+                  onClick={() => setShowPassword((s) => !s)}
+                  aria-label="Toggle password visibility"
+                >
+                  <img
+                    src={eyeIcon}
+                    alt=""
+                    width={15}
+                    height={15}
+                    style={{ opacity: showPassword ? 1 : 0.75 }}
+                  />
+                </button>
+              </div>
+            </div>
 
-          {error && <p style={styles.errorText}>{error}</p>}
+            <div style={styles.forgotRow}>
+              <Link className="servease-auth-link" to="/forgot-password" style={styles.forgotLink}>
+                Forgot password?
+              </Link>
+            </div>
 
-          <button
-            className="servease-primary-btn"
-            type="submit"
-            style={styles.primaryBtn}
-            disabled={submitting}
-          >
-            {submitting ? 'Signing in...' : 'Sign in'}
-          </button>
+            {error && <p style={styles.errorText}>{error}</p>}
 
-          <div style={styles.dividerRow}>
-            <hr style={{ ...styles.dividerLine, ...styles.dividerLineLeft }} />
-            <span style={styles.dividerText}>or</span>
-            <hr style={{ ...styles.dividerLine, ...styles.dividerLineRight }} />
-          </div>
+            <button
+              className="servease-primary-btn"
+              type="submit"
+              style={styles.primaryBtn}
+              disabled={submitting}
+            >
+              {submitting ? 'Signing in...' : 'Sign in'}
+            </button>
 
-          <button
-            type="button"
-            className="servease-google-btn"
-            style={styles.googleBtn}
-            onClick={() => startGoogleLogin()}
-          >
-            <span style={styles.googleChip}>
-              <GoogleGLogo />
-            </span>
-            Continue with Google
-          </button>
+            <div style={styles.dividerRow}>
+              <hr className="servease-divider-left" style={styles.dividerLine} />
+              <span style={styles.dividerText}>or</span>
+              <hr className="servease-divider-right" style={styles.dividerLine} />
+            </div>
 
-          <p style={styles.footerText}>
-            Don&apos;t have an account?{' '}
-            <Link className="servease-auth-link" to="/signup" style={styles.forgotLink}>Sign up</Link>
-          </p>
-        </form>
+            <button
+              type="button"
+              className="servease-google-btn"
+              style={styles.googleBtn}
+              onClick={() => startGoogleLogin()}
+            >
+              Continue with Google
+            </button>
+
+            <p style={styles.footerText}>
+              <span>Don&apos;t have an account?</span>
+              <Link className="servease-auth-link" to="/signup" style={styles.forgotLink}>Sign up</Link>
+            </p>
+          </form>
+        </div>
       </div>
     </div>
   );

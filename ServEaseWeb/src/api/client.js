@@ -60,13 +60,21 @@ const toRegistrationPayload = (form) => {
   return payload;
 };
 
-export const requestOtp = (form) =>
-  request('/auth/request-otp', { method: 'POST', body: toRegistrationPayload(form), auth: false });
+// Step 1 of signup (SendOTP.jsx): the backend sends a 6-digit code to the chosen channel.
+// channel: 'sms' (-> phone_number) | 'email' (-> email). Defaults to 'sms' so older callers keep working.
+// May resolve { message, destination } where destination is the masked phone/email.
+export const requestOtp = (form, channel = 'sms') =>
+  request('/auth/request-otp', {
+    method: 'POST',
+    body: { ...toRegistrationPayload(form), otp_channel: channel },
+    auth: false,
+  });
 
-export const register = async (form, otp) => {
+// Step 2 of signup (OTPVerification.jsx): the code is checked against the one sent on `channel`.
+export const register = async (form, otp, channel = 'sms') => {
   const data = await request('/auth/register', {
     method: 'POST',
-    body: { ...toRegistrationPayload(form), otp },
+    body: { ...toRegistrationPayload(form), otp, otp_channel: channel },
     auth: false,
   });
   setToken(data.token); // this was missing before — register() never saved its token

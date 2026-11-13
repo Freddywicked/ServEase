@@ -1,91 +1,92 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import logo from '../assets/servease_logo.png';
+import leftBg from '../assets/auth_left_bg.png';
 import { forgotPassword, verifyResetOtp } from '../api/client';
 
 const OTP_LENGTH = 6;
-// Same stage as OTPVerification.jsx so both OTP screens line up exactly.
-const DESIGN_WIDTH = 1440;
-const DESIGN_HEIGHT = 1024;
 
-const getScale = () =>
-  Math.min(1, window.innerWidth / DESIGN_WIDTH, window.innerHeight / DESIGN_HEIGHT);
-
+// Same layout as the refined OTPVerification.jsx so both OTP screens line up.
 const styles = {
   page: {
     position: 'fixed',
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '100vh',
-    boxSizing: 'border-box',
-    overflow: 'hidden',
-    backgroundColor: '#EBEBEB',
+    inset: 0,
+    display: 'flex',
+    overflowX: 'hidden',
+    overflowY: 'auto',
+    backgroundColor: '#FFFFFF',
     fontFamily: "'Roboto', sans-serif",
   },
-  stage: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    width: DESIGN_WIDTH,
-    height: DESIGN_HEIGHT,
+  left: {
+    flex: '0 0 53.68%',
+    position: 'sticky',
+    top: 0,
+    alignSelf: 'flex-start',
+    height: '100vh',
+    backgroundColor: '#1565C0',
+    backgroundImage: `url(${leftBg})`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat',
+  },
+  right: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: '100vh',
+    display: 'flex',
+    boxSizing: 'border-box',
+    padding: '24px 48px',
+    backgroundColor: '#FFFFFF',
+  },
+  inner: {
+    width: '100%',
+    maxWidth: 416,
+    margin: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
   },
   logo: {
-    position: 'absolute',
-    top: 75,
-    left: '50%',
-    width: 263,
-    height: 263,
+    width: 200,
+    height: 200,
     display: 'block',
     objectFit: 'contain',
-    transform: 'translateX(-50%)',
+    alignSelf: 'center',
+    marginBottom: -22,
   },
   heading: {
-    position: 'absolute',
-    top: 366,
-    left: 0,
-    right: 0,
     height: 49,
+    margin: 0,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontFamily: "'Roboto', sans-serif",
-    fontWeight: 700,
+    whiteSpace: 'nowrap',
+    fontFamily: "'Maven Pro', sans-serif",
+    fontWeight: 800,
     fontSize: 32,
     lineHeight: '32px',
     color: '#021E79',
-    margin: 0,
   },
   subheading: {
-    position: 'absolute',
-    top: 472,
-    left: 0,
-    right: 0,
+    margin: '44px 0 0',
     fontFamily: "'Plus Jakarta Sans', sans-serif",
     fontWeight: 700,
-    fontSize: 24,
-    lineHeight: '30px',
-    textAlign: 'center',
+    fontSize: 20,
+    lineHeight: '25px',
     color: '#292727',
-    margin: 0,
+    textAlign: 'left',
   },
-  form: { position: 'absolute', inset: 0 },
-  otpRow: {
-    position: 'absolute',
-    top: 534,
-    left: '50%',
-    display: 'flex',
-    gap: 16,
-    transform: 'translateX(-50%)',
-  },
+  otpRow: { display: 'flex', gap: 12, marginTop: 24 },
   otpBox: {
-    width: 64,
-    height: 71,
+    boxSizing: 'border-box',
+    flex: 1,
+    minWidth: 0,
+    height: 62,
     padding: 0,
     textAlign: 'center',
     fontFamily: "'Roboto', sans-serif",
     fontWeight: 700,
-    fontSize: 28,
+    fontSize: 24,
     color: '#292727',
     border: 'none',
     borderRadius: 10,
@@ -94,20 +95,17 @@ const styles = {
     caretColor: '#0255AF',
   },
   resendRow: {
-    position: 'absolute',
-    top: 618,
-    left: 0,
-    right: 0,
+    margin: '16px 0 0',
     display: 'flex',
     justifyContent: 'center',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 6,
     fontFamily: "'Roboto', sans-serif",
     fontWeight: 700,
-    fontSize: 16,
-    lineHeight: '23px',
+    fontSize: 12,
+    lineHeight: '14px',
     color: '#484040',
-    margin: 0,
   },
   resendBtn: {
     background: 'none',
@@ -116,38 +114,32 @@ const styles = {
     cursor: 'pointer',
     fontFamily: "'Roboto', sans-serif",
     fontWeight: 700,
-    fontSize: 16,
-    lineHeight: '23px',
+    fontSize: 12,
+    lineHeight: '14px',
     color: '#2E86FF',
   },
   primaryBtn: {
-    position: 'absolute',
-    top: 656,
-    left: '50%',
     boxSizing: 'border-box',
-    width: 'min(519px, calc(100vw - 40px))',
-    height: 62,
+    width: '100%',
+    height: 46,
+    marginTop: 20,
     border: '1px solid rgba(0, 0, 0, 0.3)',
     borderRadius: 8,
     backgroundImage: 'linear-gradient(90deg, #0255AF 0%, #04A5A5 100%)',
     color: '#FFFFFF',
     fontFamily: "'Quicksand', sans-serif",
     fontWeight: 700,
-    fontSize: 24,
+    fontSize: 16,
     lineHeight: '23px',
     cursor: 'pointer',
-    transform: 'translateX(-50%)',
     transition: 'filter 150ms ease, transform 150ms ease',
   },
   statusText: {
-    position: 'absolute',
-    top: 734,
-    left: 0,
-    right: 0,
+    margin: '14px 0 0',
     textAlign: 'center',
     fontFamily: "'Roboto', sans-serif",
-    fontSize: 13,
-    margin: 0,
+    fontSize: 12,
+    lineHeight: '14px',
   },
 };
 
@@ -161,7 +153,6 @@ export default function OTPForgotPassword() {
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
   const inputRefs = useRef([]);
-  const [scale, setScale] = useState(getScale);
 
   // This screen only makes sense right after ForgotPassword, which hands the
   // email forward via router state. Reached directly, there's nothing to verify.
@@ -170,12 +161,6 @@ export default function OTPForgotPassword() {
       navigate('/forgot-password', { replace: true });
     }
   }, [email, navigate]);
-
-  useEffect(() => {
-    const handleResize = () => setScale(getScale());
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
 
   const handleChange = (index, value) => {
     if (value && !/^[0-9]$/.test(value)) return;
@@ -241,22 +226,28 @@ export default function OTPForgotPassword() {
   return (
     <div style={styles.page}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@700&family=Quicksand:wght@700&family=Roboto:wght@400;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Maven+Pro:wght@800&family=Plus+Jakarta+Sans:wght@700&family=Quicksand:wght@700&family=Roboto:wght@400;700&display=swap');
 
         .servease-otp-box:focus { box-shadow: 0 0 0 2px rgba(2, 85, 175, 0.45); }
         .servease-primary-btn:hover:not(:disabled) { filter: brightness(1.04); }
-        .servease-primary-btn:active:not(:disabled) { transform: translateX(-50%) translateY(1px); }
+        .servease-primary-btn:active:not(:disabled) { transform: translateY(1px); }
         .servease-primary-btn:disabled { opacity: 0.7; cursor: not-allowed; }
         .servease-resend-btn:hover:not(:disabled) { text-decoration: underline; }
         .servease-resend-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        @media (max-width: 900px) {
+          .servease-auth-left { display: none !important; }
+          .servease-auth-right { padding: 24px 24px !important; }
+        }
       `}</style>
 
-      <div style={{ ...styles.stage, transform: `translate(-50%, -50%) scale(${scale})` }}>
-        <img src={logo} alt="ServEase" style={styles.logo} />
-        <h1 style={styles.heading}>Forgot Password</h1>
-        <p style={styles.subheading}>Enter verification code</p>
+      <div className="servease-auth-left" style={styles.left} aria-hidden="true" />
 
-        <form style={styles.form} onSubmit={handleSubmit}>
+      <div className="servease-auth-right" style={styles.right}>
+        <form style={styles.inner} onSubmit={handleSubmit}>
+          <img src={logo} alt="ServEase" style={styles.logo} />
+          <h1 style={styles.heading}>Forgot Password</h1>
+          <h2 style={styles.subheading}>Enter verification code</h2>
+
           <div style={styles.otpRow} onPaste={handlePaste}>
             {digits.map((digit, i) => (
               <input

@@ -3,7 +3,7 @@ const { OAuth2Client } = require('google-auth-library');
 const ApiError = require('../utils/api_error');
 const asyncHandler = require('../utils/async_handler');
 const { signToken } = require('../utils/jwt');
-const { validateRegistration } = require('../utils/validators');
+const { validateRegistration, parseOtpChannel } = require('../utils/validators');
 const { unwrap } = require('../utils/db');
 const { supabase } = require('../config/supabase');
 const config = require('../config');
@@ -44,14 +44,20 @@ const generateUsername = async (email) => {
   return candidate;
 };
 
-// Sign-up step 1: validate the form, then text an OTP to the phone number.
-// Nothing is saved to users yet.
+// Sign-up step 1: validate the form, then send an OTP by the channel the user picked
+// on the app's SendOTP screen: 'sms' -> the phone number, 'email' -> the email address.
+// Nothing is saved to users yet. The code is stored keyed to the email either way, so
+// register() verifies it the same way for both channels.
 const requestOtp = asyncHandler(async (req, res) => {
   const data = validateRegistration(req.body);
+  const channel = parseOtpChannel(req.body);
   await assertEmailAvailable(data.email);
   await assertPhoneAvailable(data.phone_number);
-  await otp.sendOtp({ email: data.email, phone: data.phone_number });
-  res.json({ message: 'OTP sent to your phone number' });
+  await otp.sendOtp({ email: data.email, phone: data.phone_number, channel });
+  res.json({
+    channel,
+    message: channel === 'email' ? 'OTP sent to your email address' : 'OTP sent to your phone number',
+  });
 });
 
 // Sign-up step 2: the app sends the same form again plus the OTP.

@@ -77,4 +77,20 @@ const validateRegistration = (body = {}) => {
   };
 };
 
-module.exports = { validateRegistration, EMAIL_RE };
+// Where the signup OTP is delivered. Sent by the mobile app as `otp_channel`.
+// Kept OUT of validateRegistration()'s return value on purpose: that object is the
+// whitelist for the users insert, and otp_channel is not a users column.
+// Missing -> 'sms' (the previous behaviour), so older app builds and the web app keep working.
+const OTP_CHANNELS = ['sms', 'email'];
+const parseOtpChannel = (body = {}) => {
+  const raw = String(body.otp_channel ?? '').trim().toLowerCase();
+  if (!raw) return 'sms';
+  if (!OTP_CHANNELS.includes(raw)) {
+    throw new ApiError(400, 'Please fix the highlighted fields', {
+      otp_channel: "Choose 'sms' or 'email' for the verification code",
+    });
+  }
+  return raw;
+};
+
+module.exports = { validateRegistration, parseOtpChannel, OTP_CHANNELS, EMAIL_RE };

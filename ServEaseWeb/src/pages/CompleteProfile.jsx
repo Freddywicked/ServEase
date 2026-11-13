@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import logo from '../assets/servease_logo.png';
+import leftBg from '../assets/auth_left_bg.png';
 import { me, requestPhoneOtp, verifyPhoneOtp } from '../api/client';
 import { useAuth } from '../context/auth_context';
 
@@ -15,79 +16,150 @@ const styles = {
     position: 'fixed',
     inset: 0,
     display: 'flex',
+    overflowX: 'hidden',
+    overflowY: 'auto',
+    backgroundColor: '#FFFFFF',
+    fontFamily: "'Roboto', sans-serif",
+  },
+  left: {
+    flex: '0 0 53.68%',
+    position: 'sticky',
+    top: 0,
+    alignSelf: 'flex-start',
+    height: '100vh',
+    backgroundColor: '#1565C0',
+    backgroundImage: `url(${leftBg})`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat',
+  },
+  right: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: '100vh',
+    display: 'flex',
+    boxSizing: 'border-box',
+    padding: '24px 48px',
+    backgroundColor: '#FFFFFF',
+  },
+  inner: {
+    width: '100%',
+    maxWidth: 573,
+    margin: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+  },
+  logo: {
+    width: 150,
+    height: 150,
+    display: 'block',
+    objectFit: 'contain',
+    alignSelf: 'center',
+    marginBottom: -5,
+  },
+  heading: {
+    height: 49,
+    margin: 0,
+    display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#EBEBEB',
-    fontFamily: "'Roboto', sans-serif",
-    padding: 16,
-    boxSizing: 'border-box',
-  },
-  card: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: '#E2E5E8',
-    borderRadius: 24,
-    padding: '32px 32px 28px',
-    boxSizing: 'border-box',
-    textAlign: 'center',
-  },
-  logo: { width: 90, height: 90, objectFit: 'contain' },
-  heading: {
     fontFamily: "'Maven Pro', sans-serif",
     fontWeight: 800,
-    fontSize: 26,
+    fontSize: 32,
+    lineHeight: '32px',
     color: '#021E79',
-    margin: '8px 0 4px',
   },
-  subtitle: { fontSize: 13, color: '#7C7979', margin: '0 0 24px', lineHeight: '18px' },
-  label: {
-    display: 'block',
+  subtitle: {
+    margin: '12px auto 0',
+    maxWidth: 460,
+    textAlign: 'center',
+    fontFamily: "'Roboto', sans-serif",
+    fontWeight: 400,
+    fontSize: 13,
+    lineHeight: '18px',
+    color: '#7C7979',
+  },
+  fieldGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 4,
+    height: 52,
+    marginTop: 29,
     textAlign: 'left',
+  },
+  label: {
+    fontFamily: "'Roboto', sans-serif",
     fontWeight: 700,
     fontSize: 9,
+    lineHeight: '11px',
     letterSpacing: '0.2em',
     textTransform: 'uppercase',
     color: '#7C7979',
-    marginBottom: 4,
   },
-  input: {
+  textbox: {
     boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
     width: '100%',
-    height: 44,
+    height: 40,
     padding: 8,
     backgroundColor: '#FFFFFF',
     border: '1px solid #A6A6A6',
     borderRadius: 6,
-    fontSize: 14,
-    color: '#333',
+    transition: 'border-color 150ms ease, box-shadow 150ms ease',
+  },
+  inputBare: {
+    flex: 1,
+    minWidth: 0,
+    border: 'none',
     outline: 'none',
-    marginBottom: 16,
+    background: 'transparent',
+    fontFamily: "'Roboto', sans-serif",
+    fontWeight: 400,
+    fontSize: 12,
+    lineHeight: '14px',
+    color: '#333',
+  },
+  error: {
+    margin: '10px 0 -10px',
+    fontFamily: "'Roboto', sans-serif",
+    fontSize: 11,
+    lineHeight: '13px',
+    color: '#E53935',
   },
   button: {
+    boxSizing: 'border-box',
     width: '100%',
     height: 46,
-    border: 'none',
+    marginTop: 40,
+    border: '1px solid rgba(0, 0, 0, 0.3)',
     borderRadius: 8,
     backgroundImage: 'linear-gradient(90deg, #0255AF 0%, #04A5A5 100%)',
     color: '#FFFFFF',
     fontFamily: "'Quicksand', sans-serif",
     fontWeight: 700,
     fontSize: 16,
+    lineHeight: '23px',
     cursor: 'pointer',
+    transition: 'filter 150ms ease, transform 150ms ease',
   },
-  buttonDisabled: { opacity: 0.6, cursor: 'not-allowed' },
-  error: { color: '#E53935', fontSize: 12, margin: '0 0 12px' },
   resend: {
-    marginTop: 14,
+    alignSelf: 'center',
+    marginTop: 20,
     background: 'none',
     border: 'none',
+    padding: 0,
     color: '#2E86FF',
+    fontFamily: "'Roboto', sans-serif",
     fontWeight: 700,
     fontSize: 12,
+    lineHeight: '14px',
     cursor: 'pointer',
   },
 };
-
 
 export default function CompleteProfile() {
   const navigate = useNavigate();
@@ -144,59 +216,100 @@ export default function CompleteProfile() {
 
   return (
     <div style={styles.page}>
-      <div style={styles.card}>
-        <img src={logo} alt="ServEase" style={styles.logo} />
-        <h1 style={styles.heading}>One more step</h1>
-        <p style={styles.subtitle}>
-          Your Google account is connected. Add and verify your mobile number to finish
-          setting up your ServEase account.
-        </p>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Maven+Pro:wght@800&family=Quicksand:wght@700&family=Roboto:wght@400;700&display=swap');
+        .servease-input::placeholder { color: #A6A6A6; }
+        .servease-input:disabled { color: #7C7979; cursor: not-allowed; }
+        .servease-textbox:focus-within {
+          border-color: #0255AF;
+          box-shadow: 0 0 0 2px rgba(2, 85, 175, 0.12);
+        }
+        .servease-primary-btn:hover:not(:disabled) { filter: brightness(1.04); }
+        .servease-primary-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .servease-primary-btn:active:not(:disabled) { transform: translateY(1px); }
+        .servease-resend-btn:hover { text-decoration: underline; }
+        @media (max-width: 900px) {
+          .servease-auth-left { display: none !important; }
+          .servease-auth-right { padding: 24px 24px !important; }
+        }
+      `}</style>
 
-        {error && <p style={styles.error}>{error}</p>}
+      <div className="servease-auth-left" style={styles.left} aria-hidden="true" />
 
-        <label style={styles.label} htmlFor="phone">Phone Number</label>
-        <input
-          id="phone"
-          style={styles.input}
-          placeholder="09XX XXX XXXX"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          disabled={otpSent}
-        />
+      <div className="servease-auth-right" style={styles.right}>
+        <div style={styles.inner}>
+          <img src={logo} alt="ServEase" style={styles.logo} />
+          <h1 style={styles.heading}>One more step</h1>
+          <p style={styles.subtitle}>
+            Your Google account is connected. Add and verify your mobile number to finish
+            setting up your ServEase account.
+          </p>
 
-        {!otpSent ? (
-          <button
-            style={{ ...styles.button, ...(submitting ? styles.buttonDisabled : {}) }}
-            onClick={sendCode}
-            disabled={submitting}
-          >
-            {submitting ? 'Sending…' : 'Send verification code'}
-          </button>
-        ) : (
-          <>
-            <label style={styles.label} htmlFor="otp">Verification Code</label>
-            <input
-              id="otp"
-              style={styles.input}
-              placeholder="6-digit code"
-              inputMode="numeric"
-              maxLength={6}
-              value={otp}
-              onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-              autoFocus
-            />
+          <div style={styles.fieldGroup}>
+            <label style={styles.label} htmlFor="phone">Phone Number</label>
+            <div className="servease-textbox" style={styles.textbox}>
+              <input
+                id="phone"
+                className="servease-input"
+                style={styles.inputBare}
+                placeholder="09XX XXX XXXX"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                disabled={otpSent}
+              />
+            </div>
+          </div>
+
+          {otpSent && (
+            <div style={{ ...styles.fieldGroup, marginTop: 28 }}>
+              <label style={styles.label} htmlFor="otp">Verification Code</label>
+              <div className="servease-textbox" style={styles.textbox}>
+                <input
+                  id="otp"
+                  className="servease-input"
+                  style={styles.inputBare}
+                  placeholder="6-digit code"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+                  autoFocus
+                />
+              </div>
+            </div>
+          )}
+
+          {error && <p style={styles.error}>{error}</p>}
+
+          {!otpSent ? (
             <button
-              style={{ ...styles.button, ...(submitting ? styles.buttonDisabled : {}) }}
-              onClick={verify}
+              className="servease-primary-btn"
+              style={styles.button}
+              onClick={sendCode}
               disabled={submitting}
             >
-              {submitting ? 'Verifying…' : 'Verify and continue'}
+              {submitting ? 'Sending…' : 'Send verification code'}
             </button>
-            <button style={styles.resend} onClick={() => { setOtpSent(false); setOtp(''); setError(''); }}>
-              Use a different number / resend code
-            </button>
-          </>
-        )}
+          ) : (
+            <>
+              <button
+                className="servease-primary-btn"
+                style={styles.button}
+                onClick={verify}
+                disabled={submitting}
+              >
+                {submitting ? 'Verifying…' : 'Verify and continue'}
+              </button>
+              <button
+                className="servease-resend-btn"
+                style={styles.resend}
+                onClick={() => { setOtpSent(false); setOtp(''); setError(''); }}
+              >
+                Use a different number / resend code
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

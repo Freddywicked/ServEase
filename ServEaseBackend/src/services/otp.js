@@ -1,11 +1,12 @@
 /**
- * OTP generation, storage (Supabase table: signup_otps) and delivery (PhilSMS).
+ * OTP generation, storage (Supabase table: signup_otps) and delivery (PhilSMS or Resend email).
  * Codes are stored in the database, so they survive server/nodemon restarts.
  */
 const crypto = require('node:crypto');
 const config = require('../config');
 const { supabase } = require('../config/supabase');
 const { unwrap } = require('../utils/db');
+const { sendSignupOtpEmail } = require('./email');
 
 const PHILSMS_SEND_URL = `${process.env.PHILSMS_BASE_URL || 'https://dashboard.philsms.com/api/v3'}/sms/send`;
 const TABLE = 'signup_otps';
@@ -82,8 +83,10 @@ const sendOtpSms = async (phone, code) => {
   throw httpError(502, 'Failed to send the verification code.');
 };
 
-// Step 1 of signup: make a code, store it, text it to the phone number.
-const sendOtp = async ({ email, phone }) => {
+// Step 1 of signup: make a code, store it, and deliver it by the chosen channel:
+// 'sms' (default) -> the phone number, 'email' -> the email address.
+// Storage and verification are identical for both, so verifyOtp() needs no channel.
+const sendOtp = async ({ email, phone, channel = 'sms' }) => {
   const key = emailKey(email);
   const normalizedPhone = normalizePhPhone(phone);
 
@@ -113,7 +116,8 @@ const sendOtp = async ({ email, phone }) => {
   }
 
   try {
-    await sendOtpSms(normalizedPhone, code);
+    if (channel === 'email') await sendSignupOtpEmail(key, code);
+    else await sendOtpSms(normalizedPhone, code);
   } catch (err) {
     // Sending failed: remove the row so "Try again" isn't blocked by the cooldown.
     await supabase.from(TABLE).delete().eq('email', key);

@@ -2,52 +2,59 @@ import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import logo from '../assets/servease_logo.png';
 import eyeIcon from '../assets/icon_eye.png';
+import leftBg from '../assets/auth_left_bg.png';
 import { resetPassword } from '../api/client';
-
-// Same card as Login.jsx (width, colours, radius); only the height differs
-// because this screen has less content.
-const CARD_WIDTH = 659;
-const CARD_HEIGHT = 520;
-
-const getScale = () =>
-  Math.min(1, window.innerWidth / CARD_WIDTH, window.innerHeight / CARD_HEIGHT);
 
 const styles = {
   page: {
     position: 'fixed',
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '100vh',
-    boxSizing: 'border-box',
-    overflow: 'hidden',
-    backgroundColor: '#EBEBEB',
+    inset: 0,
+    display: 'flex',
+    overflowX: 'hidden',
+    overflowY: 'auto',
+    backgroundColor: '#FFFFFF',
     fontFamily: "'Roboto', sans-serif",
   },
-  card: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    width: CARD_WIDTH,
-    height: CARD_HEIGHT,
-    backgroundColor: '#E2E5E8',
-    borderRadius: 30,
+  left: {
+    flex: '0 0 53.68%',
+    position: 'sticky',
+    top: 0,
+    alignSelf: 'flex-start',
+    height: '100vh',
+    backgroundColor: '#1565C0',
+    backgroundImage: `url(${leftBg})`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    backgroundRepeat: 'no-repeat',
+  },
+  right: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: '100vh',
+    display: 'flex',
+    boxSizing: 'border-box',
+    padding: '24px 48px',
+    backgroundColor: '#FFFFFF',
+  },
+  inner: {
+    width: '100%',
+    maxWidth: 573,
+    margin: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
   },
   logo: {
-    position: 'absolute',
-    top: 25,
-    left: '50%',
     width: 150,
     height: 150,
     display: 'block',
     objectFit: 'contain',
-    transform: 'translateX(-50%)',
+    alignSelf: 'center',
+    marginBottom: -5,
   },
   heading: {
-    position: 'absolute',
-    top: 170,
-    left: '50%',
     height: 49,
+    margin: 0,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -56,25 +63,17 @@ const styles = {
     fontWeight: 800,
     fontSize: 32,
     lineHeight: '32px',
-    letterSpacing: 0,
     color: '#021E79',
-    margin: 0,
-    transform: 'translateX(-50%)',
   },
-  form: { position: 'absolute', inset: 0 },
+  form: { display: 'flex', flexDirection: 'column', alignItems: 'stretch', marginTop: 29 },
   fieldGroup: {
-    position: 'absolute',
-    left: '6.525%',
-    right: '6.525%',
-    height: 52,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'flex-start',
     gap: 4,
+    height: 52,
     textAlign: 'left',
   },
-  newField: { top: 248 },
-  confirmField: { top: 328 },
   label: {
     fontFamily: "'Roboto', sans-serif",
     fontWeight: 700,
@@ -119,22 +118,17 @@ const styles = {
     padding: 0,
   },
   errorText: {
-    position: 'absolute',
-    top: 392,
-    left: '6.525%',
-    right: '6.525%',
+    margin: '10px 0 -10px',
     fontFamily: "'Roboto', sans-serif",
     fontSize: 11,
+    lineHeight: '13px',
     color: '#E53935',
-    margin: 0,
   },
   primaryBtn: {
-    position: 'absolute',
-    top: 421,
-    left: '6.525%',
-    right: '6.525%',
     boxSizing: 'border-box',
+    width: '100%',
     height: 46,
+    marginTop: 40,
     border: '1px solid rgba(0, 0, 0, 0.3)',
     borderRadius: 8,
     backgroundImage: 'linear-gradient(90deg, #0255AF 0%, #04A5A5 100%)',
@@ -194,7 +188,6 @@ export default function NewPassword() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [scale, setScale] = useState(getScale);
 
   // Without an email + reset token (i.e. OTP not verified) there is nothing to reset.
   useEffect(() => {
@@ -202,12 +195,6 @@ export default function NewPassword() {
       navigate('/forgot-password', { replace: true });
     }
   }, [email, resetToken, navigate]);
-
-  useEffect(() => {
-    const handleResize = () => setScale(getScale());
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -243,45 +230,52 @@ export default function NewPassword() {
         .servease-primary-btn:hover:not(:disabled) { filter: brightness(1.04); }
         .servease-primary-btn:disabled { opacity: 0.7; cursor: not-allowed; }
         .servease-primary-btn:active:not(:disabled) { transform: translateY(1px); }
+        @media (max-width: 900px) {
+          .servease-auth-left { display: none !important; }
+          .servease-auth-right { padding: 24px 24px !important; }
+        }
       `}</style>
 
-      <div style={{ ...styles.card, transform: `translate(-50%, -50%) scale(${scale})` }}>
-        <img src={logo} alt="ServEase" style={styles.logo} />
-        <h1 style={styles.heading}>Forgot Password</h1>
+      <div className="servease-auth-left" style={styles.left} aria-hidden="true" />
 
-        <form style={styles.form} onSubmit={handleSubmit}>
-          <PasswordField
-            id="new-password"
-            label="Enter New Password"
-            placeholder="Create a password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            show={showPassword}
-            onToggle={() => setShowPassword((s) => !s)}
-            style={styles.newField}
-          />
-          <PasswordField
-            id="confirm-password"
-            label="Confirm Password"
-            placeholder="Confirm password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            show={showConfirm}
-            onToggle={() => setShowConfirm((s) => !s)}
-            style={styles.confirmField}
-          />
+      <div className="servease-auth-right" style={styles.right}>
+        <div style={styles.inner}>
+          <img src={logo} alt="ServEase" style={styles.logo} />
+          <h1 style={styles.heading}>Forgot Password</h1>
 
-          {error && <p style={styles.errorText}>{error}</p>}
+          <form style={styles.form} onSubmit={handleSubmit}>
+            <PasswordField
+              id="new-password"
+              label="Enter New Password"
+              placeholder="Create a password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              show={showPassword}
+              onToggle={() => setShowPassword((s) => !s)}
+            />
+            <PasswordField
+              id="confirm-password"
+              label="Confirm Password"
+              placeholder="Confirm password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              show={showConfirm}
+              onToggle={() => setShowConfirm((s) => !s)}
+              style={{ marginTop: 28 }}
+            />
 
-          <button
-            className="servease-primary-btn"
-            type="submit"
-            style={styles.primaryBtn}
-            disabled={submitting}
-          >
-            {submitting ? 'Saving...' : 'Submit'}
-          </button>
-        </form>
+            {error && <p style={styles.errorText}>{error}</p>}
+
+            <button
+              className="servease-primary-btn"
+              type="submit"
+              style={styles.primaryBtn}
+              disabled={submitting}
+            >
+              {submitting ? 'Saving...' : 'Submit'}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );
