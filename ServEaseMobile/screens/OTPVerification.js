@@ -4,6 +4,7 @@ import {
     Image,
     Text,
     TextInput,
+    ScrollView,
     TouchableOpacity,
     ActivityIndicator,
     StyleSheet,
@@ -170,9 +171,15 @@ const OTPVerification = ({ navigation, route }) => {
 
     return (
         <SafeAreaView style={styles.safeArea}>
-            <View style={styles.container}>
+            <ScrollView
+                contentContainerStyle={styles.container}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+            >
                 <Image source={require('../assets/logo_servease.png')} style={styles.logo} />
-                <Text style={styles.title}>Create your account</Text>
+                <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                    Create your account
+                </Text>
                 <Text style={styles.subtitle}>Verify your identity</Text>
 
                 {sendStatus === 'sending' && (
@@ -241,28 +248,30 @@ const OTPVerification = ({ navigation, route }) => {
                         )}
                     </Text>
                 )}
-            </View>
+            </ScrollView>
         </SafeAreaView>
     );
 };
 
 const styles = StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: '#FFFFFF' },
-    container: { flex: 1, paddingHorizontal: 36 },
+    container: { flexGrow: 1, paddingHorizontal: 36, paddingBottom: 40 },
+    // Spacing follows the Figma "Verify OTP" frame (402 x 874).
     logo: { width: 198, height: 198, resizeMode: 'contain', alignSelf: 'center' },
-    title: { fontSize: 32, lineHeight: 40, fontWeight: '700', color: '#021E79', marginTop: -14, marginBottom: 25 },
-    subtitle: { fontSize: 20, lineHeight: 25, fontWeight: '700', color: '#292727', marginBottom: 8 },
-    statusRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
-    statusInline: { fontSize: 12, color: '#626262' },
-    statusText: { fontSize: 12, color: '#626262', marginBottom: 16 },
+    title: { fontSize: 32, lineHeight: 40, fontWeight: '700', color: '#021E79', textAlign: 'center', alignSelf: 'stretch', marginTop: -19, marginBottom: 26 },
+    subtitle: { fontSize: 20, lineHeight: 25, fontWeight: '700', color: '#292727', marginBottom: 13 },
+    statusRow: { flexDirection: 'row', alignItems: 'center', marginLeft: 15, marginBottom: 29 },
+    statusInline: { fontSize: 12, lineHeight: 14, color: '#626262' },
+    statusText: { fontSize: 12, lineHeight: 14, color: '#626262', marginLeft: 15, marginBottom: 29 },
     bold: { fontWeight: '700', color: '#333333' },
-    failedBox: { backgroundColor: '#FDECEA', borderRadius: 10, padding: 12, marginBottom: 16 },
+    failedBox: { backgroundColor: '#FDECEA', borderRadius: 10, padding: 12, marginBottom: 29 },
     failedText: { color: '#E53935', fontSize: 13 },
     failedActions: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
-    otpRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 32 },
+    otpRow: { flexDirection: 'row', justifyContent: 'center', gap: 11, marginHorizontal: 5, marginBottom: 38 },
     otpBox: {
-        width: 46,
-        height: 52,
+        flex: 1,
+        maxWidth: 44,
+        height: 61,
         borderRadius: 10,
         backgroundColor: '#D9D9D9',
         textAlign: 'center',
@@ -273,13 +282,15 @@ const styles = StyleSheet.create({
     otpBoxFocused: { borderWidth: 2, borderColor: '#1E9BF0' },
     otpBoxError: { borderWidth: 1, borderColor: '#E53935' },
     otpBoxDisabled: { opacity: 0.5 },
-    errorText: { color: '#E53935', fontSize: 11, marginTop: -20, marginBottom: 16 },
+    errorText: { color: '#E53935', fontSize: 11, marginTop: -30, marginBottom: 17, marginLeft: 5 },
     signInButton: {
         backgroundColor: '#0255AF',
         backgroundImage: 'linear-gradient(to right, #0255AF, #04A5A5)',
         borderRadius: 8,
         borderWidth: 1,
         borderColor: 'rgba(0,0,0,0.3)',
+        alignSelf: 'stretch',
+        marginHorizontal: -3, // 336px wide in the design (33px side margins)
         height: 46,
         justifyContent: 'center',
         alignItems: 'center',

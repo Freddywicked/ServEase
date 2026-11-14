@@ -24,6 +24,7 @@ const Workflow = require('../models/workflow_model');
 const Provider = require('../models/provider_model');
 const { getProviderFileUrl, getUserPhotoUrl } = require('../utils/storage');
 const { analyzeSentiment } = require('../utils/ai_sentiment');
+const { supabase } = require('../config/supabase');
 
 // The stage list the provider's Jobs screen offers; also the customer's timeline.
 const JOB_STAGES = ['Assessing', 'Repairing', 'Quality Check', 'Completed'];
@@ -92,9 +93,80 @@ const paymentReceipt = async (row, payment) => {
 
 // ============================ NOTIFICATIONS ============================
 
+// One account can be both a customer and a service provider, and both kinds of
+// notification are stored under the same user_id. The bell on each dashboard must only
+// count / list its own role's, so notifications are classified by their `type`.
+// ADD any other type your code passes to Workflow.notify() to the right list below
+// (e.g. the type used when a customer sends a provider a NEW service request belongs in
+// PROVIDER). A type in neither list shows on BOTH dashboards.
+const PROVIDER_NOTIFICATION_TYPES = [
+  'schedule_accepted', 'schedule_rejected', 'payment_approved', 'payment_rejected',
+  'quotation_accepted', 'quotation_declined', 'payment_received', 'rating_received',
+];
+const CUSTOMER_NOTIFICATION_TYPES = [
+  'request_accepted', 'request_declined', 'quotation_received', 'schedule_proposal',
+  'payment_request', 'progress_update', 'job_completed',
+];
+
+const audienceOf = (req) => (['customer', 'provider'].includes(req.query.audience) ? req.query.audience : null);
+
+// Drops the OTHER role's types from a notifications query.
+const forAudience = (query, audience) => {
+  if (audience === 'customer') return query.not('type', 'in', `(${PROVIDER_NOTIFICATION_TYPES.join(',')})`);
+  if (audience === 'provider') return query.not('type', 'in', `(${CUSTOMER_NOTIFICATION_TYPES.join(',')})`);
+  return query;
+};
+
+const listNotificationsForAudience = async (userId, limit, audience) => {
+  const size = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 50);
+  const { data, error } = await forAudience(
+    supabase.from('notifications').select('*').eq('user_id', userId),
+    audience
+  )
+    .order('created_at', { ascending: false })
+    .limit(size);
+  if (error) throw new ApiError(500, 'Could not load notifications');
+  return data || [];
+};
+
+// GET /api/notifications/unread-count?audience=customer|provider -> { count }
+// The bell badge: notifications the user has not "seen" yet (seen_at is null).
+const getUnreadNotificationCount = asyncHandler(async (req, res) => {
+  const { count, error } = await forAudience(
+    supabase
+      .from('notifications')
+      .select('notification_id', { count: 'exact', head: true })
+      .eq('user_id', req.user.user_id)
+      .is('seen_at', null),
+    audienceOf(req)
+  );
+  if (error) throw new ApiError(500, 'Could not load the notification count');
+  res.json({ count: count ?? 0 });
+});
+
+// PATCH /api/notifications/mark-seen?audience=customer|provider
+// Tapping the bell clears the badge. Only sets seen_at; read_at (opened/read) is untouched.
+const markNotificationsSeen = asyncHandler(async (req, res) => {
+  const { error } = await forAudience(
+    supabase
+      .from('notifications')
+      .update({ seen_at: new Date().toISOString() })
+      .eq('user_id', req.user.user_id)
+      .is('seen_at', null),
+    audienceOf(req)
+  );
+  if (error) throw new ApiError(500, 'Could not update notifications');
+  res.json({ ok: true });
+});
+
 // GET /api/notifications?limit -> { notifications: [{ id, type, message, requestId, readAt, createdAt }] }
 const listNotifications = asyncHandler(async (req, res) => {
-  const rows = await Workflow.listNotifications(req.user.user_id, req.query.limit);
+  const audience = audienceOf(req);
+  // With ?audience=customer|provider (sent by the dashboards' bell) only that role's
+  // notifications come back; without it the list is unchanged.
+  const rows = audience
+    ? await listNotificationsForAudience(req.user.user_id, req.query.limit, audience)
+    : await Workflow.listNotifications(req.user.user_id, req.query.limit);
   // request_id is stored as the requests table UUID; the apps route with the
   // public "SR-0007" reference, so translate it here.
   const requestIds = [...new Set(rows.map((n) => n.request_id).filter(Boolean))];
@@ -1564,6 +1636,8 @@ const getProviderDetails = asyncHandler(async (req, res) => {
 module.exports = {
   listNotifications,
   markNotificationRead,
+  getUnreadNotificationCount,
+  markNotificationsSeen,
   getActiveRepair,
   getCustomerHistory,
   getPaymentDue,

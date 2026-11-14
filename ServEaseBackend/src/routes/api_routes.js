@@ -44,6 +44,9 @@ router.use('/provider', require('./providerwork_routes'));
 // Notifications + customer<->provider chat (workflow_controllers.js; tables from
 // migrations/002_core_workflow_tables.sql).
 router.get('/notifications', authenticate, workflow.listNotifications);
+// Bell badge: unseen count + clearing it when the bell is tapped (keep above any /notifications/:id route).
+router.get('/notifications/unread-count', authenticate, workflow.getUnreadNotificationCount);
+router.patch('/notifications/mark-seen', authenticate, workflow.markNotificationsSeen);
 router.post('/notifications/:id/read', authenticate, workflow.markNotificationRead);
 router.get('/conversations', authenticate, workflow.listConversations);
 router.get('/conversations/:id/messages', authenticate, workflow.listMessages);

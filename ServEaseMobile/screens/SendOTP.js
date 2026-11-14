@@ -73,7 +73,9 @@ const SendOTP = ({ navigation, route }) => {
                 showsVerticalScrollIndicator={false}
             >
                 <Image source={require('../assets/logo_servease.png')} style={styles.logo} />
-                <Text style={styles.title}>Create your account</Text>
+                <Text style={styles.title} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                    Create your account
+                </Text>
                 <Text style={styles.subtitle}>Verify your identity</Text>
                 <Text style={styles.helper}>Where should we send your 6-digit security code?</Text>
 
@@ -125,7 +127,7 @@ const styles = StyleSheet.create({
     container: { paddingHorizontal: 36, paddingBottom: 40 },
 
     logo: { width: 198, height: 198, resizeMode: 'contain', alignSelf: 'center' },
-    title: { fontSize: 32, lineHeight: 40, fontWeight: '700', color: '#021E79', marginTop: -14 },
+    title: { fontSize: 32, lineHeight: 40, fontWeight: '700', color: '#021E79', textAlign: 'center', alignSelf: 'stretch', marginTop: -19 },
     subtitle: { fontSize: 20, lineHeight: 25, fontWeight: '700', color: '#292727', marginTop: 25 },
     helper: { fontSize: 12, lineHeight: 14, color: '#626262', marginTop: 13, marginBottom: 33 },
 

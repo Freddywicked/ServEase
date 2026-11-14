@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet, Modal, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, ActivityIndicator, StyleSheet, Modal, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import LinearGradient from 'react-native-linear-gradient';
@@ -10,7 +10,9 @@ import { getCategories, getProviderDashboard } from '../api/servicerequest_api';
 import { getProviderEarnings } from '../api/providerWork_api';
 import { formatPeso } from '../utils/provider_formatters';
 import NotificationsModal from '../components/NotificationsModal';
-import { DashboardSection, DashboardItem, DashboardEmpty } from '../components/DashboardSection';
+import NotificationBell from '../components/NotificationBell';
+import useNotificationBadge from '../hooks/useNotificationBadge';
+import { DashboardSection, DashboardEmpty } from '../components/DashboardSection';
 import { formatAiSuggestion } from '../utils/formatters';
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -69,23 +71,65 @@ const rowTitle = (item) => {
     return `${customer} | #${reqNum}`;
 };
 
-// Extract Summary from dynamic backend properties
+// Problem details come from the backend. Different endpoints / DB columns name the field differently,
+// so check the known names (top-level first, then a nested request object). Nothing is hard-coded.
+const PROBLEM_DETAIL_KEYS = [
+    'problemDescription', 'problem_description', 'problemDetails', 'problem_details',
+    'issueDescription', 'issue_description', 'description', 'details',
+    'issue', 'problem', 'concern', 'summary', 'notes',
+];
+const NESTED_REQUEST_KEYS = ['serviceRequest', 'service_request', 'request'];
+
+const readDetailText = (source) => {
+    if (!source || typeof source !== 'object') return '';
+    for (const key of PROBLEM_DETAIL_KEYS) {
+        const value = source[key];
+        if (typeof value === 'string' && value.trim()) return value.replace(/\s+/g, ' ').trim();
+    }
+    return '';
+};
+
+// Problem details only - the status is shown separately on the right side of the row.
 const rowSummary = (item) => {
     if (!item) return '';
-    return (
-        item.problemDescription ||
-        item.summary ||
-        item.description ||
-        item.statusLabel ||
-        item.status ||
-        formatAiSuggestion(item.aiDiagnosis) ||
-        'No details provided.'
-    );
+    const direct = readDetailText(item);
+    if (direct) return direct;
+    for (const key of NESTED_REQUEST_KEYS) {
+        const nested = readDetailText(item[key]);
+        if (nested) return nested;
+    }
+    return item.aiDiagnosis ? String(formatAiSuggestion(item.aiDiagnosis) || '').trim() : '';
 };
+
+// "in_progress" -> "In Progress" (value itself comes from the backend)
+const rowStatus = (item) => {
+    const raw = item?.statusLabel || item?.status || item?.request?.status || '';
+    return String(raw)
+        .replace(/[_-]+/g, ' ')
+        .trim()
+        .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+};
+
+// Row used by the Pending Request / Active Repair containers:
+// title (left) + optional status (right) on top, single-line problem details below.
+const RequestRow = ({ isFirst, title, summary, status, onPress }) => (
+    <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={onPress}
+        style={[styles.requestRow, isFirst ? styles.requestRowFirst : styles.requestRowNext]}
+    >
+        <View style={styles.requestRowHeader}>
+            <Text style={styles.requestRowTitle} numberOfLines={1}>{title}</Text>
+            {!!status && <Text style={styles.requestRowStatus} numberOfLines={1}>{status}</Text>}
+        </View>
+        <Text style={styles.requestRowSummary} numberOfLines={1} ellipsizeMode="tail">{summary}</Text>
+    </TouchableOpacity>
+);
 
 const ServiceProviderDashboard = ({ navigation }) => {
     const { user, provider, refreshUser } = useAuth();
     const isVerified = provider?.verification_status === VERIFIED_STATUS;
+    const { count: notificationCount, markSeen: markNotificationsSeen } = useNotificationBadge({ audience: 'provider' });
 
     const [profile, setProfile] = useState(null);
     const [categoryOptions, setCategoryOptions] = useState([]);
@@ -238,6 +282,7 @@ const ServiceProviderDashboard = ({ navigation }) => {
     };
 
     const handleNotificationsPress = () => {
+        if (!notificationsVisible) markNotificationsSeen();
         setNotificationsVisible((visible) => !visible);
     };
 
@@ -257,14 +302,15 @@ const ServiceProviderDashboard = ({ navigation }) => {
     const pendingItems = pendingRequests.map((item) => ({
         id: item.id || item.requestId,
         title: rowTitle(item),
-        summary: rowSummary(item),
+        summary: rowSummary(item) || 'No details provided.',
     }));
 
     // Format active repairs dynamically with title and summary
     const activeItems = activeRepairs.map((item) => ({
         id: item.id || item.requestId || 'active-repair',
         title: rowTitle(item),
-        summary: rowSummary(item),
+        summary: rowSummary(item) || 'No details provided.',
+        status: rowStatus(item),
     }));
 
     const todayKey = toDateKey(new Date());
@@ -283,14 +329,11 @@ const ServiceProviderDashboard = ({ navigation }) => {
                         </Text>
                         <Text style={styles.subtitle}>{providerTitle}</Text>
                     </View>
-                    <TouchableOpacity
+                    <NotificationBell
+                        count={notificationCount}
                         onPress={handleNotificationsPress}
                         style={styles.bellButton}
-                        accessibilityRole="button"
-                        accessibilityLabel="Notifications"
-                    >
-                        <Image source={require('../assets/icon_ringbell.png')} style={styles.bellIcon} />
-                    </TouchableOpacity>
+                    />
                 </View>
 
                 {!isVerified && (
@@ -338,7 +381,7 @@ const ServiceProviderDashboard = ({ navigation }) => {
                 <DashboardSection title="Pending Request" onActionPress={handlePendingRequestPress} style={styles.firstSection}>
                     {pendingItems.length > 0 ? (
                         pendingItems.map((item, index) => (
-                            <DashboardItem
+                            <RequestRow
                                 key={item.id}
                                 isFirst={index === 0}
                                 title={item.title}
@@ -355,11 +398,12 @@ const ServiceProviderDashboard = ({ navigation }) => {
                 <DashboardSection title="Active Repair" onActionPress={handleActiveRepairPress} style={styles.nextSection}>
                     {activeItems.length > 0 ? (
                         activeItems.map((item, index) => (
-                            <DashboardItem
+                            <RequestRow
                                 key={item.id}
                                 isFirst={index === 0}
                                 title={item.title}
                                 summary={item.summary}
+                                status={item.status}
                                 onPress={handleActiveRepairPress}
                             />
                         ))
@@ -543,6 +587,7 @@ const ServiceProviderDashboard = ({ navigation }) => {
             <NotificationsModal
                 visible={notificationsVisible}
                 onClose={() => setNotificationsVisible(false)}
+                audience="provider"
             />
         </SafeAreaView>
     );
@@ -584,11 +629,6 @@ const styles = StyleSheet.create({
     bellButton: {
         marginTop: 6,
         marginRight: 10,
-    },
-    bellIcon: {
-        width: 27,
-        height: 27,
-        resizeMode: 'contain',
     },
     pendingBanner: {
         borderWidth: 1,
@@ -675,6 +715,46 @@ const styles = StyleSheet.create({
         fontSize: 10,
         lineHeight: 14,
         color: '#666666',
+    },
+    requestRow: {
+        borderWidth: 1,
+        borderColor: '#C9C2C2',
+        borderRadius: 14,
+        backgroundColor: '#FFFFFF',
+        paddingHorizontal: 14,
+        paddingVertical: 9,
+    },
+    requestRowFirst: {
+        marginTop: 12,
+    },
+    requestRowNext: {
+        marginTop: 8,
+    },
+    requestRowHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    requestRowTitle: {
+        flex: 1,
+        marginRight: 8,
+        fontSize: 12,
+        lineHeight: 18,
+        fontWeight: '700',
+        color: '#3D3D3D',
+    },
+    requestRowStatus: {
+        flexShrink: 0,
+        maxWidth: '45%',
+        fontSize: 11,
+        lineHeight: 16,
+        fontWeight: '400',
+        color: '#484040',
+    },
+    requestRowSummary: {
+        fontSize: 11,
+        lineHeight: 16,
+        color: '#484040',
     },
     modalBackdrop: {
         flex: 1,

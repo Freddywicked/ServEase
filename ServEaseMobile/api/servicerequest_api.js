@@ -285,7 +285,22 @@ export const getActiveRepair = async () => {
     }
 };
 
-export const getNotifications = ({ limit } = {}) => request('/notifications', { query: { limit } }).then(pick('notifications'));
+// `audience` ('customer' | 'provider') keeps each dashboard's list to its own role's notifications.
+export const getNotifications = ({ limit, audience } = {}) => request('/notifications', { query: { limit, audience } }).then(pick('notifications'));
+
+// Bell badge (dashboards): how many notifications the signed-in user hasn't "seen" yet, read
+// live from the backend. Tapping the bell calls markNotificationsSeen, which clears the badge
+// for good without deleting or "reading" anything. `audience` is 'customer' | 'provider'.
+//   GET   /notifications/unread-count  ?audience -> { count }
+//   PATCH /notifications/mark-seen     ?audience -> { success: true }
+export const getUnreadNotificationCount = ({ audience } = {}) =>
+    request('/notifications/unread-count', { query: { audience } }).then((data) => {
+        const count = Number(data?.count ?? data?.unreadCount ?? 0);
+        return Number.isFinite(count) && count > 0 ? count : 0;
+    });
+
+export const markNotificationsSeen = ({ audience } = {}) =>
+    request('/notifications/mark-seen', { method: 'PATCH', query: { audience } });
 
 /* ------------------------------ Tracking (customer) ------------------------------ */
 

@@ -24,13 +24,14 @@ export const splitNotification = (item) => {
  * SafeAreaView so it sits on top. Tapping anywhere outside it (or the bell again) closes it.
  *
  * Notifications are fetched from the backend every time it opens, so the list is always
- * fresh — and because the backend returns the signed-in user's own notifications, a customer
- * and a service provider each see different content.
+ * fresh. Pass `audience` ('customer' | 'provider') so each dashboard lists only its own
+ * role's notifications.
  *
- * The list is a plain ScrollView (no Pressable wrapped around it), so it scrolls normally
- * once the notifications are taller than the dropdown.
+ * Each notification is a rounded container (Figma): a bold first line, a smaller second line
+ * and the time on the right. The card is a fixed height and the list scrolls inside it once
+ * the notifications no longer fit.
  */
-const NotificationsModal = ({ visible, onClose, top = DEFAULT_TOP }) => {
+const NotificationsModal = ({ visible, onClose, top = DEFAULT_TOP, audience }) => {
     const [notifications, setNotifications] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [loadFailed, setLoadFailed] = useState(false);
@@ -39,13 +40,13 @@ const NotificationsModal = ({ visible, onClose, top = DEFAULT_TOP }) => {
         setIsLoading(true);
         setLoadFailed(false);
         try {
-            setNotifications(await getNotifications({ limit: NOTIFICATION_LIMIT }));
+            setNotifications(await getNotifications({ limit: NOTIFICATION_LIMIT, audience }));
         } catch (error) {
             setLoadFailed(true);
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [audience]);
 
     useEffect(() => {
         if (visible) load();
@@ -60,7 +61,6 @@ const NotificationsModal = ({ visible, onClose, top = DEFAULT_TOP }) => {
 
             <View style={[styles.popup, { top }]}>
                 <Text style={styles.title}>NOTIFICATIONS</Text>
-                <View style={styles.line} />
 
                 {isLoading ? (
                     <ActivityIndicator color="#0255AF" style={styles.stateWrap} />
@@ -76,18 +76,21 @@ const NotificationsModal = ({ visible, onClose, top = DEFAULT_TOP }) => {
                     <ScrollView
                         style={styles.list}
                         nestedScrollEnabled
-                        showsVerticalScrollIndicator
+                        showsVerticalScrollIndicator={false}
                         keyboardShouldPersistTaps="handled"
                     >
-                        {notifications.map((item) => (
-                            <View key={item.id}>
-                                <View style={styles.item}>
-                                    <Text style={styles.message}>{item.message}</Text>
-                                    <Text style={styles.time}>{formatTimeAgo(item.createdAt)}</Text>
+                        {notifications.map((item) => {
+                            const { heading, detail } = splitNotification(item);
+                            return (
+                                <View key={item.id} style={styles.item}>
+                                    <View style={styles.itemTextWrap}>
+                                        <Text style={styles.itemHeading}>{heading}</Text>
+                                        {detail ? <Text style={styles.itemDetail}>{detail}</Text> : null}
+                                    </View>
+                                    <Text style={styles.itemTime}>{formatTimeAgo(item.createdAt)}</Text>
                                 </View>
-                                <View style={styles.line} />
-                            </View>
-                        ))}
+                            );
+                        })}
                     </ScrollView>
                 )}
             </View>
@@ -100,13 +103,13 @@ const styles = StyleSheet.create({
         position: 'absolute',
         left: 25,
         right: 25,
-        maxHeight: 300, // taller than this -> the list scrolls
+        height: 243, // Figma card height; taller content scrolls
         backgroundColor: '#FFFFFF',
         borderRadius: 10,
         borderWidth: 1,
         borderColor: '#E0E0E0',
+        paddingTop: 25,
         paddingHorizontal: 16,
-        paddingTop: 12,
         paddingBottom: 4,
         zIndex: 10,
         elevation: 8,
@@ -116,31 +119,54 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 4 },
     },
     title: {
-        fontSize: 16,
-        fontWeight: '800',
-        color: '#3F55A5',
-        marginBottom: 8,
-    },
-    line: {
-        height: 1,
-        backgroundColor: '#8A8A8A',
+        marginLeft: 7,
+        marginBottom: 9,
+        fontSize: 15,
+        lineHeight: 18,
+        fontWeight: '900',
+        color: '#021E79',
+        opacity: 0.7,
     },
     list: {
-        flexGrow: 0,
-        flexShrink: 1,
+        flex: 1,
     },
+    // One notification container (Figma: 319 x 43, 1px #C9C2C2 border, radius 14, 11px apart).
     item: {
-        paddingVertical: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        minHeight: 43,
+        marginBottom: 11,
+        paddingVertical: 5,
+        paddingLeft: 11,
+        paddingRight: 10,
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: '#C9C2C2',
+        borderRadius: 14,
     },
-    message: {
-        fontSize: 12,
+    itemTextWrap: {
+        flex: 1,
+        justifyContent: 'center',
+    },
+    itemHeading: {
+        fontSize: 10,
+        lineHeight: 17,
         fontWeight: '700',
-        color: '#333333',
+        color: '#3D3D3D',
     },
-    time: {
-        fontSize: 11,
-        color: '#666666',
-        marginTop: 2,
+    itemDetail: {
+        fontSize: 9,
+        lineHeight: 15,
+        fontWeight: '400',
+        color: '#484040',
+        marginTop: -1,
+    },
+    itemTime: {
+        marginLeft: 8,
+        fontSize: 10,
+        lineHeight: 12,
+        fontWeight: '400',
+        color: '#484040',
     },
     stateWrap: {
         paddingVertical: 24,

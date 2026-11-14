@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import LinearGradient from 'react-native-linear-gradient';
@@ -7,8 +7,10 @@ import { useAuth } from '../context/auth_context';
 import { ROUTES } from '../navigation/routes';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
 import { getActiveRepair, getMyServiceRequests } from '../api/servicerequest_api';
-import { formatTimeAgo } from '../utils/formatters';
+import { formatTimeAgo, formatAiSuggestion } from '../utils/formatters';
 import NotificationsModal from '../components/NotificationsModal';
+import NotificationBell from '../components/NotificationBell';
+import useNotificationBadge from '../hooks/useNotificationBadge';
 import { DashboardSection, DashboardItem, DashboardEmpty } from '../components/DashboardSection';
 
 // Preview limit set to 5 items per container
@@ -22,9 +24,39 @@ const formatRequestTitle = (item) => {
     return `${category} | #${id}`;
 };
 
+// Problem details come from the backend. Different endpoints / DB columns name the field differently,
+// so check the known names (top-level first, then a nested request object). Nothing is hard-coded.
+const PROBLEM_DETAIL_KEYS = [
+    'problemDescription', 'problem_description', 'problemDetails', 'problem_details',
+    'issueDescription', 'issue_description', 'description', 'details',
+    'issue', 'problem', 'concern', 'summary', 'notes',
+];
+const NESTED_REQUEST_KEYS = ['serviceRequest', 'service_request', 'request'];
+
+const readDetailText = (source) => {
+    if (!source || typeof source !== 'object') return '';
+    for (const key of PROBLEM_DETAIL_KEYS) {
+        const value = source[key];
+        if (typeof value === 'string' && value.trim()) return value.replace(/\s+/g, ' ').trim();
+    }
+    return '';
+};
+
+const getProblemDetails = (item) => {
+    if (!item) return '';
+    const direct = readDetailText(item);
+    if (direct) return direct;
+    for (const key of NESTED_REQUEST_KEYS) {
+        const nested = readDetailText(item[key]);
+        if (nested) return nested;
+    }
+    return item.aiDiagnosis ? String(formatAiSuggestion(item.aiDiagnosis) || '').trim() : '';
+};
+
 const CustomerDashboard = ({ navigation, route }) => {
     const { user, provider, refreshUser } = useAuth();
     const resetDraft = useServiceRequestDraftStore((state) => state.resetDraft);
+    const { count: notificationCount, markSeen: markNotificationsSeen } = useNotificationBadge({ audience: 'customer' });
     const customerName = user?.name || 'Customer';
     const applicationStatus = provider?.verification_status ?? null;
 
@@ -79,7 +111,10 @@ const CustomerDashboard = ({ navigation, route }) => {
     };
 
     const handleNotificationsPress = () => {
-        if (!notificationsVisible) scrollRef.current?.scrollTo({ y: 0, animated: false });
+        if (!notificationsVisible) {
+            scrollRef.current?.scrollTo({ y: 0, animated: false });
+            markNotificationsSeen();
+        }
         setNotificationsVisible((visible) => !visible);
     };
 
@@ -89,7 +124,7 @@ const CustomerDashboard = ({ navigation, route }) => {
     const activeItems = activeRepairs.map((item) => ({
         id: item.id || item.requestId,
         title: formatRequestTitle(item),
-        summary: item.summary || item.description || item.problemDescription || 'No summary available.',
+        summary: getProblemDetails(item) || 'No summary available.',
     }));
 
     const historyItems = recentHistory.map((item) => ({
@@ -110,14 +145,11 @@ const CustomerDashboard = ({ navigation, route }) => {
                         </Text>
                         <Text style={styles.subtitle}>What needs fixing today?</Text>
                     </View>
-                    <TouchableOpacity
+                    <NotificationBell
+                        count={notificationCount}
                         onPress={handleNotificationsPress}
                         style={styles.bellButton}
-                        accessibilityRole="button"
-                        accessibilityLabel="Notifications"
-                    >
-                        <Image source={require('../assets/icon_ringbell.png')} style={styles.bellIcon} />
-                    </TouchableOpacity>
+                    />
                 </View>
 
                 {applicationStatus === 'pending' && (
@@ -184,7 +216,7 @@ const CustomerDashboard = ({ navigation, route }) => {
                 </DashboardSection>
             </ScrollView>
 
-            <NotificationsModal visible={notificationsVisible} onClose={() => setNotificationsVisible(false)} />
+            <NotificationsModal visible={notificationsVisible} onClose={() => setNotificationsVisible(false)} audience="customer" />
         </SafeAreaView>
     );
 };
@@ -226,11 +258,6 @@ const styles = StyleSheet.create({
     bellButton: {
         marginTop: 6,
         marginRight: 10,
-    },
-    bellIcon: {
-        width: 27,
-        height: 27,
-        resizeMode: 'contain',
     },
     pendingBanner: {
         borderWidth: 1,
