@@ -212,6 +212,8 @@ const getActiveRepair = asyncHandler(async (req, res) => {
       status: row.request_status,
       statusLabel: row.request_status,
       category: row.category,
+      // The customer's problem description (service_requests.description) for the dashboard card.
+      description: row.description || '',
       providerName: users[providerId]?.name || null,
       createdAt: row.created_at,
     },
@@ -1085,6 +1087,8 @@ const getProviderDashboard = asyncHandler(async (req, res) => {
           requestId: refOf(newest.row),
           statusLabel: newest.row.request_status,
           customerName: customerMap[newest.row.customer_id]?.name || 'Customer',
+          // Problem details shown under the title on the dashboard card.
+          description: newest.row.description || '',
         }
       : null,
     notifications: notifications.map((n) => ({ id: n.notification_id, message: n.message, createdAt: n.created_at })),
@@ -1092,6 +1096,8 @@ const getProviderDashboard = asyncHandler(async (req, res) => {
       id: refOf(row),
       requestNumber: refOf(row),
       customerName: customerMap[row.customer_id]?.name || 'Customer',
+      // Problem details shown under the title on the dashboard card.
+      description: row.description || '',
     })),
   });
 });
