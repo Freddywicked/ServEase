@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { ROUTES } from '../navigation/routes';
 import ProgressBar from '../components/ProgressBar';
+import ExitRequestModal, { useExitServiceRequest } from '../components/ExitRequestModal';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
 import { diagnoseServiceRequest } from '../api/servicerequest_api';
 
@@ -34,6 +35,7 @@ const CURRENT_STEP = 2;
 
 const AIDiagnosis = ({ navigation }) => {
     const setDraft = useServiceRequestDraftStore((state) => state.setDraft);
+    const { isExitModalVisible, requestExit, continueRequest, cancelRequest } = useExitServiceRequest(navigation);
     const [status, setStatus] = useState('choice'); // 'choice' | 'loading' | 'failed'
     const [failureMessage, setFailureMessage] = useState('');
     const spinValue = useRef(new Animated.Value(0)).current;
@@ -100,8 +102,10 @@ const AIDiagnosis = ({ navigation }) => {
         outputRange: ['0deg', '360deg'],
     });
 
+    // X button: ask "Do you still want to continue?" first. Cancelling (No) wipes the draft and
+    // returns to the dashboard; leaving also unmounts this screen, which aborts any in-flight AI call.
     const handleClose = () => {
-        navigation.goBack();
+        requestExit();
     };
 
     // Starts a run (first time from the choice screen, or again after a failure).
@@ -181,6 +185,7 @@ const AIDiagnosis = ({ navigation }) => {
                     </View>
                 )}
             </ScrollView>
+            <ExitRequestModal visible={isExitModalVisible} onYes={continueRequest} onNo={cancelRequest} />
         </SafeAreaView>
     );
 };

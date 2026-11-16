@@ -33,7 +33,7 @@ const STAGE_COPY = {
     initial: {
         type: 'Initial Fee',
         lineItem: 'Initial repair payment',
-        subtitle: 'Your 20% initial payment has been processed.',
+        subtitle: 'Your initial payment has been processed.',
     },
     additional: {
         type: 'Additional payment fee',

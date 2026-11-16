@@ -228,13 +228,28 @@ export const getProviderDocuments = (id, kind) => request(`/admin/users/${id}/do
 //      timeSlots:        ['10:00 AM', ...],    // appointment times offered
 //      searchRadius:     { minKm, maxKm, defaultKm },
 //      defaultMapCenter: { lat, lng },         // optional: where the map opens until the location resolves
+//      uploadLimits:     { maxImages, maxVideos, maxImageMb, maxVideoMb },  // optional
 //    }
 // Register this route BEFORE '/:requestId' in servicerequest_routes.js (like '/active' and '/tracking').
 export const getServiceRequestOptions = () => request('/service-requests/options');
 
+// Appointment slots for ONE day, with the ones that can no longer be booked marked unavailable
+// -> { slots: [{ time: '9:00 AM', available: true }, ...] }.
+// category / latitude / longitude / radiusKm are sent when the customer already picked them, so the
+// backend can decide availability for the providers that could actually take this request.
+// Register this route BEFORE '/:requestId' in servicerequest_routes.js.
+export const getAppointmentSlots = ({ date, category, latitude, longitude, radiusKm } = {}) => {
+  const params = new URLSearchParams({ date });
+  if (category) params.set('category', category);
+  if (latitude != null) params.set('latitude', latitude);
+  if (longitude != null) params.set('longitude', longitude);
+  if (radiusKm != null) params.set('radiusKm', radiusKm);
+  return request(`/service-requests/time-slots?${params.toString()}`);
+};
+
 // Step 1 of the create-request flow. `formData` is multipart: category, description,
-// serviceLocationType?, photo?, appointmentDate? ("YYYY-MM-DD"), appointmentTime? ("10:00 AM"),
-// latitude?, longitude?, searchRadiusKm?.
+// serviceLocationType?, photos? (up to 4 image files, repeat the field), video? (1 video file),
+// appointmentDate? ("YYYY-MM-DD"), appointmentTime? ("9:00 AM"), latitude?, longitude?, searchRadiusKm?.
 // Creates a draft (request_status 'New') -> { request: { id: "SR-0007", ... } }.
 export const createServiceRequest = (formData) =>
   request('/service-requests', { method: 'POST', body: formData });
@@ -254,6 +269,11 @@ export const runAiDiagnosis = (requestId) =>
 // "Skip AI and Find Service Providers" -> { request: {...} }.
 export const skipAiDiagnosis = (requestId) =>
   request(`/service-requests/${encodeURIComponent(requestId)}/skip-ai`, { method: 'POST' });
+
+// The customer pressed the close button and answered "No": delete the unsubmitted draft so the
+// request is not recorded -> { ok: true }. Only drafts (not yet submitted) may be deleted.
+export const cancelDraftRequest = (requestId) =>
+  request(`/service-requests/${encodeURIComponent(requestId)}/draft`, { method: 'DELETE' });
 
 // The AI solved the problem; closes the draft request -> { request: {...} }.
 export const resolveServiceRequest = (requestId) =>
@@ -372,8 +392,12 @@ export const getCustomerHistory = (type = 'all') =>
 
 // --- Notifications (bell + dashboard boxes) ---
 
-// -> { notifications: [{ id, type, message, requestId, readAt, createdAt }] }
-export const getNotifications = () => request('/notifications');
+// -> { notifications: [{ id, type, message, requestId, role, readAt, createdAt }] }
+// `role` ('customer' | 'provider' | 'admin') is the side the bell belongs to: the backend returns only the
+// notifications addressed to that role of the logged-in user, so a customer notification never shows up
+// (or counts) on the provider bell, and vice versa.
+export const getNotifications = (role) =>
+  request(`/notifications${role ? `?role=${encodeURIComponent(role)}` : ''}`);
 
 export const markNotificationRead = (notificationId) =>
   request(`/notifications/${encodeURIComponent(notificationId)}/read`, { method: 'POST' });

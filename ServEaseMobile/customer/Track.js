@@ -3,10 +3,12 @@ import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, ActivityInd
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { ROUTES } from '../navigation/routes';
+// The chat screens' own route names (same ones MessageCustomer.js navigates with).
+import { ROUTES as MESSAGING_ROUTES } from '../constants/messaging';
 import {
     getTrackedRequests,
-    acceptScheduleProposal,
-    rejectScheduleProposal,
+    // [SCHEDULE PROPOSAL - DISABLED] acceptScheduleProposal,
+    // [SCHEDULE PROPOSAL - DISABLED] rejectScheduleProposal,
     approveAdditionalPayment,
     rejectAdditionalPayment,
 } from '../api/servicerequest_api';
@@ -45,10 +47,26 @@ import { formatDateTime } from '../utils/formatters';
  *   Quotation approve/decline happens in RequestDetails (respondToQuotation in the API file).
  *
  * Tabs (customer-facing) and which tracking groups feed them:
- *   Pending    <- sent                 sent requests, quotations being reviewed, price negotiations
+ *   Pending    <- sent                 sent requests, INITIAL quotations being reviewed, price negotiations
  *   Active     <- approved + ongoing   confirmed appointments and repairs underway
  *   Completed  <- done                 finished services with payment settled
- *   Closed     <- declined             declined or cancelled requests
+ *   Closed     <- declined             quotation declined by the customer, request declined by the provider,
+ *                                      or a request cancelled by either side (see getClosedInfo)
+ *
+ * Inside Active there are two sections (underlined sub-tabs, per Figma):
+ *   Quotations <- cards waiting on the customer's answer: additional-payment quotations for parts
+ *                 (cardType 'payment': Approve / Negotiate / Decline). INITIAL quotations stay in
+ *                 Pending and move to Active once approved.
+ *   On-going   <- the active repairs with their tracking indicator (cardType 'timeline' / 'completed').
+ *                 A repair with an additional payment waiting shows in BOTH sections (the payment
+ *                 quotation in Quotations, its tracking indicator in On-going). Completed-but-unpaid
+ *                 repairs stay here.
+ * The tracking indicator is the one for the request's service location type (Shop-based or
+ * Home-based); the backend builds the steps for that type, see getTimeline().
+ *
+ * [SCHEDULE PROPOSAL - DISABLED] The provider's "new schedule" card (Accept / Reject) was removed
+ * because the customer can pick another schedule in RecommendServiceProvider. Search for the tag
+ * "[SCHEDULE PROPOSAL - DISABLED]" in this file to find (and restore) every piece of it.
  *
  * Notification count on each tab = requests in that tab that need the customer's attention:
  * the backend flags one with `isUnread: true`, and anything waiting on the customer
@@ -78,7 +96,20 @@ const STATUS_FILTERS = [
 ];
 
 // Cards that sit waiting on the customer's answer.
-const ACTION_CARD_TYPES = ['quotation', 'schedule', 'payment'];
+// [SCHEDULE PROPOSAL - DISABLED] 'schedule' used to be in this list.
+const ACTION_CARD_TYPES = ['quotation', 'payment'];
+
+// Sections inside the Active tab (labels only; the cards in each come from the backend).
+const ACTIVE_SECTIONS = [
+    { key: 'quotations', label: 'Quotations' },
+    { key: 'ongoing', label: 'On-going' },
+];
+
+// Quotations section: everything that needs an answer. On-going section: every active repair, i.e.
+// everything except the cards that only ask a question. A repair with an additional payment waiting
+// has two cards: the 'payment' card (Quotations) and its own 'timeline' card (On-going).
+const isQuotationCard = (request) => ACTION_CARD_TYPES.includes(request.cardType);
+const isOngoingCard = (request) => !ACTION_CARD_TYPES.includes(request.cardType);
 
 const getTabRequests = (groups, tab) => tab.sources.flatMap((source) => groups?.[source] ?? []);
 
@@ -114,6 +145,47 @@ const isCompletedStep = (step) =>
 
 const formatPeso = (amount) => `₱${Number(amount ?? 0).toFixed(2)}`;
 
+// Closed tab wording. The backend says who closed the request (`closedBy`: 'customer' | 'provider')
+// and how (`closedAction`: 'declined' | 'cancelled'); a backend `statusLabel` wins for the badge.
+//   customer + declined  -> the customer declined the provider's quotation
+//   customer + cancelled -> the customer cancelled the request
+//   provider + declined  -> the provider declined the request
+//   provider + cancelled -> the provider cancelled the request
+const getClosedInfo = (request) => {
+    const cancelled = String(request.closedAction ?? '').toLowerCase() === 'cancelled';
+    const byCustomer = String(request.closedBy ?? '').toLowerCase() === 'customer';
+    const provider = request.providerName || 'The service provider';
+    let summary;
+    if (byCustomer) {
+        summary = cancelled ? 'You cancelled this request.' : `You declined the quotation from ${provider}.`;
+    } else {
+        summary = cancelled ? `${provider} cancelled this request.` : `${provider} declined this request.`;
+    }
+    return { label: request.statusLabel ?? (cancelled ? 'Cancelled' : 'Declined'), summary };
+};
+
+// "₱ 3000" style used by the additional-payment notice (Figma).
+const formatPesoSpaced = (amount) => {
+    const value = Number(amount ?? 0);
+    return `₱ ${Number.isInteger(value) ? value : value.toFixed(2)}`;
+};
+
+// Shop-based and Home-based requests have different tracking indicators. The backend sends the
+// request's service location type (`serviceLocationType`: 'home' | 'shop') and the matching steps.
+const getLocationType = (request) => {
+    const raw = String(request.serviceLocationType ?? request.locationType ?? request.serviceType ?? '').toLowerCase();
+    if (raw.includes('home')) return 'home';
+    if (raw.includes('shop')) return 'shop';
+    return null;
+};
+
+// Picks the indicator that matches the request's service location type. `timelines` ({ home, shop })
+// is preferred when the backend sends both; otherwise `timeline` is already the right one.
+const getTimeline = (request) => {
+    const type = getLocationType(request);
+    return (type && request.timelines?.[type]) || request.timeline || [];
+};
+
 // Pulls together whichever text fields a card happens to have so search works
 // the same way regardless of cardType, instead of assuming every request
 // shares the same shape.
@@ -132,6 +204,38 @@ const NotificationBadge = ({ count }) => {
         </View>
     );
 };
+
+// Cards in a section that need the customer's attention (drives the small red count on the sub-tab).
+const getSectionCount = (requests, sectionKey, tab) =>
+    sectionKey === 'quotations'
+        ? requests.filter(isQuotationCard).length
+        : requests.filter((request) => isOngoingCard(request) && needsAttention(request, tab)).length;
+
+// "Quotations | On-going" underlined sub-tabs shown under the Active pill (Figma).
+const SectionTabs = ({ sections, selectedKey, counts, onSelect }) => (
+    <View style={styles.sectionTabRow}>
+        {sections.map((section) => {
+            const isSelected = section.key === selectedKey;
+            const count = counts?.[section.key] ?? 0;
+            return (
+                <TouchableOpacity
+                    key={section.key}
+                    style={styles.sectionTab}
+                    onPress={() => onSelect(section.key)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
+                    accessibilityLabel={count ? `${section.label}, ${count} need attention` : section.label}
+                >
+                    <View style={styles.sectionTabLabelWrap}>
+                        <Text style={[styles.sectionTabText, isSelected && styles.sectionTabTextSelected]}>{section.label}</Text>
+                        <NotificationBadge count={count} />
+                    </View>
+                    <View style={[styles.sectionTabBar, isSelected && styles.sectionTabBarSelected]} />
+                </TouchableOpacity>
+            );
+        })}
+    </View>
+);
 
 // Magnifier drawn with Views so this screen does not depend on an icon asset.
 const SearchIcon = () => (
@@ -154,6 +258,12 @@ const Track = ({ navigation, route }) => {
     const [approvedPayment, setApprovedPayment] = useState(null);
     const [rejectTarget, setRejectTarget] = useState(null);
     const [rejectReason, setRejectReason] = useState('');
+    // Active tab sub-tab. null = not chosen yet, so the screen picks one from what is loaded.
+    const [sectionChoice, setSectionChoice] = useState(null);
+    // Price negotiation modal (additional payment). `negotiateTarget` is the card being negotiated.
+    const [negotiateTarget, setNegotiateTarget] = useState(null);
+    const [negotiateMessage, setNegotiateMessage] = useState('');
+    const [negotiateAmount, setNegotiateAmount] = useState('');
 
     const loadTracking = useCallback(async ({ refresh = false } = {}) => {
         if (refresh) setIsRefreshing(true);
@@ -177,12 +287,14 @@ const Track = ({ navigation, route }) => {
         useCallback(() => {
             const tabKey = route?.params?.tab;
             const target = findTab(tabKey);
+            const sectionKey = route?.params?.section ?? (tabKey === 'ongoing' ? 'ongoing' : null);
             if (target) {
                 setSelectedStatus(target);
-                navigation.setParams({ tab: undefined });
+                if (sectionKey) setSectionChoice(sectionKey);
+                navigation.setParams({ tab: undefined, section: undefined });
             }
             loadTracking();
-        }, [loadTracking, navigation, route?.params?.tab]),
+        }, [loadTracking, navigation, route?.params?.tab, route?.params?.section]),
     );
 
     // ---------------------------------------------------------------------
@@ -202,9 +314,27 @@ const Track = ({ navigation, route }) => {
     // ---------------------------------------------------------------------
 
     const statusRequests = getTabRequests(groups, selectedStatus);
-    const visibleRequests = searchQuery.trim()
-        ? statusRequests.filter((request) => getSearchableText(request).includes(searchQuery.trim().toLowerCase()))
+    const isActiveTab = selectedStatus.key === 'active';
+    const quotationRequests = statusRequests.filter(isQuotationCard);
+    const ongoingRequests = statusRequests.filter(isOngoingCard);
+    // Until the customer taps a sub-tab: Quotations if anything waits on them, else On-going.
+    const activeSection =
+        sectionChoice ?? (quotationRequests.length > 0 || ongoingRequests.length === 0 ? 'quotations' : 'ongoing');
+    const sectionRequests = isActiveTab
+        ? activeSection === 'quotations'
+            ? quotationRequests
+            : ongoingRequests
         : statusRequests;
+    const searchTerm = searchQuery.trim().toLowerCase();
+    const visibleRequests = searchTerm
+        ? sectionRequests.filter((request) => getSearchableText(request).includes(searchTerm))
+        : sectionRequests;
+    const sectionCounts = isActiveTab
+        ? {
+              quotations: getSectionCount(statusRequests, 'quotations', selectedStatus),
+              ongoing: getSectionCount(statusRequests, 'ongoing', selectedStatus),
+          }
+        : null;
 
     const handleSelectStatus = (status) => {
         setSelectedStatus(status);
@@ -237,11 +367,12 @@ const Track = ({ navigation, route }) => {
         }
     };
 
-    const handleAcceptSchedule = (request) =>
-        runAction(request.id, () => acceptScheduleProposal(request.requestId, request.proposalId), 'Could not accept the schedule');
+    // [SCHEDULE PROPOSAL - DISABLED] Accept / Reject of the provider's new schedule (restore with the card below).
+    // const handleAcceptSchedule = (request) =>
+    //     runAction(request.id, () => acceptScheduleProposal(request.requestId, request.proposalId), 'Could not accept the schedule');
 
-    const handleRejectSchedule = (request) =>
-        runAction(request.id, () => rejectScheduleProposal(request.requestId, request.proposalId), 'Could not reject the schedule');
+    // const handleRejectSchedule = (request) =>
+    //     runAction(request.id, () => rejectScheduleProposal(request.requestId, request.proposalId), 'Could not reject the schedule');
 
     const handleApprovePayment = (request) =>
         runAction(
@@ -307,13 +438,35 @@ const Track = ({ navigation, route }) => {
         });
     };
 
+    // Negotiate opens the "Request a Price Negotiation" modal.
+    const handleNegotiatePayment = (request) => {
+        setNegotiateMessage('');
+        setNegotiateAmount('');
+        setNegotiateTarget(request);
+    };
+
+    const handleCloseNegotiateModal = () => {
+        setNegotiateTarget(null);
+        setNegotiateMessage('');
+        setNegotiateAmount('');
+    };
+
+    // NOT WIRED YET: the provider side of price negotiation is not finished, so there is no route.
+    // Confirm intentionally does nothing; only the X closes the modal. When the provider side is
+    // ready, send { message: negotiateMessage, suggestedAmount: Number(negotiateAmount) } for
+    // negotiateTarget.requestId / negotiateTarget.paymentRequestId (e.g. POST
+    // /service-requests/:id/payment-requests/:paymentRequestId/negotiate) through runAction(),
+    // which reloads the tracking data afterwards.
+    const handleConfirmNegotiation = () => {};
+
+    // Opens the conversation that belongs to THIS service request (its own request id), so each
+    // request (SR-0000, SR-0001, ...) has its own thread with the provider.
+    // The conversation id IS the request reference ("SR-0007"), the same id MessageCustomer.js passes.
     const handleMessageProvider = (request) => {
-        // Re-uses the existing Chat -> Conversation flow so the customer can
-        // message this provider directly about the request.
-        navigation.navigate(ROUTES.CONVERSATION, {
-            senderName: request.providerName,
-            providerId: request.providerId,
-            requestId: request.requestId,
+        navigation.navigate(MESSAGING_ROUTES.CONVERSATION_CUSTOMER, {
+            conversationId: request.requestId ?? request.requestNumber,
+            contactName: request.providerName,
+            jobTitle: request.category,
         });
     };
 
@@ -338,11 +491,15 @@ const Track = ({ navigation, route }) => {
             const isCompleted = isCompletedStep(step);
             const isDone = !!step.done && (!isCompleted || isPaid);
             const providerCompleted = isCompleted && !!step.done && !isPaid;
+            // `subtext` is a note the backend wants shown instead of the date (e.g. the Home-based
+            // "Service provider is now heading to your door step" on the "on the way" step).
             const subtext = providerCompleted
                 ? 'Payment Pending'
-                : isDone && step.timestamp
-                  ? formatDateTime(step.timestamp)
-                  : step.description;
+                : isDone && step.subtext
+                  ? step.subtext
+                  : isDone && step.timestamp
+                    ? formatDateTime(step.timestamp)
+                    : step.description;
             return (
                 <View key={step.id ?? `${step.label}-${index}`} style={styles.timelineRow}>
                     <View
@@ -397,8 +554,11 @@ const Track = ({ navigation, route }) => {
     );
 
     const renderQuotationCard = (request) => {
-        const hasParts = Number(request.partsCost) > 0;
-        const total = request.total ?? Number(request.laborCost ?? 0) + Number(request.partsCost ?? 0);
+        // Labor Cost, Parts Cost and Service Fee are always listed in this order. Parts is 0.00 when the
+        // provider set no price for parts; the service fee (platform fee) comes from the backend.
+        const total =
+            request.total ??
+            Number(request.laborCost ?? 0) + Number(request.partsCost ?? 0) + Number(request.serviceFee ?? 0);
         return (
             // Preview only — tapping opens RequestDetails, which is where the real
             // Approve/Decline actions (and the scheduling + payment modals) live.
@@ -420,12 +580,14 @@ const Track = ({ navigation, route }) => {
                     <Text style={styles.lineItemLabel}>Labor Cost</Text>
                     <Text style={styles.lineItemAmount}>{formatPeso(request.laborCost)}</Text>
                 </View>
-                {hasParts && (
-                    <View style={styles.lineItemRow}>
-                        <Text style={styles.lineItemLabel}>Parts Cost</Text>
-                        <Text style={styles.lineItemAmount}>{formatPeso(request.partsCost)}</Text>
-                    </View>
-                )}
+                <View style={styles.lineItemRow}>
+                    <Text style={styles.lineItemLabel}>Parts Cost</Text>
+                    <Text style={styles.lineItemAmount}>{formatPeso(request.partsCost)}</Text>
+                </View>
+                <View style={styles.lineItemRow}>
+                    <Text style={styles.lineItemLabel}>Service Fee</Text>
+                    <Text style={styles.lineItemAmount}>{formatPeso(request.serviceFee)}</Text>
+                </View>
                 <View style={styles.divider} />
                 <View style={styles.lineItemRow}>
                     <Text style={styles.lineItemLabelBold}>Total</Text>
@@ -435,34 +597,35 @@ const Track = ({ navigation, route }) => {
         );
     };
 
-    const renderScheduleCard = (request) => {
-        const isBusy = busyCardId !== null;
-        return (
-            <View key={request.id} style={styles.requestCard}>
-                <View style={styles.cardTopRow}>
-                    <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
-                    <View style={styles.badgeOrange}>
-                        <Text style={styles.badgeOrangeText}>New Schedule</Text>
-                    </View>
-                </View>
-                <Text style={styles.sentToLine}>{request.providerName} sent a new schedule.</Text>
+    // [SCHEDULE PROPOSAL - DISABLED] The provider's "New Schedule" card (Accept / Reject).
+    // const renderScheduleCard = (request) => {
+    //     const isBusy = busyCardId !== null;
+    //     return (
+    //         <View key={request.id} style={styles.requestCard}>
+    //             <View style={styles.cardTopRow}>
+    //                 <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
+    //                 <View style={styles.badgeOrange}>
+    //                     <Text style={styles.badgeOrangeText}>New Schedule</Text>
+    //                 </View>
+    //             </View>
+    //             <Text style={styles.sentToLine}>{request.providerName} sent a new schedule.</Text>
 
-                <Text style={styles.scheduleDateTime}>{formatDateTime(request.scheduledAt)}</Text>
+    //             <Text style={styles.scheduleDateTime}>{formatDateTime(request.scheduledAt)}</Text>
 
-                <Text style={styles.reasonLabel}>Reason for New Schedule</Text>
-                <Text style={styles.reasonText}>{request.reason}</Text>
+    //             <Text style={styles.reasonLabel}>Reason for New Schedule</Text>
+    //             <Text style={styles.reasonText}>{request.reason}</Text>
 
-                <View style={styles.actionRow}>
-                    <TouchableOpacity style={[styles.actionButton, styles.actionButtonAccept, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleAcceptSchedule(request)}>
-                        <Text style={[styles.actionButtonText, styles.actionButtonTextLight]}>Accept</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.actionButton, styles.actionButtonReject, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleRejectSchedule(request)}>
-                        <Text style={[styles.actionButtonText, styles.actionButtonTextLight]}>Reject</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
-        );
-    };
+    //             <View style={styles.actionRow}>
+    //                 <TouchableOpacity style={[styles.actionButton, styles.actionButtonAccept, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleAcceptSchedule(request)}>
+    //                     <Text style={[styles.actionButtonText, styles.actionButtonTextLight]}>Accept</Text>
+    //                 </TouchableOpacity>
+    //                 <TouchableOpacity style={[styles.actionButton, styles.actionButtonReject, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleRejectSchedule(request)}>
+    //                     <Text style={[styles.actionButtonText, styles.actionButtonTextLight]}>Reject</Text>
+    //                 </TouchableOpacity>
+    //             </View>
+    //         </View>
+    //     );
+    // };
 
     // Header shared by the on-going / completed cards. The badge wraps under the request number
     // when it is too long for one line (e.g. "Additional payment requested") instead of running
@@ -487,6 +650,8 @@ const Track = ({ navigation, route }) => {
             </Text>
         ) : null;
 
+    // Additional payment quotation (Active > Quotations). The tracking indicator for the same request
+    // is shown in On-going, so it is not repeated here.
     const renderPaymentCard = (request) => {
         const isBusy = busyCardId !== null;
         return (
@@ -499,26 +664,36 @@ const Track = ({ navigation, route }) => {
                         <Text style={styles.paymentNoticeReason}>{request.paymentReason}</Text>
                     </View>
                     <View style={styles.paymentNoticeAmountWrap}>
-                        <Text style={styles.paymentNoticeAmount}>₱{Number(request.paymentAmount).toLocaleString()}</Text>
-                        <Text style={styles.paymentNoticeCaption}>Due for approval</Text>
+                        <Text style={styles.paymentNoticeAmount}>{formatPesoSpaced(request.paymentAmount)}</Text>
+                        <Text style={styles.paymentNoticeCaption}>due for approval</Text>
                     </View>
                 </View>
 
-                <View style={styles.actionRow}>
-                    <TouchableOpacity style={[styles.actionButton, styles.actionButtonAccept, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleApprovePayment(request)}>
-                        <Text style={[styles.actionButtonText, styles.actionButtonTextLight]}>Approve</Text>
+                <View style={styles.paymentActionRow}>
+                    <TouchableOpacity
+                        style={[styles.paymentActionButton, styles.paymentActionApprove, isBusy && styles.actionButtonDisabled]}
+                        disabled={isBusy}
+                        onPress={() => handleApprovePayment(request)}
+                    >
+                        <Text style={styles.paymentActionText}>Approve</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.actionButton, styles.actionButtonReject, isBusy && styles.actionButtonDisabled]} disabled={isBusy} onPress={() => handleRejectPayment(request)}>
-                        <Text style={[styles.actionButtonText, styles.actionButtonTextLight]}>Reject</Text>
+                    {request.canNegotiate !== false && (
+                        <TouchableOpacity
+                            style={[styles.paymentActionButton, styles.paymentActionNegotiate, isBusy && styles.actionButtonDisabled]}
+                            disabled={isBusy}
+                            onPress={() => handleNegotiatePayment(request)}
+                        >
+                            <Text style={styles.paymentActionText}>Negotiate</Text>
+                        </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                        style={[styles.paymentActionButton, styles.paymentActionDecline, isBusy && styles.actionButtonDisabled]}
+                        disabled={isBusy}
+                        onPress={() => handleRejectPayment(request)}
+                    >
+                        <Text style={styles.paymentActionText}>Decline</Text>
                     </TouchableOpacity>
                 </View>
-
-                {request.timeline?.length > 0 && (
-                    <>
-                        <View style={styles.cardDivider} />
-                        {renderTimeline(request.timeline, isRequestPaid(request))}
-                    </>
-                )}
 
                 <View style={styles.cardDivider} />
                 <TouchableOpacity onPress={() => handleMessageProvider(request)} style={styles.messageButton}>
@@ -532,7 +707,7 @@ const Track = ({ navigation, route }) => {
         <View key={request.id} style={styles.requestCard}>
             {renderCardHeader(request)}
             {renderDeferredNote(request)}
-            {renderTimeline(request.timeline, isRequestPaid(request))}
+            {renderTimeline(getTimeline(request), isRequestPaid(request))}
 
             <View style={styles.cardDivider} />
             <TouchableOpacity onPress={() => handleMessageProvider(request)} style={styles.messageButton}>
@@ -541,23 +716,28 @@ const Track = ({ navigation, route }) => {
         </View>
     );
 
-    const renderDeclinedCard = (request) => (
-        <View key={request.id} style={styles.requestCard}>
-            <View style={styles.cardTopRow}>
-                <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
-                <View style={styles.badgeDeclined}>
-                    <Text style={styles.badgeDeclinedText}>{request.statusLabel ?? selectedStatus.label}</Text>
+    // Closed tab: quotation declined by the customer, request declined by the provider, or a
+    // request cancelled by either side.
+    const renderDeclinedCard = (request) => {
+        const closed = getClosedInfo(request);
+        return (
+            <View key={request.id} style={styles.requestCard}>
+                <View style={styles.cardTopRow}>
+                    <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
+                    <View style={styles.badgeDeclined}>
+                        <Text style={styles.badgeDeclinedText}>{closed.label}</Text>
+                    </View>
                 </View>
+                <Text style={styles.sentToLine}>{closed.summary}</Text>
+                {!!request.reason && (
+                    <>
+                        <Text style={styles.reasonLabel}>Reason</Text>
+                        <Text style={styles.reasonText}>{request.reason}</Text>
+                    </>
+                )}
             </View>
-            <Text style={styles.sentToLine}>{request.providerName} declined this request.</Text>
-            {!!request.reason && (
-                <>
-                    <Text style={styles.reasonLabel}>Reason</Text>
-                    <Text style={styles.reasonText}>{request.reason}</Text>
-                </>
-            )}
-        </View>
-    );
+        );
+    };
 
     const renderCompletedCard = (request) => {
         const isPaid = isRequestPaid(request);
@@ -565,7 +745,7 @@ const Track = ({ navigation, route }) => {
             <View key={request.id} style={styles.requestCard}>
                 {renderCardHeader(request)}
                 {!isPaid && renderDeferredNote(request)}
-                {renderTimeline(request.timeline, isPaid)}
+                {renderTimeline(getTimeline(request), isPaid)}
 
                 <View style={styles.cardDivider} />
                 {isPaid ? (
@@ -573,12 +753,12 @@ const Track = ({ navigation, route }) => {
                         <Text style={styles.messageButtonText}>Message</Text>
                     </TouchableOpacity>
                 ) : (
-                    <View style={styles.actionRow}>
-                        <TouchableOpacity style={styles.actionButton} onPress={() => handleProceedToPayment(request)}>
-                            <Text style={styles.actionButtonText}>Proceed to Payment</Text>
+                    <View style={styles.footerButtonRow}>
+                        <TouchableOpacity style={styles.footerButton} onPress={() => handleProceedToPayment(request)}>
+                            <Text style={styles.footerButtonText}>Proceed to Payment</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.actionButton} onPress={() => handleMessageProvider(request)}>
-                            <Text style={styles.actionButtonText}>Message</Text>
+                        <TouchableOpacity style={styles.footerButton} onPress={() => handleMessageProvider(request)}>
+                            <Text style={styles.footerButtonText}>Message</Text>
                         </TouchableOpacity>
                     </View>
                 )}
@@ -586,13 +766,14 @@ const Track = ({ navigation, route }) => {
         );
     };
 
-    const renderRequestCard = (request) => {
+    const renderRequestCard = (request, section) => {
         switch (request.cardType) {
             case 'quotation':
                 return renderQuotationCard(request);
-            case 'schedule':
-                return renderScheduleCard(request);
+            // [SCHEDULE PROPOSAL - DISABLED] case 'schedule': return renderScheduleCard(request);
             case 'payment':
+                // Additional-payment quotation (Active > Quotations). The repair's tracking indicator
+                // is its own 'timeline' card in On-going.
                 return renderPaymentCard(request);
             case 'timeline':
                 return renderTimelineCard(request);
@@ -618,13 +799,18 @@ const Track = ({ navigation, route }) => {
             );
         }
         if (visibleRequests.length === 0) {
+            const emptyLabel = isActiveTab
+                ? activeSection === 'quotations'
+                    ? 'No quotations'
+                    : 'No on-going repairs'
+                : `No ${selectedStatus.label.toLowerCase()} requests`;
             return (
                 <View style={styles.emptyState}>
-                    <Text style={styles.emptyStateText}>No {selectedStatus.label.toLowerCase()} requests</Text>
+                    <Text style={styles.emptyStateText}>{emptyLabel}</Text>
                 </View>
             );
         }
-        return visibleRequests.map(renderRequestCard);
+        return visibleRequests.map((request) => renderRequestCard(request, isActiveTab ? activeSection : null));
     };
 
     return (
@@ -669,6 +855,15 @@ const Track = ({ navigation, route }) => {
                         );
                     })}
                 </View>
+
+                {isActiveTab && (
+                    <SectionTabs
+                        sections={ACTIVE_SECTIONS}
+                        selectedKey={activeSection}
+                        counts={sectionCounts}
+                        onSelect={setSectionChoice}
+                    />
+                )}
 
                 {renderBody()}
             </ScrollView>
@@ -725,6 +920,42 @@ const Track = ({ navigation, route }) => {
                             ) : (
                                 <Text style={styles.modalPillButtonText}>Confirm</Text>
                             )}
+                        </TouchableOpacity>
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
+
+            {/* Price negotiation (additional payment). UI only for now: Confirm is not wired to the backend. */}
+            <Modal visible={!!negotiateTarget} transparent animationType="fade" onRequestClose={handleCloseNegotiateModal}>
+                <KeyboardAvoidingView
+                    style={styles.modalOverlay}
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                >
+                    <View style={styles.modalCard}>
+                        <TouchableOpacity style={styles.modalCloseButton} onPress={handleCloseNegotiateModal}>
+                            <Image source={require('../assets/icon_close.png')} style={styles.modalCloseIcon} />
+                        </TouchableOpacity>
+                        <Text style={styles.negotiateTitle}>Request a Price Negotiation</Text>
+
+                        <Text style={styles.negotiateLabel}>Your Message</Text>
+                        <TextInput
+                            style={styles.negotiateMessageInput}
+                            value={negotiateMessage}
+                            onChangeText={setNegotiateMessage}
+                            multiline
+                            textAlignVertical="top"
+                        />
+
+                        <Text style={styles.negotiateLabel}>Suggested Additional Amount</Text>
+                        <TextInput
+                            style={styles.negotiateAmountInput}
+                            value={negotiateAmount}
+                            onChangeText={(text) => setNegotiateAmount(text.replace(/[^0-9.]/g, ''))}
+                            keyboardType="decimal-pad"
+                        />
+
+                        <TouchableOpacity style={styles.negotiateConfirmButton} onPress={handleConfirmNegotiation}>
+                            <Text style={styles.messageButtonText}>Confirm</Text>
                         </TouchableOpacity>
                     </View>
                 </KeyboardAvoidingView>
@@ -896,9 +1127,10 @@ const styles = StyleSheet.create({
         color: '#111111',
     },
     providerNameLine: {
-        fontSize: 13,
-        color: '#666666',
-        marginBottom: 12,
+        fontSize: 10,
+        lineHeight: 17,
+        color: '#5B5959',
+        marginBottom: 8,
     },
     headerRule: {
         height: 1,
@@ -961,8 +1193,9 @@ const styles = StyleSheet.create({
     },
     divider: {
         height: 1,
-        backgroundColor: '#E0E0E0',
-        marginVertical: 8,
+        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+        marginTop: 6,
+        marginBottom: 6,
     },
     cardDivider: {
         height: 1,
@@ -976,23 +1209,27 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     lineItemLabel: {
-        fontSize: 13,
+        fontSize: 8,
         fontWeight: '600',
-        color: '#333333',
+        lineHeight: 14,
+        color: '#292727',
     },
     lineItemAmount: {
-        fontSize: 13,
-        color: '#666666',
+        fontSize: 8,
+        lineHeight: 14,
+        color: '#5B5959',
     },
     lineItemLabelBold: {
-        fontSize: 13,
+        fontSize: 10,
         fontWeight: '700',
-        color: '#111111',
+        lineHeight: 17,
+        color: '#191818',
     },
     lineItemAmountBold: {
-        fontSize: 13,
+        fontSize: 10,
         fontWeight: '700',
-        color: '#111111',
+        lineHeight: 17,
+        color: '#5B5959',
     },
     scheduleDateTime: {
         fontSize: 15,
@@ -1046,52 +1283,142 @@ const styles = StyleSheet.create({
     paymentNotice: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        backgroundColor: '#FCF3C8',
+        backgroundColor: '#FFFED3',
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
         borderRadius: 10,
-        padding: 12,
-        marginBottom: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        marginBottom: 8,
     },
     paymentNoticeTextWrap: {
         flex: 1,
         marginRight: 10,
     },
     paymentNoticeTitle: {
-        fontSize: 13,
+        fontSize: 10,
         fontWeight: '700',
-        color: '#B4622A',
-        marginBottom: 2,
+        lineHeight: 17,
+        color: '#BB8157',
     },
     paymentNoticeReason: {
-        fontSize: 11,
-        color: '#8A7A4A',
+        fontSize: 7,
+        lineHeight: 12,
+        color: '#292727',
     },
     paymentNoticeAmountWrap: {
         alignItems: 'flex-end',
     },
     paymentNoticeAmount: {
-        fontSize: 14,
+        fontSize: 10,
         fontWeight: '700',
-        color: '#111111',
+        lineHeight: 17,
+        color: '#292727',
     },
     paymentNoticeCaption: {
+        fontSize: 7,
+        lineHeight: 12,
+        color: '#292727',
+    },
+    paymentActionRow: {
+        flexDirection: 'row',
+    },
+    paymentActionButton: {
+        flex: 1,
+        marginHorizontal: 4,
+        height: 26,
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    paymentActionApprove: {
+        backgroundColor: '#167713',
+    },
+    paymentActionNegotiate: {
+        backgroundColor: '#DEBF6A',
+    },
+    paymentActionDecline: {
+        backgroundColor: '#C62828',
+    },
+    paymentActionText: {
         fontSize: 10,
-        color: '#8A7A4A',
+        fontWeight: '700',
+        lineHeight: 17,
+        color: '#FFFFFF',
     },
     messageButton: {
         alignSelf: 'flex-end',
+        minWidth: 90,
+        height: 28,
         borderWidth: 1,
-        borderColor: '#DDDDDD',
-        backgroundColor: '#FFFFFF',
+        borderColor: '#B1A8A8',
+        backgroundColor: '#FFFDFD',
         borderRadius: 10,
-        paddingVertical: 8,
-        paddingHorizontal: 20,
+        paddingHorizontal: 18,
         alignItems: 'center',
         justifyContent: 'center',
     },
     messageButtonText: {
-        fontSize: 13,
-        color: '#333333',
+        fontSize: 10,
         fontWeight: '700',
+        lineHeight: 17,
+        color: '#414141',
+    },
+    footerButtonRow: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+    },
+    footerButton: {
+        minWidth: 90,
+        height: 28,
+        marginLeft: 8,
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
+        backgroundColor: '#FFFDFD',
+        borderRadius: 10,
+        paddingHorizontal: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    footerButtonText: {
+        fontSize: 10,
+        fontWeight: '700',
+        lineHeight: 17,
+        color: '#414141',
+    },
+    sectionTabRow: {
+        flexDirection: 'row',
+        marginTop: -4,
+        marginBottom: 16,
+    },
+    sectionTab: {
+        flex: 1,
+        alignItems: 'stretch',
+    },
+    sectionTabLabelWrap: {
+        alignSelf: 'center',
+        marginBottom: 3,
+    },
+    sectionTabText: {
+        fontFamily: FONTS.quicksand,
+        fontSize: 10,
+        fontWeight: '500',
+        lineHeight: 17,
+        color: '#292727',
+        includeFontPadding: false,
+    },
+    sectionTabTextSelected: {
+        fontWeight: '700',
+    },
+    sectionTabBar: {
+        height: 3,
+        borderRadius: 10,
+        backgroundColor: '#D9D9D9',
+    },
+    sectionTabBarSelected: {
+        backgroundColor: '#18315B',
     },
     timelineRow: {
         flexDirection: 'row',
@@ -1122,12 +1449,12 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     timelineLabel: {
-        fontSize: 13,
+        fontSize: 11,
         fontWeight: '700',
         color: '#111111',
     },
     timelineSubtext: {
-        fontSize: 11,
+        fontSize: 8,
         color: '#999999',
         marginTop: 1,
     },
@@ -1222,6 +1549,52 @@ const styles = StyleSheet.create({
         fontSize: 13,
         color: '#333333',
         marginBottom: 14,
+    },
+    negotiateTitle: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#414141',
+        marginBottom: 14,
+    },
+    negotiateLabel: {
+        fontSize: 10,
+        fontWeight: '700',
+        color: '#414141',
+        marginBottom: 6,
+    },
+    negotiateMessageInput: {
+        minHeight: 110,
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
+        borderRadius: 10,
+        backgroundColor: '#FFFDFD',
+        padding: 10,
+        fontSize: 12,
+        color: '#333333',
+        marginBottom: 14,
+    },
+    negotiateAmountInput: {
+        height: 36,
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
+        borderRadius: 10,
+        backgroundColor: '#FFFDFD',
+        paddingHorizontal: 10,
+        paddingVertical: 0,
+        fontSize: 12,
+        color: '#333333',
+        marginBottom: 18,
+    },
+    negotiateConfirmButton: {
+        alignSelf: 'center',
+        minWidth: 90,
+        height: 28,
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
+        borderRadius: 10,
+        backgroundColor: '#FFFDFD',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     modalConfirmButton: {
         alignSelf: 'flex-end',

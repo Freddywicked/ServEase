@@ -59,6 +59,7 @@ const MessageCustomer = ({ navigation }) => {
             contactName: conversation.name,
             jobTitle: conversation.jobTitle,
             isOnline: conversation.isOnline,
+            requestStatus: conversation.requestStatus,
         });
     };
 
@@ -74,6 +75,12 @@ const MessageCustomer = ({ navigation }) => {
             )}
             <View style={styles.cardContent}>
                 <Text style={styles.senderName}>{item.name}</Text>
+                {!!item.requestNumber && (
+                    <Text style={styles.requestTag} numberOfLines={1}>
+                        Request #{item.requestNumber}
+                        {item.requestStatus ? ` · ${item.requestStatus}` : ''}
+                    </Text>
+                )}
                 <Text style={styles.lastMessage} numberOfLines={1}>
                     {item.lastMessage || TEXT.aboutRequest(item.id)}
                 </Text>
@@ -158,6 +165,12 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '700',
         color: COLORS.ink600,
+    },
+    requestTag: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: COLORS.primary,
+        marginTop: 2,
     },
     lastMessage: {
         fontSize: 13,

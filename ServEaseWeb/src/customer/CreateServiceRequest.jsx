@@ -1,8 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Play, X } from 'lucide-react';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
-import { createServiceRequest, getServiceRequestOptions, setDraftRequestId } from '../api/client';
+import ExitRequestControl from '../components/ExitRequestControl.jsx';
+import {
+  createServiceRequest,
+  getAppointmentSlots,
+  getServiceRequestOptions,
+  setDraftRequestId,
+} from '../api/client';
 import calendarIcon from '../assets/icon_calendar.png';
 import photoIcon from '../assets/icon_photo.png';
 
@@ -18,6 +24,11 @@ const toOption = (item) =>
         value: item.value ?? item.name ?? item.id,
         label: item.label ?? item.name ?? String(item.value ?? item.id ?? ''),
       };
+
+// Photo / video limits come from the backend (`uploadLimits` in GET /service-requests/options).
+// These values are only a fallback for when the backend does not send them yet.
+const FALLBACK_UPLOAD_LIMITS = { maxImages: 4, maxVideos: 1, maxImageMb: 10, maxVideoMb: 50 };
+const BYTES_PER_MB = 1024 * 1024;
 
 // Google Maps JavaScript API key. Add VITE_GOOGLE_MAPS_API_KEY=... to your .env (Maps JavaScript API enabled).
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -88,9 +99,28 @@ function StepProgress({ activeStep, totalSteps = 4 }) {
   );
 }
 
-// Appointment date/time picker modal. Selecting a date and a time and pressing Confirm
-// hands the chosen appointment back to the parent form.
-function AppointmentModal({ initialDate, timeSlots, onClose, onConfirm }) {
+// A slot from the backend is either "9:00 AM" or { time, available }.
+const normalizeSlot = (slot) =>
+  typeof slot === 'string'
+    ? { time: slot, available: true }
+    : {
+        time: slot.time ?? slot.label ?? slot.value,
+        available: slot.available !== false && !slot.booked,
+      };
+
+// "9:00 AM" / "4:00 PM" -> minutes since midnight (null when it can't be read).
+const slotToMinutes = (label) => {
+  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(String(label).trim());
+  if (!m) return null;
+  const hours = (Number(m[1]) % 12) + (m[3].toUpperCase() === 'PM' ? 12 : 0);
+  return hours * 60 + Number(m[2]);
+};
+
+// Appointment date/time picker modal. The time slots come from the backend; when the customer picks a
+// day, `loadSlots(date)` asks the backend which of that day's slots are still free (a slot that is
+// already booked is shown disabled). Selecting a date and a time and pressing Confirm hands the chosen
+// appointment back to the parent form.
+function AppointmentModal({ initialDate, timeSlots, loadSlots, onClose, onConfirm }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const start = initialDate || today;
@@ -100,8 +130,41 @@ function AppointmentModal({ initialDate, timeSlots, onClose, onConfirm }) {
   const [selectedDate, setSelectedDate] = useState(start);
   const [selectedSlot, setSelectedSlot] = useState(null);
 
+  const baseSlots = useMemo(() => timeSlots.map(normalizeSlot), [timeSlots]);
+  const [slots, setSlots] = useState(baseSlots);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+
   const grid = buildMonthGrid(viewYear, viewMonth);
   const selectedKey = toDateKey(selectedDate);
+
+  // Re-check the slots every time the day changes.
+  useEffect(() => {
+    let cancelled = false;
+    setSelectedSlot(null);
+    setSlotsLoading(true);
+    Promise.resolve(loadSlots ? loadSlots(selectedDate) : null)
+      .then((list) => {
+        if (!cancelled) setSlots(Array.isArray(list) && list.length > 0 ? list.map(normalizeSlot) : baseSlots);
+      })
+      .catch(() => {
+        if (!cancelled) setSlots(baseSlots); // availability could not be checked: offer the plain list
+      })
+      .finally(() => {
+        if (!cancelled) setSlotsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey]);
+
+  // Today's slots that have already started can't be chosen.
+  const isPastSlot = (time) => {
+    if (selectedKey !== toDateKey(new Date())) return false;
+    const minutes = slotToMinutes(time);
+    const now = new Date();
+    return minutes != null && minutes <= now.getHours() * 60 + now.getMinutes();
+  };
 
   const goToMonth = (offset) => {
     const next = new Date(viewYear, viewMonth + offset, 1);
@@ -120,7 +183,7 @@ function AppointmentModal({ initialDate, timeSlots, onClose, onConfirm }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-5" onClick={onClose}>
       <div
-        className="relative box-border w-full max-w-[340px] rounded-2xl bg-white p-6 font-[Roboto]"
+        className="relative box-border max-h-full w-full max-w-[340px] overflow-y-auto rounded-2xl bg-white p-6 font-[Roboto]"
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -187,24 +250,33 @@ function AppointmentModal({ initialDate, timeSlots, onClose, onConfirm }) {
         </div>
 
         <p className="m-0 mb-2 mt-5 font-[Quicksand] text-[13px] font-bold text-black">Select Time</p>
+        {slotsLoading && <p className="m-0 mb-2 text-[11px] text-[#817C7C]">Checking availability…</p>}
         <div className="grid grid-cols-2 gap-2">
-          {timeSlots.length === 0 && (
+          {slots.length === 0 && (
             <p className="col-span-2 m-0 text-[12px] text-[#817C7C]">No time slots available</p>
           )}
-          {timeSlots.map((slot) => (
-            <button
-              key={slot}
-              type="button"
-              onClick={() => setSelectedSlot(slot)}
-              className={`rounded-md border px-3 py-2 text-[12px] font-semibold ${
-                slot === selectedSlot
-                  ? 'cursor-pointer border-black bg-black text-white'
-                  : 'cursor-pointer border-[#DAD2D2] bg-white text-black hover:border-black/40'
-              }`}
-            >
-              {slot}
-            </button>
-          ))}
+          {slots.map(({ time, available }) => {
+            const disabled = !available || isPastSlot(time);
+            const chosen = time === selectedSlot;
+            return (
+              <button
+                key={time}
+                type="button"
+                disabled={disabled}
+                title={disabled ? 'This time is not available' : undefined}
+                onClick={() => setSelectedSlot(time)}
+                className={`rounded-md border px-3 py-2 text-[12px] font-semibold ${
+                  disabled
+                    ? 'cursor-not-allowed border-[#EEE8E8] bg-[#F5F3F3] text-black/30 line-through'
+                    : chosen
+                    ? 'cursor-pointer border-black bg-black text-white'
+                    : 'cursor-pointer border-[#DAD2D2] bg-white text-black hover:border-black/40'
+                }`}
+              >
+                {time}
+              </button>
+            );
+          })}
         </div>
 
         <div className="mt-4 flex justify-end">
@@ -222,6 +294,32 @@ function AppointmentModal({ initialDate, timeSlots, onClose, onConfirm }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// One photo / video thumbnail in the upload box, with a remove button.
+function MediaThumb({ item, onRemove }) {
+  return (
+    <div className="relative h-[72px] w-[72px] flex-none">
+      {item.isVideo ? (
+        <>
+          <video src={item.url} muted preload="metadata" className="h-full w-full rounded-md object-cover" />
+          <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-md bg-black/30">
+            <Play size={20} color="#FFFFFF" fill="#FFFFFF" />
+          </span>
+        </>
+      ) : (
+        <img src={item.url} alt="" className="h-full w-full rounded-md object-cover" />
+      )}
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove ${item.file.name}`}
+        className="absolute -right-[6px] -top-[6px] flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border-none bg-[#292727] p-0"
+      >
+        <X size={12} color="#FFFFFF" />
+      </button>
     </div>
   );
 }
@@ -445,7 +543,7 @@ function LocationMap({ coords, fallbackCenter, status, radiusKm, onPick }) {
       : 'Detecting your location…';
 
   return (
-    <div className="relative box-border h-[300px] w-full overflow-hidden rounded-[20px] border border-[#818080]/30 bg-[#EDF2F8] sm:h-[360px]">
+    <div className="relative box-border h-[300px] w-full overflow-hidden rounded-[33px] border border-[#818080]/30 bg-[#EDF2F8] sm:h-[360px]">
       <div ref={containerRef} className="absolute inset-0" />
 
       {mapState === 'error' && <EmbedMap coords={coords} fallbackCenter={fallbackCenter} radiusKm={radiusKm} />}
@@ -494,7 +592,9 @@ export default function CreateServiceRequest() {
 
   const [category, setCategory] = useState(null);
   const [description, setDescription] = useState('');
-  const [photo, setPhoto] = useState(null); // File object, TODO uploaded to backend on submit
+  const [photos, setPhotos] = useState([]); // [{ file, url, isVideo: false }] — up to maxImages
+  const [video, setVideo] = useState(null); // { file, url, isVideo: true } — up to maxVideos (1)
+  const [mediaError, setMediaError] = useState('');
   const [appointment, setAppointment] = useState(null); // { date: Date, time: string }
   const [serviceLocationType, setServiceLocationType] = useState(''); // 'home' | 'shop'
   const [searchRadiusKm, setSearchRadiusKm] = useState(null); // km, set from the backend's default once the options load
@@ -526,6 +626,7 @@ export default function CreateServiceRequest() {
           timeSlots: data?.timeSlots ?? [],
           radiusRange: hasRange ? { min: minKm, max: maxKm } : null,
           defaultMapCenter: hasCenter ? { lat: Number(c.lat), lng: Number(c.lng) } : null,
+          uploadLimits: { ...FALLBACK_UPLOAD_LIMITS, ...(data?.uploadLimits || {}) },
         });
         if (hasRange) {
           setSearchRadiusKm(
@@ -586,10 +687,80 @@ export default function CreateServiceRequest() {
 
   const appointmentLabel = formatAppointment(appointment?.date, appointment?.time);
 
-  const handlePhotoChange = (e) => {
-    const file = e.target.files?.[0] || null;
-    setPhoto(file);
+  const limits = options?.uploadLimits ?? FALLBACK_UPLOAD_LIMITS;
+
+  // Adds the chosen files: up to `maxImages` photos (each up to `maxImageMb`) and one video
+  // (up to `maxVideoMb`). Anything over a limit is skipped with a message.
+  const handleMediaChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = ''; // so picking the same file again still fires onChange
+    if (files.length === 0) return;
+
+    const nextPhotos = [...photos];
+    let nextVideo = video;
+    const problems = [];
+
+    files.forEach((file) => {
+      if (file.type.startsWith('image/')) {
+        if (nextPhotos.length >= limits.maxImages) {
+          problems.push(`You can add up to ${limits.maxImages} photos.`);
+        } else if (file.size > limits.maxImageMb * BYTES_PER_MB) {
+          problems.push(`"${file.name}" is over ${limits.maxImageMb} MB.`);
+        } else {
+          nextPhotos.push({ file, url: URL.createObjectURL(file), isVideo: false });
+        }
+      } else if (file.type.startsWith('video/')) {
+        if (nextVideo || limits.maxVideos < 1) {
+          problems.push(`You can add only ${limits.maxVideos} video.`);
+        } else if (file.size > limits.maxVideoMb * BYTES_PER_MB) {
+          problems.push(`"${file.name}" is over ${limits.maxVideoMb} MB.`);
+        } else {
+          nextVideo = { file, url: URL.createObjectURL(file), isVideo: true };
+        }
+      } else {
+        problems.push(`"${file.name}" is not a photo or video.`);
+      }
+    });
+
+    setPhotos(nextPhotos);
+    setVideo(nextVideo);
+    setMediaError([...new Set(problems)].join(' '));
   };
+
+  const removePhoto = (index) => {
+    setPhotos((current) => {
+      URL.revokeObjectURL(current[index].url);
+      return current.filter((_, i) => i !== index);
+    });
+    setMediaError('');
+  };
+
+  const removeVideo = () => {
+    if (video) URL.revokeObjectURL(video.url);
+    setVideo(null);
+    setMediaError('');
+  };
+
+  const mediaItems = [...photos, ...(video ? [video] : [])];
+  const canAddMore = photos.length < limits.maxImages || (!video && limits.maxVideos > 0);
+
+  // Release the preview URLs when leaving the screen.
+  const mediaUrlsRef = useRef([]);
+  mediaUrlsRef.current = mediaItems.map((m) => m.url);
+  useEffect(
+    () => () => mediaUrlsRef.current.forEach((url) => URL.revokeObjectURL(url)),
+    []
+  );
+
+  // Which appointment times are still free on a day (asks the backend; see getAppointmentSlots).
+  const loadSlots = (date) =>
+    getAppointmentSlots({
+      date: toDateKey(date),
+      category,
+      latitude: coords?.lat,
+      longitude: coords?.lng,
+      radiusKm: searchRadiusKm,
+    }).then((data) => data?.slots ?? data?.timeSlots ?? null);
 
   const handleConfirmAppointment = (date, time) => {
     setAppointment({ date, time });
@@ -628,7 +799,8 @@ export default function CreateServiceRequest() {
       formData.append('category', category);
       formData.append('description', description.trim());
       formData.append('serviceLocationType', serviceLocationType); // "home" | "shop"
-      if (photo) formData.append('photo', photo);
+      photos.forEach((p) => formData.append('photos', p.file)); // up to 4 images
+      if (video) formData.append('video', video.file); // 1 video
       if (appointment) {
         formData.append('appointmentDate', toDateKey(appointment.date)); // "YYYY-MM-DD"
         formData.append('appointmentTime', appointment.time);
@@ -649,7 +821,8 @@ export default function CreateServiceRequest() {
 
   return (
     <CustomerSidebar>
-      <div className="box-border w-full px-5 py-8 sm:px-10 lg:px-14 lg:py-10">
+      <div className="relative box-border w-full px-5 py-8 sm:px-10 lg:py-10 lg:pl-[47px] lg:pr-[57px]">
+        <ExitRequestControl />
         <h1 className="m-0 mb-4 font-[Quicksand] text-[32px] font-bold leading-tight text-[#005FCA] sm:text-[40px] lg:text-[48px]">
           Creating Service Request
         </h1>
@@ -684,7 +857,7 @@ export default function CreateServiceRequest() {
           <p className="m-0 mb-8 font-[Roboto] text-[14px] text-[#817C7C]">No categories available.</p>
         )}
         {optionsStatus === 'done' && options.categories.length > 0 && (
-          <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4 lg:gap-6">
+          <div className="mb-8 flex flex-wrap justify-center gap-x-[33px] gap-y-4">
             {options.categories.map((c) => {
               const active = c.value === category;
               return (
@@ -693,7 +866,7 @@ export default function CreateServiceRequest() {
                   type="button"
                   onClick={() => setCategory(c.value)}
                   aria-pressed={active}
-                  className={`box-border h-[46px] cursor-pointer rounded-[10px] border border-[#818080] bg-gradient-to-r from-[#0255AF] to-[#04A5A5] px-4 font-[Roboto] text-[14px] text-white shadow-[0_4px_4px_rgba(0,0,0,0.25)] transition ${
+                  className={`box-border h-[42px] w-[188px] max-w-full cursor-pointer rounded-[10px] border border-[#818080] bg-gradient-to-r from-[#0255AF] to-[#04A5A5] px-4 font-[Roboto] text-[14px] font-normal leading-[16px] text-white shadow-[0_4px_4px_rgba(0,0,0,0.25)] transition ${
                     active ? 'ring-2 ring-[#021E79] ring-offset-2' : 'hover:brightness-110'
                   }`}
                 >
@@ -711,29 +884,61 @@ export default function CreateServiceRequest() {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="e.g. Screen cracked"
-              className="box-border h-[140px] w-full resize-none rounded-[10px] border border-[#818080] bg-white p-4 font-[SF_Pro,system-ui,sans-serif] text-[14px] text-[#333333] outline-none placeholder:text-[#333333]/60 focus:border-[#0255AF]"
+              className="box-border h-[109px] w-full resize-none rounded-[10px] border border-[#818080] bg-white p-4 font-[SF_Pro,system-ui,sans-serif] text-[14px] text-[#333333] outline-none placeholder:text-[#333333]/60 focus:border-[#0255AF]"
             />
           </div>
 
           <div>
-            <h3 className={SECTION_HEADING}>Photo</h3>
+            <h3 className={SECTION_HEADING}>Photo &amp; Video</h3>
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
-              onChange={handlePhotoChange}
+              accept="image/*,video/*"
+              multiple
+              onChange={handleMediaChange}
               className="hidden"
             />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="box-border flex h-[140px] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-[10px] border border-[#818080] bg-white"
-            >
-              <img src={photoIcon} alt="" className="h-10 w-10 opacity-80" />
-              <span className="font-[SF_Pro,system-ui,sans-serif] text-[12px] text-[#484040]">
-                {photo ? photo.name : 'Upload Image'}
-              </span>
-            </button>
+            {mediaItems.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="box-border flex h-[109px] w-full cursor-pointer flex-col items-center justify-center gap-1 rounded-[10px] border border-[#818080] bg-white"
+              >
+                <img src={photoIcon} alt="" className="h-[51px] w-[52px] object-contain opacity-90" />
+                <span className="font-[SF_Pro,system-ui,sans-serif] text-[10px] leading-[12px] text-[#484040]">
+                  Upload Image
+                </span>
+              </button>
+            ) : (
+              <div className="box-border flex h-[109px] w-full items-center gap-3 overflow-x-auto rounded-[10px] border border-[#818080] bg-white px-4">
+                {photos.map((item, index) => (
+                  <MediaThumb key={item.url} item={item} onRemove={() => removePhoto(index)} />
+                ))}
+                {video && <MediaThumb item={video} onRemove={removeVideo} />}
+                {canAddMore && (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    aria-label="Add more photos or video"
+                    className="flex h-[72px] w-[72px] flex-none cursor-pointer flex-col items-center justify-center gap-1 rounded-md border border-dashed border-[#818080] bg-white p-0"
+                  >
+                    <img src={photoIcon} alt="" className="h-6 w-6 object-contain opacity-80" />
+                    <span className="font-[SF_Pro,system-ui,sans-serif] text-[10px] leading-[12px] text-[#484040]">
+                      Add
+                    </span>
+                  </button>
+                )}
+              </div>
+            )}
+            <p className="m-0 mt-1 font-[SF_Pro,system-ui,sans-serif] text-[11px] leading-[14px] text-[#817C7C]">
+              {photos.length}/{limits.maxImages} photos (max {limits.maxImageMb} MB each) · {video ? 1 : 0}/
+              {limits.maxVideos} video (max {limits.maxVideoMb} MB)
+            </p>
+            {mediaError && (
+              <p role="alert" className="m-0 mt-1 font-[Roboto] text-[12px] text-[#B91C1C]">
+                {mediaError}
+              </p>
+            )}
           </div>
 
           <button
@@ -811,6 +1016,7 @@ export default function CreateServiceRequest() {
         <AppointmentModal
           initialDate={appointment?.date}
           timeSlots={options?.timeSlots ?? []}
+          loadSlots={loadSlots}
           onClose={() => setIsCalendarOpen(false)}
           onConfirm={handleConfirmAppointment}
         />

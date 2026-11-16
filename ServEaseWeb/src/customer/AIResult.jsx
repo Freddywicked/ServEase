@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
+import ExitRequestControl from '../components/ExitRequestControl.jsx';
 import {
   clearDraftRequestId,
   getDraftRequestId,
@@ -69,7 +70,8 @@ export default function AIResult() {
 
   return (
     <CustomerSidebar>
-      <div className="box-border px-4 py-6 sm:px-9">
+      <div className="relative box-border px-4 py-6 sm:px-9">
+        <ExitRequestControl requestId={requestId} />
         <StepProgress activeStep={3} />
 
         <h1 className="m-0 mb-6 font-[Quicksand] text-[32px] font-bold text-[#005FCA] sm:text-[40px] lg:text-[48px]">

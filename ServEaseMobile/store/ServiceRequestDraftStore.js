@@ -12,6 +12,8 @@ const emptyDraft = () => ({
     clientRequestId: newClientRequestId(),
     categoryKey: null,        // matches SERVICE_REQUEST.category (key from GET /categories)
     description: '',
+    mediaItems: [],           // [{ id, type: 'photo'|'video', uri, path, duration, status }] picked in CreateServiceRequest.
+                              // MUST be reset with the rest of the draft, or the previous request's photos reappear.
     photoUri: null,           // local file URI, for preview only
     photoPath: null,          // Storage path returned by the upload (the bucket is private, like the provider
                               // documents, so the backend signs short-lived URLs on read) -> SERVICE_REQUEST_ATTACHMENT.file_url
@@ -24,6 +26,7 @@ const emptyDraft = () => ({
     providerId: null,
     providerName: null,       // display only (confirmation screen)
     submittedRequestId: null, // request_id returned by POST /service-requests
+    submittedReferenceCode: null, // per-customer reference (e.g. "SR-0001") returned by POST /service-requests
 });
 
 export const useServiceRequestDraftStore = create((set) => ({

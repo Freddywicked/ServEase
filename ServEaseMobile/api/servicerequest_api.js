@@ -316,12 +316,13 @@ export const markNotificationsSeen = ({ audience } = {}) =>
  *
  * Every card:  { id (unique per card), requestId, requestNumber, providerId, providerName, cardType }
  *   cardType 'diagnosis' (sent):      probableCause|null, confidencePercent|null
- *   cardType 'quotation' (approved):  laborCost, partsCost, total            <- provider's QUOTATION
- *   cardType 'schedule'  (approved):  proposalId, scheduledAt (ISO), reason  <- provider's new schedule
- *   cardType 'payment'   (ongoing):   paymentRequestId, paymentAmount, paymentReason <- provider's extra charge
- *   cardType 'timeline'  (ongoing):   timeline: [{ label, timestamp (ISO)|null, description?, done }]
- *   cardType 'completed' (done):      finalAmount, timeline
- *   cardType 'declined'  (declined):  reason|null                            <- provider's decline reason
+ *   cardType 'quotation' (sent):      laborCost, partsCost (0 if none), serviceFee, total   <- INITIAL quotation, stays in Pending
+ *   cardType 'payment'   (approved):  paymentRequestId, paymentAmount, paymentReason        <- additional payment = Active > Quotations
+ *   cardType 'timeline'  (ongoing):   timeline: [{ label, timestamp (ISO)|null, description?, subtext?, done }]  <- Active > On-going
+ *   cardType 'completed' (done|ongoing): finalAmount, isPaid, timeline
+ *   cardType 'declined'  (declined):  closedBy 'customer'|'provider', closedAction 'declined'|'cancelled', reason|null
+ *   Every card also carries serviceLocationType 'home'|'shop' (the timeline already matches it).
+ *   [SCHEDULE PROPOSAL - DISABLED] the 'schedule' card is no longer sent.
  */
 export const getTrackedRequests = () => request('/service-requests/tracking');
 

@@ -6,42 +6,42 @@ import { ROUTES } from '../navigation/routes';
 import { getServiceRequest, respondToQuotation } from '../api/servicerequest_api';
 
 /* ============================================================================
- * BACKEND-READY — RequestDetails
+ * RequestDetails (Customer app) — review, approve/decline and pay for a QUOTATION
  * ----------------------------------------------------------------------------
- * This is the screen where the QUOTATION a provider sent gets reviewed,
- * approved/declined, and paid for. Every action here has a direct
- * provider-side mirror — the provider needs to know the outcome of each step
- * (accepted/declined, payment received) since they're the
- * one fulfilling the request. See the per-handler notes below.
+ * Nothing on this screen is hard-coded. Everything comes from the backend:
+ *
+ *   Load     GET  /service-requests/:id   (getServiceRequest)
+ *            The quotation lives on the provider entry whose status is 'quoted'
+ *            (toCustomerDto in the backend): providers[].quote = {
+ *              labor, parts, serviceFee, total, notes,
+ *              initialFeePercent, initialAmount
+ *            }
+ *            - labor / parts / serviceFee   line items, always listed in this order (parts is 0.00 when
+ *                                           the provider set no price; serviceFee is the platform fee,
+ *                                           separate from the initial payment)
+ *            - total                        quotation total (falls back to the sum of the line items)
+ *            - initialFeePercent            the business rule for the initial payment, sent by the
+ *                                           backend so the app and the payment validation always agree
+ *            - initialAmount                the exact initial payment to charge (server-rounded)
+ *   Respond  POST /service-requests/:id/quotation/respond  (respondToQuotation) { approve: boolean }
+ *            Approve -> the provider is booked and notified, then the customer is asked to pay the
+ *                       initial fee (Payment screen, stage 'initial').
+ *            Decline -> the quotation is declined and the provider is notified; the request moves to
+ *                       the Closed tab (backend: closedBy 'customer', closedAction 'declined').
+ *
+ * Layout follows the Figma "SR- Quotation" frame (402px wide): Roboto title, 16px request number,
+ * 8px line items, 96x32 Approve / Decline buttons aligned to the right.
  * ========================================================================== */
 
-// Hardcoded per instructions for this round of frontend review — the adviser
-// is checking the coded frontend before the backend exists. Once real
-// navigation params + a backend fetch are wired up, this should come from
-// route.params (e.g. route.params.requestNumber) instead, e.g.
-// fetchRequestDetail(route.params.requestNumber).then(setRequestDetail).
-// BACKEND-READY: GET /service-requests/:id (or /quotations/:id)
-//   requestNumber → SERVICE_REQUEST.request_id (display-formatted)
-//   providerName  → USER.name for the QUOTATION's provider_id
-//   reason        → QUOTATION.remarks
-//   lineItems     → derived from QUOTATION.labor_cost / parts_cost (split into
-//                   rows here, or the backend returns them pre-split)
-//   total         → QUOTATION.total_amount
-//   initialFeePercent → this is hardcoded to 20 here, but the minimum initial
-//                   payment discussed for the ERD was 50% of total_amount.
-//                   Reconcile these before wiring this up — if 50% is the
-//                   real business rule, this should either be a constant
-//                   shared with the backend or fetched, not hardcoded per
-//                   screen at a different value than intended.
-// The initial fee is 20% of the quotation total. NOTE: the ERD discussion mentioned
-// 50% — change this one constant (and the backend payment validation) if that wins.
-const INITIAL_FEE_PERCENT = 20;
+const FONTS = { roboto: 'Roboto' };
+
+const toAmount = (value) => Number(value ?? 0);
+const formatAmount = (value) => toAmount(value).toFixed(2);
+const formatPercent = (value) => (Number.isInteger(Number(value)) ? String(Number(value)) : Number(value).toFixed(2));
 
 const RequestDetails = ({ navigation, route }) => {
     const requestId = route?.params?.requestId;
 
-    // The real request: GET /service-requests/:id. The quotation lives on the
-    // provider entry whose status is 'quoted' (toCustomerDto in the backend).
     const [detail, setDetail] = useState(null);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
@@ -61,15 +61,30 @@ const RequestDetails = ({ navigation, route }) => {
                 const request = await getServiceRequest(requestId);
                 if (cancelled) return;
                 const quoted = (request.providers || []).find((p) => p.status === 'quoted' && p.quote);
+                const quote = quoted?.quote;
+
+                // Labor, Parts and Service Fee are always listed in this order. Parts shows 0.00 when the
+                // provider set no price for parts; the service fee (platform fee) is set by the backend.
+                const lineItems = [
+                    { label: 'Labor', amount: toAmount(quote?.labor) },
+                    { label: 'Parts', amount: toAmount(quote?.parts) },
+                    { label: 'Service Fee', amount: toAmount(quote?.serviceFee) },
+                ];
+
+                const total = quote?.total ?? lineItems.reduce((sum, item) => sum + item.amount, 0);
+                const initialFeePercent = quote?.initialFeePercent ?? request.initialFeePercent ?? null;
+                const initialAmount =
+                    quote?.initialAmount ??
+                    (initialFeePercent !== null ? Math.round(((toAmount(total) * Number(initialFeePercent)) / 100) * 100) / 100 : null);
+
                 setDetail({
                     requestNumber: request.id,
                     providerName: quoted?.name || 'Service provider',
-                    reason: quoted?.quote?.notes || '',
-                    lineItems: [
-                        { label: 'Labor', amount: quoted?.quote?.labor ?? 0 },
-                        { label: 'Parts / Items', amount: quoted?.quote?.parts ?? 0 },
-                    ],
-                    total: (quoted?.quote?.labor ?? 0) + (quoted?.quote?.parts ?? 0),
+                    reason: quote?.notes || '',
+                    lineItems,
+                    total: toAmount(total),
+                    initialFeePercent,
+                    initialAmount,
                     hasOpenQuotation: Boolean(quoted),
                 });
             } catch (error) {
@@ -101,8 +116,7 @@ const RequestDetails = ({ navigation, route }) => {
         }
     };
 
-    // Declining frees the provider (they're notified) and the request stays open
-    // so the customer can pick another one.
+    // Declining the quotation notifies the provider and the request goes to the Closed tab.
     const handleDecline = async () => {
         if (acting) return;
         setActing(true);
@@ -122,61 +136,70 @@ const RequestDetails = ({ navigation, route }) => {
             requestNumber: detail?.requestNumber,
             providerName: detail?.providerName,
             paymentStage: 'initial',
-            amount: Math.round(((detail?.total ?? 0) * INITIAL_FEE_PERCENT) / 100 * 100) / 100,
+            amount: detail?.initialAmount ?? undefined,
         });
     };
+
+    // The percentage is part of the sentence only when the backend sent it.
+    const initialFeeSentence =
+        detail?.initialFeePercent !== null && detail?.initialFeePercent !== undefined
+            ? `the initial fee which is the ${formatPercent(detail.initialFeePercent)}% of the total service repair cost`
+            : 'the initial fee of the total service repair cost';
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <ScrollView contentContainerStyle={styles.scrollContent}>
-                <TouchableOpacity onPress={handleClose}>
+                <TouchableOpacity onPress={handleClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                     <Image source={require('../assets/icon_back_button.png')} style={styles.backIcon} />
                 </TouchableOpacity>
                 <Text style={styles.header}>My Requests</Text>
 
                 {loading ? (
-                    <ActivityIndicator color="#0255AF" style={{ marginTop: 24 }} />
+                    <ActivityIndicator color="#0255AF" style={styles.loadingIndicator} />
                 ) : loadError ? (
                     <Text style={styles.reasonText}>{loadError}</Text>
                 ) : !detail || !detail.hasOpenQuotation ? (
                     <Text style={styles.reasonText}>There is no open quotation for this request.</Text>
                 ) : (
                     <>
-                <Text style={styles.requestNumber}>Request #{detail.requestNumber}</Text>
-                <Text style={styles.senderLine}>{detail.providerName} sent a quotation</Text>
-                {!!detail.reason && <Text style={styles.reasonText}>{detail.reason}</Text>}
+                        <Text style={styles.requestNumber}>Request #{detail.requestNumber}</Text>
+                        <Text style={styles.senderLine}>{detail.providerName} sent a quotation</Text>
+                        {!!detail.reason && <Text style={styles.reasonText}>{detail.reason}</Text>}
 
-                <View style={styles.lineItemsCard}>
-                    {detail.lineItems.map((item) => (
-                        <View key={item.label} style={styles.lineItemRow}>
-                            <Text style={styles.lineItemLabel}>{item.label}</Text>
-                            <Text style={styles.lineItemAmount}>₱{item.amount.toFixed(2)}</Text>
+                        <View style={styles.lineItemsCard}>
+                            {detail.lineItems.map((item) => (
+                                <View key={item.label} style={styles.lineItemRow}>
+                                    <Text style={styles.lineItemLabel}>{item.label}</Text>
+                                    <Text style={styles.lineItemAmount}>{formatAmount(item.amount)}</Text>
+                                </View>
+                            ))}
+                            <View style={styles.divider} />
+                            <View style={styles.lineItemRow}>
+                                <Text style={styles.totalLabel}>Total</Text>
+                                <Text style={styles.totalAmount}>{formatAmount(detail.total)}</Text>
+                            </View>
                         </View>
-                    ))}
-                    <View style={styles.divider} />
-                    <View style={styles.lineItemRow}>
-                        <Text style={styles.totalLabel}>Total</Text>
-                        <Text style={styles.totalAmount}>₱{detail.total.toFixed(2)}</Text>
-                    </View>
-                </View>
 
-                <Text style={styles.noteText}>
-                    Note: If you accepted the quotation, you are required to pay the initial fee which is the{' '}
-                    {INITIAL_FEE_PERCENT}% of the total service repair cost.
-                </Text>
+                        <Text style={styles.noteText}>
+                            Note: If you accepted the quotation, you are required to pay {initialFeeSentence}.
+                        </Text>
 
-                <View style={styles.actionRow}>
-                    <TouchableOpacity style={styles.actionButtonHalf} onPress={handleApprove} disabled={acting}>
-                        <View style={[styles.actionButton, styles.approveButton]}>
-                            <Text style={styles.actionButtonText}>{acting ? 'Please wait…' : 'Approve'}</Text>
+                        <View style={styles.actionRow}>
+                            <TouchableOpacity
+                                style={[styles.actionButton, styles.approveButton, acting && styles.actionButtonDisabled]}
+                                onPress={handleApprove}
+                                disabled={acting}
+                            >
+                                <Text style={styles.actionButtonText}>{acting ? 'Please wait…' : 'Approve'}</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.actionButton, styles.declineButton, acting && styles.actionButtonDisabled]}
+                                onPress={handleDecline}
+                                disabled={acting}
+                            >
+                                <Text style={styles.actionButtonText}>Decline</Text>
+                            </TouchableOpacity>
                         </View>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.actionButtonHalf} onPress={handleDecline} disabled={acting}>
-                        <View style={[styles.actionButton, styles.declineButton]}>
-                            <Text style={styles.actionButtonText}>Decline</Text>
-                        </View>
-                    </TouchableOpacity>
-                </View>
                     </>
                 )}
             </ScrollView>
@@ -190,10 +213,7 @@ const RequestDetails = ({ navigation, route }) => {
                         </TouchableOpacity>
 
                         <Text style={styles.modalTitle}>Service Request Approved</Text>
-                        <Text style={styles.modalSubtitle}>
-                            You are required to pay the initial fee which is the {INITIAL_FEE_PERCENT}% of the total
-                            service repair cost.
-                        </Text>
+                        <Text style={styles.modalSubtitle}>You are required to pay {initialFeeSentence}.</Text>
 
                         <TouchableOpacity onPress={handleProceedToPayment}>
                             <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.proceedButton}>
@@ -214,7 +234,7 @@ const styles = StyleSheet.create({
     },
     scrollContent: {
         paddingHorizontal: 24,
-        paddingTop: 16,
+        paddingTop: 12, // Figma: back arrow sits ~12px below the 62px status bar the SafeAreaView covers
         paddingBottom: 24,
         flexGrow: 1,
     },
@@ -222,79 +242,91 @@ const styles = StyleSheet.create({
         width: 22,
         height: 22,
         resizeMode: 'contain',
-        marginBottom: 12,
+        marginBottom: 14,
     },
     header: {
+        fontFamily: FONTS.roboto,
         fontSize: 24,
-        fontWeight: '800',
-        color: '#1B2A8C',
-        marginBottom: 20,
+        fontWeight: '700',
+        lineHeight: 28,
+        color: '#021E79',
+        marginBottom: 24,
     },
     requestNumber: {
         fontSize: 16,
         fontWeight: '700',
-        color: '#111111',
-        marginBottom: 4,
+        lineHeight: 27,
+        color: '#292727',
     },
     senderLine: {
         fontSize: 13,
-        color: '#666666',
-        marginBottom: 10,
+        lineHeight: 22,
+        color: '#5B5959',
+        marginBottom: 12,
     },
     reasonText: {
-        fontSize: 12,
-        color: '#777777',
-        marginBottom: 18,
+        fontSize: 11,
+        lineHeight: 19,
+        color: '#5B5959',
+        marginBottom: 14,
     },
     lineItemsCard: {
-        marginBottom: 14,
+        marginBottom: 16,
     },
     lineItemRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingVertical: 10,
     },
     lineItemLabel: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#333333',
+        fontSize: 10,
+        fontWeight: '700',
+        lineHeight: 17,
+        color: '#191818',
     },
     lineItemAmount: {
-        fontSize: 13,
-        color: '#666666',
+        fontSize: 8,
+        lineHeight: 14,
+        color: '#5B5959',
+        textAlign: 'right',
     },
     totalLabel: {
-        fontSize: 14,
+        fontSize: 10,
         fontWeight: '700',
-        color: '#111111',
+        lineHeight: 17,
+        color: '#191818',
     },
     totalAmount: {
-        fontSize: 14,
+        fontSize: 10,
         fontWeight: '700',
-        color: '#111111',
+        lineHeight: 17,
+        color: '#5B5959',
+        textAlign: 'right',
     },
     divider: {
         height: 1,
-        backgroundColor: '#E0E0E0',
+        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+        marginTop: 5,
+        marginBottom: 6,
     },
     noteText: {
-        fontSize: 12,
-        color: '#777777',
-        lineHeight: 17,
-        marginBottom: 20,
+        fontSize: 11,
+        lineHeight: 19,
+        color: '#5B5959',
+        marginBottom: 16,
     },
     actionRow: {
         flexDirection: 'row',
-        marginBottom: 8,
-    },
-    actionButtonHalf: {
-        flex: 1,
-        marginHorizontal: 4,
+        justifyContent: 'flex-end',
+        marginRight: 10,
     },
     actionButton: {
+        width: 96,
+        height: 32,
+        marginLeft: 5,
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
         borderRadius: 10,
-        paddingVertical: 13,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -304,10 +336,17 @@ const styles = StyleSheet.create({
     declineButton: {
         backgroundColor: '#C62828',
     },
+    actionButtonDisabled: {
+        opacity: 0.6,
+    },
     actionButtonText: {
-        fontSize: 14,
+        fontSize: 10,
+        lineHeight: 17,
         color: '#FFFFFF',
         fontWeight: '700',
+    },
+    loadingIndicator: {
+        marginTop: 24,
     },
     modalOverlay: {
         flex: 1,

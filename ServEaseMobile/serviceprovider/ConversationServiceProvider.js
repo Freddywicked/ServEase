@@ -25,7 +25,11 @@ const ConversationServiceProvider = ({ navigation, route }) => {
     const [loading, setLoading] = useState(true);
     const [loadFailed, setLoadFailed] = useState(false);
     const [sending, setSending] = useState(false);
+    // The thread's service request from the backend ({ requestNumber, status }); shown as the indicator.
+    const [meta, setMeta] = useState(null);
     const listRef = useRef(null);
+    const requestNumber = meta?.requestNumber ?? conversationId;
+    const requestStatus = meta?.status ?? route?.params?.requestStatus;
 
     const loadMessages = useCallback(async () => {
         if (!conversationId) {
@@ -35,6 +39,7 @@ const ConversationServiceProvider = ({ navigation, route }) => {
         try {
             const data = await getConversationMessages(conversationId);
             setMessages(data?.messages ?? []);
+            if (data?.conversation) setMeta(data.conversation);
             setLoadFailed(false);
         } catch (error) {
             // Keep the last known messages. A 401 is already handled by api/client.
@@ -125,6 +130,16 @@ const ConversationServiceProvider = ({ navigation, route }) => {
                                 </View>
                             )}
                         </View>
+                        {!!requestNumber && (
+                            <View style={styles.requestIndicator}>
+                                <Text style={styles.requestIndicatorText}>Request #{requestNumber}</Text>
+                                {!!requestStatus && (
+                                    <View style={styles.requestStatusPill}>
+                                        <Text style={styles.requestStatusText}>{requestStatus}</Text>
+                                    </View>
+                                )}
+                            </View>
+                        )}
                         {!!subject && <Text style={styles.subject}>{subject}</Text>}
                         {loadFailed && (
                             <TouchableOpacity onPress={loadMessages}>
@@ -227,6 +242,30 @@ const styles = StyleSheet.create({
     onlineBadgeText: {
         fontSize: 12,
         fontWeight: '600',
+        color: COLORS.white,
+    },
+    requestIndicator: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 6,
+    },
+    requestIndicatorText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: COLORS.primary,
+    },
+    requestStatusPill: {
+        marginLeft: 8,
+        backgroundColor: '#577FBB',
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
+        borderRadius: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 2,
+    },
+    requestStatusText: {
+        fontSize: 10,
+        fontWeight: '500',
         color: COLORS.white,
     },
     subject: {

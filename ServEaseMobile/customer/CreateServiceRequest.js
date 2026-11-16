@@ -6,6 +6,7 @@ import { launchImageLibrary } from 'react-native-image-picker';
 import { ROUTES } from '../navigation/routes';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
 import ProgressBar from '../components/ProgressBar';
+import ExitRequestModal, { useExitServiceRequest } from '../components/ExitRequestModal';
 import RadiusSlider, { DEFAULT_CUSTOMER_RADIUS_KM } from '../components/RadiusSlider';
 import {
     getCategories,
@@ -113,6 +114,14 @@ const CreateServiceRequest = ({ navigation }) => {
     // The draft lives in the shared store, so going back from a later step keeps what was typed.
     const draft = useServiceRequestDraftStore((state) => state);
     const setDraft = useServiceRequestDraftStore((state) => state.setDraft);
+    const { isExitModalVisible, requestExit, continueRequest, cancelRequest } = useExitServiceRequest(navigation);
+
+    // Required-field validation. Nothing is shown until the customer taps Next once; after that the
+    // errors are re-derived from the draft on every render, so each one clears as soon as it is fixed.
+    const [showErrors, setShowErrors] = useState(false);
+    const scrollRef = useRef(null);
+    const sectionYRef = useRef({}); // y offset of each required section, used to scroll to the first error
+    const locationAreaYRef = useRef(0);
 
     // Search area: tapping the map opens a modal where the customer slides how far (km) from
     // their location to look for providers. The map redraws the circle on release, and the
@@ -176,8 +185,9 @@ const CreateServiceRequest = ({ navigation }) => {
         loadOptions();
     }, [loadOptions]);
 
+    // X button: ask "Do you still want to continue?" first (No = cancel the request and go home).
     const handleClose = () => {
-        navigation.goBack();
+        requestExit();
     };
 
     const handleSelectCategory = (categoryKey) => {
@@ -419,25 +429,39 @@ const CreateServiceRequest = ({ navigation }) => {
         setIsAppointmentModalVisible(false);
     };
 
+    // Every required field of this step. Photos & video are optional, but uploads still in progress
+    // block Next so a half-uploaded attachment is never lost.
+    const getFieldErrors = () => {
+        const found = {};
+        if (!draft.categoryKey) found.category = 'Please choose a category.';
+        if (!draft.description?.trim()) found.description = 'Please describe the problem.';
+        if (isUploadingMedia) found.media = 'Please wait, your photos or video are still uploading.';
+        if (!draft.preferredDate || !draft.preferredTime) found.appointment = 'Please choose a preferred date and time.';
+        if (!draft.serviceLocationType) found.locationType = 'Please choose a service location type.';
+        if (!draft.location) found.location = 'Please turn on your location so we can find providers near you.';
+        return found;
+    };
+    const errors = showErrors ? getFieldErrors() : {};
+    const hasErrors = Object.keys(errors).length > 0;
+
+    // Top-to-bottom order of the sections, so the screen scrolls to the first one that needs attention.
+    const SECTION_ORDER = ['category', 'description', 'media', 'appointment', 'locationType', 'location'];
+    const getSectionY = (key) => {
+        if (key === 'appointment' || key === 'locationType') return locationAreaYRef.current;
+        if (key === 'location') return locationAreaYRef.current + (sectionYRef.current.location ?? 0);
+        return sectionYRef.current[key];
+    };
+    const markSectionY = (key) => (event) => {
+        sectionYRef.current[key] = event.nativeEvent.layout.y;
+    };
+
     const handleNext = () => {
-        if (!draft.categoryKey) {
-            Alert.alert('Pick a category', 'Choose what kind of repair you need.');
-            return;
-        }
-        if (!draft.description.trim()) {
-            Alert.alert('Describe the problem', 'Tell us what is going on so we can diagnose it.');
-            return;
-        }
-        if (!draft.serviceLocationType) {
-            Alert.alert('Choose a service location type', 'Tell us if the repair is home-based or shop-based.');
-            return;
-        }
-        if (isUploadingMedia) {
-            Alert.alert('Please wait', 'Your photos or video are still uploading.');
-            return;
-        }
-        if (!draft.location) {
-            Alert.alert('Turn on location', 'We need your location to find service providers near you.');
+        const found = getFieldErrors();
+        const firstInvalid = SECTION_ORDER.find((key) => found[key]);
+        if (firstInvalid) {
+            setShowErrors(true);
+            const y = getSectionY(firstInvalid);
+            if (y !== undefined) scrollRef.current?.scrollTo({ y: Math.max(y - 12, 0), animated: true });
             return;
         }
         // Everything collected here is already in the draft store; AIDiagnosis reads it from there.
@@ -539,7 +563,7 @@ const CreateServiceRequest = ({ navigation }) => {
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+            <ScrollView ref={scrollRef} contentContainerStyle={styles.scrollContent}>
                 <View style={styles.headerRow}>
                     <Text style={styles.headerTitle}>Creating Service Request</Text>
                     <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
@@ -554,20 +578,24 @@ const CreateServiceRequest = ({ navigation }) => {
                     Pick a category and tell us what's going on — the more detail, the better the diagnosis.
                 </Text>
 
-                <Text style={styles.sectionLabel}>Category</Text>
-                <View style={styles.categoryList}>{renderCategorySection()}</View>
+                <Text style={styles.sectionLabel} onLayout={markSectionY('category')}>Category *</Text>
+                <View style={styles.categoryList}>
+                    {renderCategorySection()}
+                    {errors.category ? <Text style={styles.errorText}>{errors.category}</Text> : null}
+                </View>
 
-                <Text style={styles.sectionLabel}>Describe the Problem</Text>
+                <Text style={styles.sectionLabel} onLayout={markSectionY('description')}>Describe the Problem *</Text>
                 <TextInput
-                    style={styles.problemInput}
+                    style={[styles.problemInput, errors.description && styles.fieldInvalid]}
                     placeholder="e.g. Screen cracked"
                     placeholderTextColor="#999999"
                     value={draft.description}
                     onChangeText={(description) => setDraft({ description })}
                     multiline
                 />
+                {errors.description ? <Text style={[styles.errorText, styles.errorTextAfterInput]}>{errors.description}</Text> : null}
 
-                <Text style={styles.sectionLabel}>Photos & Video (optional)</Text>
+                <Text style={styles.sectionLabel} onLayout={markSectionY('media')}>Photos & Video (optional)</Text>
                 {mediaItems.length === 0 ? (
                     <TouchableOpacity style={styles.uploadBox} onPress={handleAddMedia} activeOpacity={0.85}>
                         <Image source={require('../assets/icon_upload.png')} style={styles.uploadIcon} />
@@ -593,19 +621,24 @@ const CreateServiceRequest = ({ navigation }) => {
                     </View>
                 )}
 
+                {errors.media ? <Text style={[styles.errorText, styles.errorTextAfterInput]}>{errors.media}</Text> : null}
+
                 {/* One wrapper around the row and the Location section: the dropdown menu floats over the
                     map inside it (absolute), so opening it moves nothing. Keeping the menu inside this
                     wrapper's bounds is also what keeps its options tappable on Android. */}
-                <View style={[styles.locationAreaWrap, isLocationTypeOpen && { minHeight: dropdownMinHeight }]}>
+                <View
+                    style={[styles.locationAreaWrap, isLocationTypeOpen && { minHeight: dropdownMinHeight }]}
+                    onLayout={(event) => { locationAreaYRef.current = event.nativeEvent.layout.y; }}
+                >
                 <View style={styles.appointmentRow} onLayout={(event) => setTypeRowLayout(event.nativeEvent.layout)}>
                     <TouchableOpacity
-                        style={styles.appointmentBox}
+                        style={[styles.appointmentBox, errors.appointment && styles.fieldInvalid]}
                         onPress={handleOpenAppointmentPicker}
                         activeOpacity={0.85}
                     >
                         <Image source={require('../assets/icon_calendar.png')} style={styles.calendarIcon} />
                         <View style={styles.appointmentTextWrap}>
-                            <Text style={styles.appointmentTitle}>Preferred Appointment</Text>
+                            <Text style={styles.appointmentTitle}>Preferred Appointment *</Text>
                             <Text style={styles.appointmentSubtitle}>
                                 {confirmedDate && draft.preferredTime
                                     ? `${formatAppointmentDate(confirmedDate)} · ${confirmedTimeLabel}`
@@ -615,24 +648,25 @@ const CreateServiceRequest = ({ navigation }) => {
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                        style={styles.locationTypeBox}
+                        style={[styles.locationTypeBox, errors.locationType && styles.fieldInvalid]}
                         onLayout={(event) => setTypeBoxLayout(event.nativeEvent.layout)}
                         onPress={() => setIsLocationTypeOpen((open) => !open)}
                         activeOpacity={0.85}
                         accessibilityRole="button"
                         accessibilityLabel="Service location type"
                     >
-                        <Text
-                            style={[styles.locationTypeText, !selectedLocationType && styles.locationTypePlaceholder]}
-                            numberOfLines={1}
-                        >
-                            {selectedLocationType ? selectedLocationType.label : 'Service Location Type'}
+                        <Text style={[styles.locationTypeText, !selectedLocationType && styles.locationTypePlaceholder]}>
+                            {selectedLocationType ? selectedLocationType.label : 'Service Location Type *'}
                         </Text>
                         <Text style={[styles.locationTypeChevron, isLocationTypeOpen && styles.locationTypeChevronOpen]}>›</Text>
                     </TouchableOpacity>
                 </View>
+                <View style={styles.rowErrorWrap}>
+                    {errors.appointment ? <Text style={styles.errorText}>{errors.appointment}</Text> : null}
+                    {errors.locationType ? <Text style={styles.errorText}>{errors.locationType}</Text> : null}
+                </View>
 
-                <Text style={styles.sectionLabel}>Location</Text>
+                <Text style={styles.sectionLabel} onLayout={markSectionY('location')}>Location *</Text>
                 {draft.location ? (
                     <View>
                         {/* Tap the map to set the search radius. */}
@@ -669,6 +703,7 @@ const CreateServiceRequest = ({ navigation }) => {
                         )}
                     </TouchableOpacity>
                 )}
+                {errors.location ? <Text style={[styles.errorText, styles.errorTextAfterLocation]}>{errors.location}</Text> : null}
 
                 {isLocationTypeOpen && typeRowLayout && typeBoxLayout ? (
                     <>
@@ -703,6 +738,9 @@ const CreateServiceRequest = ({ navigation }) => {
             </ScrollView>
 
             <View style={styles.footer}>
+                {hasErrors ? (
+                    <Text style={styles.footerErrorText}>Please fill in the required fields marked in red.</Text>
+                ) : null}
                 <TouchableOpacity onPress={handleNext}>
                     <LinearGradient
                         colors={['#0255AF', '#04A5A5']}
@@ -880,6 +918,7 @@ const CreateServiceRequest = ({ navigation }) => {
                     </View>
                 </View>
             </Modal>
+            <ExitRequestModal visible={isExitModalVisible} onYes={continueRequest} onNo={cancelRequest} />
         </SafeAreaView>
     );
 };
@@ -1159,7 +1198,12 @@ const styles = StyleSheet.create({
     appointmentRow: {
         flexDirection: 'row',
         alignItems: 'stretch',
-        marginBottom: 20,
+        marginBottom: 6,
+    },
+    // Holds the appointment / location-type error lines; 6 + 8 + 6 keeps the old 20px gap when empty.
+    rowErrorWrap: {
+        minHeight: 8,
+        marginBottom: 6,
     },
     locationAreaWrap: {
         position: 'relative',
@@ -1202,15 +1246,21 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
     },
     locationTypeText: {
+        // Wraps onto a second line when needed so the whole label always shows (no truncation).
         flex: 1,
         fontSize: 12,
+        lineHeight: 16,
         color: '#111111',
-        marginRight: 6,
+        marginRight: 8,
     },
     locationTypePlaceholder: {
         color: '#777777',
     },
     locationTypeChevron: {
+        // Fixed width so the rotated chevron keeps its own space and can't run into the label.
+        width: 16,
+        flexShrink: 0,
+        textAlign: 'center',
         fontSize: 20,
         lineHeight: 20,
         color: '#333333',
@@ -1462,6 +1512,28 @@ const styles = StyleSheet.create({
     },
     dayCellTextDisabled: {
         color: '#CCCCCC',
+    },
+    fieldInvalid: {
+        borderColor: '#B00020',
+    },
+    errorText: {
+        fontSize: 11,
+        lineHeight: 15,
+        color: '#B00020',
+    },
+    // problemInput / uploads already carry a 20px bottom margin; pull the message up under the field.
+    errorTextAfterInput: {
+        marginTop: -14,
+        marginBottom: 18,
+    },
+    errorTextAfterLocation: {
+        marginTop: 6,
+    },
+    footerErrorText: {
+        fontSize: 12,
+        color: '#B00020',
+        textAlign: 'center',
+        marginBottom: 10,
     },
 });
 

@@ -97,11 +97,12 @@ const updateRecipient = async (requestId, providerUserId, patch) =>
   );
 
 // ---------- quotations ----------
-const addQuotation = async ({ request_id, provider_id, labor_cost, parts_cost, remarks }) =>
+// service_fee = the platform fee, saved with the quotation (see utils/pricing.js).
+const addQuotation = async ({ request_id, provider_id, labor_cost, parts_cost, service_fee, remarks }) =>
   unwrap(
     await supabase
       .from(QUOTATIONS)
-      .insert({ request_id, provider_id, labor_cost, parts_cost, remarks })
+      .insert({ request_id, provider_id, labor_cost, parts_cost, service_fee, remarks })
       .select()
       .single()
   );

@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { ROUTES } from '../navigation/routes';
 import ProgressBar from '../components/ProgressBar';
+import ExitRequestModal, { useExitServiceRequest } from '../components/ExitRequestModal';
 import { useServiceRequestDraftStore } from '../store/ServiceRequestDraftStore';
 import { createServiceRequest } from '../api/servicerequest_api';
 
@@ -33,6 +34,7 @@ const CURRENT_STEP = 2;
 const AIResult = ({ navigation }) => {
     const diagnosis = useServiceRequestDraftStore((state) => state.aiDiagnosis);
     const resetDraft = useServiceRequestDraftStore((state) => state.resetDraft);
+    const { isExitModalVisible, requestExit, continueRequest, cancelRequest } = useExitServiceRequest(navigation);
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
@@ -46,8 +48,11 @@ const AIResult = ({ navigation }) => {
         }
     }, [diagnosis, navigation]);
 
+    // X button: ask "Do you still want to continue?" first. Not while the "Yes, solved" request is
+    // being saved — that one IS being submitted, so it must finish (or fail) before the customer can leave.
     const handleClose = () => {
-        navigation.goBack();
+        if (isSaving) return;
+        requestExit();
     };
 
     const handleProblemSolved = async () => {
@@ -147,6 +152,7 @@ const AIResult = ({ navigation }) => {
                     </View>
                 </View>
             </ScrollView>
+            <ExitRequestModal visible={isExitModalVisible} onYes={continueRequest} onNo={cancelRequest} />
         </SafeAreaView>
     );
 };

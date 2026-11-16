@@ -16,6 +16,7 @@ const Provider = require('../models/provider_model');
 const Request = require('../models/servicerequest_model');
 const Workflow = require('../models/workflow_model');
 const { diagnose } = require('../utils/ai_diagnosis');
+const { toQuoteDto, serviceFeeFor } = require('../utils/pricing');
 const { getProviderFileUrl } = require('../utils/storage');
 const {
   MIN_RADIUS_KM,
@@ -136,6 +137,7 @@ const toCustomerDto = (row, recipients = [], users = {}, photoUrls = [], quotes 
   photoUrls,
   appointmentDate: row.date,
   appointmentTime: row.time,
+  serviceLocationType: row.service_location_type ?? null, // 'home' | 'shop'
   latitude: row.latitude,
   longitude: row.longitude,
   aiStatus: aiStatusOf(row),
@@ -150,7 +152,7 @@ const toCustomerDto = (row, recipients = [], users = {}, photoUrls = [], quotes 
       status: r.status,
       quote:
         r.status === 'quoted' && q
-          ? { labor: Number(q.labor_cost) || 0, parts: Number(q.parts_cost) || 0, notes: q.remarks || '' }
+          ? { ...toQuoteDto(q), notes: q.remarks || '' } // labor, parts, serviceFee, total, initialFeePercent, initialAmount
           : null,
       declinedReason: r.declined_reason || null,
     };
@@ -738,6 +740,7 @@ const sendQuote = asyncHandler(async (req, res) => {
     provider_id: req.user.user_id,
     labor_cost: labor,
     parts_cost: parts,
+    service_fee: serviceFeeFor(labor, parts), // saved now, so a later rate change never alters this quotation
     remarks: String(req.body.notes || '').trim() || null,
   });
   const updated = await Request.updateRecipient(row.request_id, req.user.user_id, {

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
 import { useAuth } from '../context/auth_context';
-import { getActiveRepair } from '../api/client';
+import { getCustomerHistory, getTrackingCards } from '../api/client';
 
 // "Mark Frederick Cerillo" -> "MC"
 const getInitials = (name = '') => {
@@ -19,8 +19,63 @@ const rowTitle = (category, requestId) => {
   return [category, ref].filter(Boolean).join(' | ');
 };
 
+const pick = (obj, keys) => {
+  for (const key of keys) {
+    if (obj?.[key] != null && obj[key] !== '') return obj[key];
+  }
+  return '';
+};
+
+const peso = (amount) =>
+  `\u20B1${Number(amount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// A Track Requests card (GET /service-requests/tracking) -> one dashboard row.
+const toRequestRow = (card) => {
+  const ref = pick(card, ['requestNumber', 'requestId', 'id']);
+  return {
+    id: String(ref),
+    title: rowTitle(pick(card, ['category', 'serviceCategory', 'jobTitle', 'title']), ref),
+    summary:
+      pick(card, ['description', 'summary']) ||
+      [pick(card, ['providerName']), pick(card, ['statusLabel', 'currentStepLabel'])].filter(Boolean).join(' - '),
+  };
+};
+
+// A request can come back as several cards (diagnosis, quotation, schedule...): show it once.
+const uniqueRows = (cards) => {
+  const seen = new Set();
+  return (cards || [])
+    .map(toRequestRow)
+    .filter((row) => row.id && !seen.has(row.id) && seen.add(row.id));
+};
+
+// One repair or transaction from GET /service-requests/history -> one dashboard row.
+const toHistoryRow = (item, index) => {
+  const ref = pick(item, ['requestNumber', 'requestId']);
+  const isTransaction = pick(item, ['type', 'kind']) === 'transaction';
+  const amount = pick(item, ['amount', 'finalAmount', 'total']);
+  const summary = isTransaction
+    ? ['Payment', amount !== '' ? peso(amount) : '', pick(item, ['providerName'])].filter(Boolean).join(' - ')
+    : pick(item, ['description', 'summary']) ||
+      [pick(item, ['providerName']), pick(item, ['statusLabel', 'status'])].filter(Boolean).join(' - ');
+  return {
+    id: `${pick(item, ['type', 'kind']) || 'item'}-${pick(item, ['id']) || ref}-${index}`,
+    title: rowTitle(pick(item, ['category', 'serviceCategory', 'title']) || (isTransaction ? 'Transaction' : ''), ref),
+    summary,
+  };
+};
+
 // White card with a bold title (Figma: Pending Request / Active Repair / History).
-function DashboardCard({ title, emptyMessage, minHeightClass, hasItems, actionLabel, actionTo, children }) {
+function DashboardCard({
+  title,
+  emptyMessage,
+  minHeightClass,
+  listMaxHeightClass = 'max-h-[190px]',
+  hasItems,
+  actionLabel,
+  actionTo,
+  children,
+}) {
   return (
     <section
       className={`box-border flex w-full flex-col rounded-[14px] border border-[#C9C2C2] bg-white px-[21px] pb-[21px] pt-[11px] ${minHeightClass}`}
@@ -40,7 +95,7 @@ function DashboardCard({ title, emptyMessage, minHeightClass, hasItems, actionLa
       </div>
 
       {hasItems ? (
-        <div className="mt-[16px] flex flex-col gap-[15px]">{children}</div>
+        <div className={`mt-[16px] flex flex-col gap-[15px] overflow-y-auto ${listMaxHeightClass}`}>{children}</div>
       ) : (
         <div className="flex flex-1 items-center justify-center">
           <p className="m-0 text-center font-[Roboto] text-[14px] font-medium leading-[23px] text-[#817C7C]">
@@ -69,59 +124,41 @@ function RequestRow({ title, summary }) {
 export default function CustomerDashboard() {
   const { user, loading } = useAuth();
 
-  // [{ id, title, summary }] for each list below.
+  // [{ id, title, summary }] for each list below, all loaded from the backend.
   const [pendingRequests, setPendingRequests] = useState([]);
   const [activeRepairs, setActiveRepairs] = useState([]);
   const [history, setHistory] = useState([]);
 
-  // Active Repair: the newest request still in play (Pending / Approved / In Progress), from
-  // GET /api/service-requests/active — null when there is none.
+  // All three boxes come from the backend:
+  //   Pending Request -> requests the customer sent that no provider has accepted yet
+  //                      (Track Requests "sent" cards).
+  //   Active Repair   -> repairs that are on-going: the provider's quotation was approved by the customer
+  //                      and the initial payment was paid (Track Requests "ongoing" cards).
+  //   History         -> every completed repair and every payment transaction
+  //                      (GET /service-requests/history?type=all, the same data as the History screen).
   useEffect(() => {
     if (!user) return undefined;
     let cancelled = false;
-    getActiveRepair()
+
+    getTrackingCards()
       .then((data) => {
         if (cancelled) return;
-        const r = data?.activeRepair;
-        setActiveRepairs(
-          r
-            ? [
-                {
-                  id: r.requestId,
-                  title: rowTitle(r.category, r.requestId),
-                  summary: r.description || [r.providerName, r.statusLabel].filter(Boolean).join(' - '),
-                },
-              ]
-            : []
-        );
+        setPendingRequests(uniqueRows(data?.sent));
+        setActiveRepairs(uniqueRows(data?.ongoing));
       })
-      .catch((err) => console.error('Failed to load the active repair', err));
+      .catch((err) => console.error('Failed to load the pending and active requests', err));
+
+    getCustomerHistory('all')
+      .then((data) => {
+        if (cancelled) return;
+        setHistory((data?.items ?? []).map(toHistoryRow));
+      })
+      .catch((err) => console.error('Failed to load the history', err));
+
     return () => {
       cancelled = true;
     };
   }, [user]);
-
-  // TODO (BACKEND): fill "Pending Request" and "History" from the customer's service requests,
-  // e.g. GET /api/service-requests?status=pending and GET /api/service-requests?status=completed,
-  // then map each one to { id, title: rowTitle(category, requestId), summary }:
-  //
-  // useEffect(() => {
-  //   if (!user) return undefined;
-  //   let cancelled = false;
-  //   getMyRequests()
-  //     .then((data) => {
-  //       if (cancelled) return;
-  //       const toRow = (r) => ({
-  //         id: r.requestId,
-  //         title: rowTitle(r.category, r.requestId),
-  //         summary: r.description,
-  //       });
-  //       setPendingRequests((data.pending || []).map(toRow));
-  //       setHistory((data.history || []).map(toRow));
-  //     })
-  //     .catch((err) => console.error('Failed to load the requests', err));
-  //   return () => { cancelled = true; };
-  // }, [user]);
 
   // Wait while the saved login is being restored, then require a logged-in user.
   if (loading) return null;
@@ -178,6 +215,7 @@ export default function CustomerDashboard() {
               title="History"
               emptyMessage="No History"
               minHeightClass="min-h-[226px]"
+              listMaxHeightClass="max-h-[320px]"
               hasItems={history.length > 0}
               actionLabel="View All"
               actionTo="/customer/history"

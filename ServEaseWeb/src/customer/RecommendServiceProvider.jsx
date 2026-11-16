@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
+import ExitRequestControl from '../components/ExitRequestControl.jsx';
 import starIcon from '../assets/icon_star.png';
 import {
   clearDraftRequestId,
   getDraftRequestId,
   getRecommendedProviders,
+  getServiceRequest,
   submitServiceRequest,
 } from '../api/client';
 
@@ -61,6 +63,19 @@ const toProviderCard = (p) => ({
   matchesCategory: Boolean(p.matchesCategory),
 });
 
+// A provider is only shown when ALL of these hold. The backend is the one that must filter (see the
+// notes in the reply); this is a safety net so a provider who is out of reach, unavailable on the
+// requested day, or in another line of work is never displayed even if the backend lets one through.
+//   - available      : false -> busy / marked unavailable on the requested day
+//   - matchesCategory: false -> specialization does not match the request's category
+//   - distanceKm     : farther than the search radius the customer set in step 1
+const isEligible = (p, radiusKm) => {
+  if (p.available === false) return false;
+  if (p.matchesCategory === false) return false;
+  if (radiusKm && p.distanceKm != null && Number(p.distanceKm) > radiusKm) return false;
+  return true;
+};
+
 export default function RecommendServiceProvider() {
   const navigate = useNavigate();
 
@@ -80,6 +95,9 @@ export default function RecommendServiceProvider() {
   // instead of navigating away (same behaviour as the mobile app).
   const seenIdsRef = useRef(new Set());
 
+  // The customer's search radius (km) from step 1, read once from the draft request.
+  const radiusKmRef = useRef(undefined); // undefined = not loaded yet, null = unknown
+
   // Always re-fetches from the backend: the ranked list (category match first,
   // then rating, then distance, with availability for the request's preferred
   // schedule) is computed server-side for this draft request. With findAnother,
@@ -91,8 +109,19 @@ export default function RecommendServiceProvider() {
       setStatus('loading');
       setNotice('');
       try {
+        if (radiusKmRef.current === undefined) {
+          try {
+            const { request: draft } = await getServiceRequest(requestId);
+            const km = Number(draft?.searchRadiusKm ?? draft?.search_radius_km ?? draft?.radiusKm);
+            radiusKmRef.current = Number.isFinite(km) && km > 0 ? km : null;
+          } catch {
+            radiusKmRef.current = null;
+          }
+        }
         const data = await getRecommendedProviders(requestId);
-        const ranked = (data?.providers ?? []).map(toProviderCard);
+        const ranked = (data?.providers ?? [])
+          .filter((p) => isEligible(p, radiusKmRef.current))
+          .map(toProviderCard);
         if (!findAnother) seenIdsRef.current.clear();
 
         let next = findAnother ? ranked.filter((p) => !seenIdsRef.current.has(p.id)) : ranked;
@@ -165,7 +194,8 @@ export default function RecommendServiceProvider() {
 
   return (
     <CustomerSidebar>
-      <div className="box-border px-4 py-6 sm:px-9">
+      <div className="relative box-border px-4 py-6 sm:px-9">
+        <ExitRequestControl requestId={requestId} />
         <h1 className="m-0 flex min-h-[68px] items-center font-[Quicksand] text-[32px] font-bold leading-tight text-[#005FCA] sm:text-[40px] lg:text-[48px] lg:leading-[32px]">
           Creating Service Request
         </h1>
@@ -190,7 +220,9 @@ export default function RecommendServiceProvider() {
         )}
         {status === 'done' && providers.length === 0 && (
           <p className="m-0 mt-10 font-[Roboto] text-[14px] text-[#817C7C]">
-            No verified service providers available yet — try again later.
+            No service providers match your request right now. Only providers within your search radius,
+            available on your preferred schedule and specialized in this category are shown. Try a larger
+            radius or a different date or time.
           </p>
         )}
 

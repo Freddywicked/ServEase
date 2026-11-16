@@ -25,6 +25,13 @@ const Provider = require('../models/provider_model');
 const { getProviderFileUrl, getUserPhotoUrl } = require('../utils/storage');
 const { analyzeSentiment } = require('../utils/ai_sentiment');
 const { supabase } = require('../config/supabase');
+const {
+  INITIAL_FEE_RATE,
+  CUSTOMER_DECLINED_QUOTATION_REASON,
+  quoteBreakdown,
+  serviceFeeFor,
+  feeSplit,
+} = require('../utils/pricing');
 
 // The stage list the provider's Jobs screen offers; also the customer's timeline.
 const JOB_STAGES = ['Assessing', 'Repairing', 'Quality Check', 'Completed'];
@@ -78,16 +85,66 @@ const receiptNoOf = (paymentId) => `RCP-${String(paymentId).replace(/-/g, '').sl
 const paymentReceipt = async (row, payment) => {
   const recipients = await Request.listRecipients(row.request_id);
   const providerId = pickProviderId(row, recipients);
-  const users = await Request.findUsersByIds([row.customer_id, providerId].filter(Boolean));
+  const [users, quotations, payments] = await Promise.all([
+    Request.findUsersByIds([row.customer_id, providerId].filter(Boolean)),
+    Request.listQuotations(row.request_id),
+    Workflow.listPayments([row.request_id]).catch(() => []),
+  ]);
+  const quote = quotations.find((q) => q.provider_id === providerId) || quotations[0] || null;
+  // Platform-fee part of THIS payment (the Payment screen's receipt shows subtotal + service fee = total).
+  const serviceFee = feeSplit(quote, payments).get(payment.payment_id) || 0;
+  const total = Number(payment.amount);
   return {
     receiptNo: receiptNoOf(payment.payment_id),
     requestNumber: refOf(row),
     paidAt: payment.created_at,
     customerName: users[row.customer_id]?.name || 'Customer',
     providerName: users[providerId]?.name || 'Service provider',
-    total: Number(payment.amount),
+    subtotal: Math.round((total - serviceFee) * 100) / 100,
+    serviceFee,
+    total,
     method: payment.method,
     reference: payment.paymongo_payment_id || payment.checkout_session_id || '',
+  };
+};
+
+// What is still due per payment stage (server-computed, so the apps never decide the amount):
+//   initial    = INITIAL_FEE_RATE of the total (labor + parts + service fee), minus what was paid as 'initial'
+//   additional = approved additional payments not paid yet (no service fee on these)
+//   final      = total + approved additional - everything already paid
+const computePaymentDue = async (row) => {
+  const [recipients, quotations, paymentRequests, payments] = await Promise.all([
+    Request.listRecipients(row.request_id),
+    Request.listQuotations(row.request_id),
+    Workflow.listPaymentRequests([row.request_id]),
+    Workflow.listPayments([row.request_id]),
+  ]);
+
+  const providerId = pickProviderId(row, recipients);
+  const quote = quotations.find((q) => q.provider_id === providerId) || quotations[0] || null;
+  const breakdown = quote ? quoteBreakdown(quote) : null;
+  const quoteTotal = breakdown ? breakdown.total : 0;
+  const approvedExtras = paymentRequests
+    .filter((p) => p.status === 'approved')
+    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const paidFor = (stage) =>
+    payments
+      .filter((p) => p.status === 'paid' && p.stage === stage)
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+  const total = quoteTotal + approvedExtras;
+  const paid = payments.filter((p) => p.status === 'paid').reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const round2 = (n) => Math.round(n * 100) / 100;
+
+  return {
+    total: round2(total),
+    paid: round2(paid),
+    serviceFee: breakdown ? breakdown.serviceFee : 0,
+    due: {
+      initial: round2(Math.max(0, quoteTotal * INITIAL_FEE_RATE - paidFor('initial'))),
+      additional: round2(Math.max(0, approvedExtras - paidFor('additional'))),
+      final: round2(Math.max(0, total - paid)),
+    },
   };
 };
 
@@ -225,11 +282,38 @@ const getActiveRepair = asyncHandler(async (req, res) => {
 // { sent, approved, ongoing, declined, done }. Card shapes are the ones
 // documented above getTrackedRequests in the mobile app's servicerequest_api.js.
 
-const buildTimeline = (updates) =>
-  JOB_STAGES.map((label) => {
-    const hit = updates.find((u) => u.step === label);
-    return { label, timestamp: hit ? hit.created_at : null, description: hit?.notes || null, done: Boolean(hit) };
-  });
+// The customer's tracking indicator depends on how the service is delivered (service_requests
+// .service_location_type, 'home' | 'shop'; anything else is treated as shop):
+//   Shop-based: Assessing -> Repairing -> Quality Checking -> Completed   (all pushed by the provider)
+//   Home-based: Request received -> Quotation approved -> Service Provider is on the way -> Completed
+//               (the first two come from the request itself; the provider pushes 'On the way' and 'Completed')
+const STEP_LABELS = { 'Quality Check': 'Quality Checking', 'On the way': 'Service Provider is on the way' };
+const ON_THE_WAY_NOTE = 'Service provider is now heading to your door step';
+const HOME_PROVIDER_STAGES = ['On the way', 'Completed'];
+
+const locationTypeOf = (row) => (row.service_location_type === 'home' ? 'home' : 'shop');
+// Progress steps the provider may push for this request (see updateJobProgress).
+const stagesFor = (row) => (locationTypeOf(row) === 'home' ? HOME_PROVIDER_STAGES : JOB_STAGES);
+
+const buildTimeline = (row, updates, approvedAt) => {
+  const stepOf = (step) => {
+    const hit = updates.find((u) => u.step === step);
+    return { label: STEP_LABELS[step] || step, timestamp: hit ? hit.created_at : null, description: hit?.notes || null, done: Boolean(hit) };
+  };
+  if (locationTypeOf(row) === 'home') {
+    const onTheWay = stepOf('On the way');
+    const completed = stepOf('Completed');
+    // While the provider is travelling, the step shows this note instead of the date.
+    if (onTheWay.done && !completed.done) onTheWay.subtext = ON_THE_WAY_NOTE;
+    return [
+      { label: 'Request received', timestamp: row.created_at, description: null, done: true },
+      { label: 'Quotation approved', timestamp: approvedAt || null, description: null, done: true },
+      onTheWay,
+      completed,
+    ];
+  }
+  return JOB_STAGES.map(stepOf);
+};
 
 const getTracking = asyncHandler(async (req, res) => {
   const rows = await Request.listForCustomer(req.user.user_id);
@@ -266,13 +350,17 @@ const getTracking = asyncHandler(async (req, res) => {
       requestNumber: refOf(row),
       providerId,
       providerName,
+      // 'home' | 'shop' — the app shows the matching tracking indicator.
+      serviceLocationType: locationTypeOf(row),
     };
     const cardId = (suffix) => `${refOf(row)}-${suffix}`;
     const my = (list) => list.filter((x) => x.request_id === row.request_id);
     const updates = my(progressRows);
-    const timeline = buildTimeline(updates);
+    const approvedAt = recipients.find((r) => r.status === 'accepted')?.responded_at || null;
+    const timeline = buildTimeline(row, updates, approvedAt);
     const quote = quotes[providerId];
-    const quoteTotal = quote ? Number(quote.labor_cost || 0) + Number(quote.parts_cost || 0) : 0;
+    // labor + parts + service fee (see utils/pricing.js)
+    const quoteTotal = quote ? quoteBreakdown(quote).total : 0;
     const approvedExtras = my(paymentRequests)
       .filter((p) => p.status === 'approved')
       .reduce((sum, p) => sum + Number(p.amount || 0), 0);
@@ -287,19 +375,23 @@ const getTracking = asyncHandler(async (req, res) => {
     if (row.request_status === 'Pending') {
       const quoted = recipients.filter((r) => r.status === 'quoted');
       if (quoted.length) {
+        // Initial quotation(s): still waiting for the customer's answer, so they stay in Pending
+        // (the `sent` group feeds the app's Pending tab). Approving moves the request to Active.
         quoted.forEach((r) => {
           const q = quotes[r.provider_id];
           if (!q) return;
-          groups.approved.push({
+          const b = quoteBreakdown(q);
+          groups.sent.push({
             ...base,
             id: cardId(`quotation-${r.provider_id}`),
             providerId: r.provider_id,
             providerName: users[r.provider_id]?.name || providerName,
             cardType: 'quotation',
             statusLabel: 'Quotation received',
-            laborCost: Number(q.labor_cost || 0),
-            partsCost: Number(q.parts_cost || 0),
-            total: Number(q.labor_cost || 0) + Number(q.parts_cost || 0),
+            laborCost: b.labor,
+            partsCost: b.parts, // 0 when the provider set no price for parts
+            serviceFee: b.serviceFee,
+            total: b.total,
             notes: q.remarks || '',
           });
         });
@@ -317,27 +409,31 @@ const getTracking = asyncHandler(async (req, res) => {
     }
 
     if (row.request_status === 'Approved' || row.request_status === 'In Progress') {
-      my(proposals)
-        .filter((p) => p.status === 'pending')
-        .forEach((p) =>
-          groups.approved.push({
-            ...base,
-            id: cardId(`schedule-${p.proposal_id}`),
-            cardType: 'schedule',
-            statusLabel: 'New schedule proposed',
-            proposalId: p.proposal_id,
-            scheduledAt: p.scheduled_at,
-            reason: p.reason || '',
-          })
-        );
+      // [SCHEDULE PROPOSAL - DISABLED] The customer can pick another schedule in the app's
+      // RecommendServiceProvider screen, so the provider's "new schedule" card is not sent any more.
+      // my(proposals)
+      //   .filter((p) => p.status === 'pending')
+      //   .forEach((p) =>
+      //     groups.approved.push({
+      //       ...base,
+      //       id: cardId(`schedule-${p.proposal_id}`),
+      //       cardType: 'schedule',
+      //       statusLabel: 'New schedule proposed',
+      //       proposalId: p.proposal_id,
+      //       scheduledAt: p.scheduled_at,
+      //       reason: p.reason || '',
+      //     })
+      //   );
       my(paymentRequests)
         .filter((p) => p.status === 'pending')
         .forEach((p) =>
-          groups.ongoing.push({
+          // The `approved` group is Active > Quotations on both apps (the answer-needed cards);
+          // the repair's own tracking card goes to `ongoing` below.
+          groups.approved.push({
             ...base,
             id: cardId(`payment-${p.payment_request_id}`),
             cardType: 'payment',
-            statusLabel: 'Additional payment requested',
+            statusLabel: 'In progress',
             paymentRequestId: p.payment_request_id,
             paymentAmount: Number(p.amount || 0),
             paymentReason: p.reason || '',
@@ -347,7 +443,7 @@ const getTracking = asyncHandler(async (req, res) => {
         ...base,
         id: cardId('timeline'),
         cardType: 'timeline',
-        statusLabel: row.request_status,
+        statusLabel: 'In progress',
         total: quoteTotal + approvedExtras,
         timeline,
       });
@@ -376,17 +472,27 @@ const getTracking = asyncHandler(async (req, res) => {
       return;
     }
 
-    if (row.request_status === 'Declined' || row.request_status === 'Rejected') {
-      const declinedBy = recipients.find((r) => r.status === 'declined');
+    // Closed tab: a quotation the customer declined, a request the provider declined, or a request
+    // that was cancelled. `closedBy` / `closedAction` let the app word the card ("You declined the
+    // quotation from X", "X declined this request", ...).
+    if (['Declined', 'Rejected', 'Cancelled'].includes(row.request_status)) {
+      const declinedRecipient = recipients.find((r) => r.status === 'declined');
+      const cancelled = row.request_status === 'Cancelled';
+      // There is no provider-side cancel yet, so a cancelled request is treated as the customer's.
+      const byCustomer = cancelled || declinedRecipient?.declined_reason === CUSTOMER_DECLINED_QUOTATION_REASON;
       groups.declined.push({
         ...base,
         id: cardId('declined'),
         cardType: 'declined',
-        statusLabel: 'Declined',
-        reason: declinedBy?.declined_reason || null,
+        statusLabel: cancelled ? 'Cancelled' : 'Declined',
+        closedBy: byCustomer ? 'customer' : 'provider',
+        closedAction: cancelled ? 'cancelled' : 'declined',
+        // The provider's own reason; the customer's quotation decline has no reason to show.
+        reason: byCustomer ? null : declinedRecipient?.declined_reason || null,
       });
+      return;
     }
-    // 'Resolved' (fixed via AI) and 'Cancelled' are history, not tracking cards.
+    // 'Resolved' (fixed via AI) is history, not a tracking card.
   });
 
   res.json(groups);
@@ -454,8 +560,8 @@ const answerPaymentRequest = (answer) =>
 
 // POST /api/service-requests/:requestId/quotation/respond  body: { approve }
 // approve: the request is booked with that provider (ERD: "Accepted by").
-// decline: that quote is refused; the request stays Pending so the customer can
-// pick another provider.
+// decline: the quotation is refused and the request is closed (it moves to the customer's Closed tab,
+// closedBy 'customer').
 const respondToQuotation = asyncHandler(async (req, res) => {
   const row = await getOwnedRequest(req);
   const approve = Boolean(req.body.approve);
@@ -480,9 +586,10 @@ const respondToQuotation = asyncHandler(async (req, res) => {
   } else {
     await Request.updateRecipient(row.request_id, quoted.provider_id, {
       status: 'declined',
-      declined_reason: 'The customer declined the quotation',
+      declined_reason: CUSTOMER_DECLINED_QUOTATION_REASON,
       responded_at: new Date().toISOString(),
     });
+    await Request.update(row.request_number, { request_status: 'Declined' });
     await Workflow.notify({
       userId: quoted.provider_id,
       type: 'quotation_declined',
@@ -539,6 +646,10 @@ const payForRequest = asyncHandler(async (req, res) => {
   const stage = ['initial', 'final', 'additional'].includes(req.body.stage) ? req.body.stage : 'final';
   if (!Number.isFinite(amount) || amount <= 0) throw new ApiError(400, 'Enter a valid amount');
   if (!PAYMENT_METHODS.includes(method)) throw new ApiError(400, 'Choose a payment method');
+  // The amount is decided by the server (quotation + service fee, 20% initial, payments so far), never by the app.
+  const { due } = await computePaymentDue(row);
+  if (!(due[stage] > 0)) throw new ApiError(409, 'Nothing is due for this payment');
+  if (Math.abs(amount - due[stage]) > 0.01) throw new ApiError(400, `The amount due is ${peso(due[stage])}`);
 
   // ---- Cash, or no PayMongo key (dev mode): record the payment straight away. ----
   // Cash is handed to the provider in person, so there is no checkout to confirm.
@@ -636,44 +747,10 @@ const getPaymentStatus = asyncHandler(async (req, res) => {
 // The web Payment screen reads the amount from here instead of trusting router
 // state, so it cannot be changed from the browser. `initial` is the 20% fee due
 // after approving a quotation (matches the note on MyRequestDetails.jsx).
-const INITIAL_FEE_RATE = 0.2;
 const getPaymentDue = asyncHandler(async (req, res) => {
   const row = await getOwnedRequest(req);
-  const [recipients, quotations, paymentRequests, payments] = await Promise.all([
-    Request.listRecipients(row.request_id),
-    Request.listQuotations(row.request_id),
-    Workflow.listPaymentRequests([row.request_id]),
-    Workflow.listPayments([row.request_id]),
-  ]);
-
-  const providerId = pickProviderId(row, recipients);
-  const quote = quotations.find((q) => q.provider_id === providerId) || quotations[0] || null;
-  const quoteTotal = quote ? Number(quote.labor_cost || 0) + Number(quote.parts_cost || 0) : 0;
-  const approvedExtras = paymentRequests
-    .filter((p) => p.status === 'approved')
-    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
-  const paidFor = (stage) =>
-    payments
-      .filter((p) => p.status === 'paid' && p.stage === stage)
-      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
-
-  const total = quoteTotal + approvedExtras;
-  const paid = payments
-    .filter((p) => p.status === 'paid')
-    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
-  const round2 = (n) => Math.round(n * 100) / 100;
-
-  res.json({
-    total: round2(total),
-    paid: round2(paid),
-    due: {
-      initial: round2(Math.max(0, quoteTotal * INITIAL_FEE_RATE - paidFor('initial'))),
-      additional: round2(Math.max(0, approvedExtras - paidFor('additional'))),
-      // Whatever is still unpaid once the job is done (the initial fee and any
-      // additional payments already made count towards it).
-      final: round2(Math.max(0, total - paid)),
-    },
-  });
+  const result = await computePaymentDue(row);
+  res.json({ ...result, initialFeePercent: Math.round(INITIAL_FEE_RATE * 10000) / 100 });
 });
 
 // GET /api/service-requests/history?type=all|repair|transactions -> { items: [...] }
@@ -916,6 +993,7 @@ const sendQuotation = asyncHandler(async (req, res) => {
     provider_id: req.user.user_id,
     labor_cost: labor,
     parts_cost: parts,
+    service_fee: serviceFeeFor(labor, parts), // saved now, so a later rate change never alters this quotation
     remarks: String(req.body.remarks || '').trim() || null,
   });
   await Request.updateRecipient(row.request_id, req.user.user_id, {
@@ -925,7 +1003,7 @@ const sendQuotation = asyncHandler(async (req, res) => {
   await Workflow.notify({
     userId: row.customer_id,
     type: 'quotation_received',
-    message: `You received a quotation for ${refOf(row)}: ${peso(labor + parts)}.`,
+    message: `You received a quotation for ${refOf(row)}: ${peso(quote.total ?? labor + parts + serviceFeeFor(labor, parts))}.`,
     requestId: row.request_id,
   });
   res.status(201).json({ quotation: { id: quote.quotation_id, labor, parts, total: labor + parts } });
@@ -978,7 +1056,8 @@ const requestAdditionalPayment = asyncHandler(async (req, res) => {
 const updateJobProgress = asyncHandler(async (req, res) => {
   const { row } = await getProviderRequest(req);
   const step = String(req.body.step || '').trim();
-  if (!JOB_STAGES.includes(step)) throw new ApiError(400, `Stage must be one of: ${JOB_STAGES.join(', ')}`);
+  const allowedStages = stagesFor(row); // Shop-based vs Home-based steps
+  if (!allowedStages.includes(step)) throw new ApiError(400, `Stage must be one of: ${allowedStages.join(', ')}`);
 
   await Workflow.addProgressUpdate({
     request_id: row.request_id,
@@ -1214,7 +1293,10 @@ const getEarnings = asyncHandler(async (req, res) => {
         .filter((p) => p.status === 'approved')
         .reduce((sum, p) => sum + Number(p.amount || 0), 0);
     const paidRows = paymentsFor(row.request_id).filter((p) => p.status === 'paid');
-    const paid = paidRows.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    // The platform service fee is ServEase's, not the provider's: take each payment's fee portion out.
+    const feeOf = feeSplit(quote, paidRows);
+    const netOf = (p) => Number(p.amount || 0) - (feeOf.get(p.payment_id) || 0);
+    const paid = paidRows.reduce((sum, p) => sum + netOf(p), 0);
     pendingPayment += Math.max(0, due - paid);
     paidRows.forEach((p) =>
       transactions.push({
@@ -1222,7 +1304,7 @@ const getEarnings = asyncHandler(async (req, res) => {
         requestNumber: refOf(row),
         customerName: customerMap[row.customer_id]?.name || 'Customer',
         date: p.created_at,
-        amount: Number(p.amount),
+        amount: netOf(p),
       })
     );
   });
@@ -1287,10 +1369,24 @@ const toMessageDto = (m, providerIdSet) => ({
   createdAt: m.created_at,
 });
 
+// The status the chat's service request indicator shows, matching the customer's Track tabs:
+// Pending (sent / quotation stage) -> Active (approved, in progress, or done but not yet paid) ->
+// Completed (done and paid) | Closed (declined / cancelled).
+const chatStatusFor = (row, payments) => {
+  if (['Declined', 'Rejected', 'Cancelled'].includes(row.request_status)) return 'Closed';
+  if (row.request_status === 'Completed') {
+    const paidFinal = payments.some((p) => p.request_id === row.request_id && p.status === 'paid' && p.stage === 'final');
+    return paidFinal ? 'Completed' : 'Active';
+  }
+  if (['Approved', 'In Progress'].includes(row.request_status)) return 'Active';
+  return 'Pending';
+};
+
 // GET /api/conversations
 const listConversations = asyncHandler(async (req, res) => {
   const entries = await conversationsFor(req.user.user_id);
   const messages = await Workflow.listMessagesForRequests(entries.map(({ row }) => row.request_id));
+  const payments = await Workflow.listPayments(entries.map(({ row }) => row.request_id));
   const latestByRequest = {};
   messages.forEach((m) => {
     latestByRequest[m.request_id] = m; // ordered by created_at — last one wins
@@ -1310,6 +1406,9 @@ const listConversations = asyncHandler(async (req, res) => {
       lastMessage: latest ? latest.body : '',
       hasUnread: Boolean(unread && latest.sender_id !== req.user.user_id),
       jobTitle: row.category,
+      // Service request indicator on each thread: "Request #SR-0007 · Active".
+      requestNumber: refOf(row),
+      requestStatus: chatStatusFor(row, payments),
       isOnline: false, // no presence system yet
     });
   }
@@ -1335,7 +1434,12 @@ const listMessages = asyncHandler(async (req, res) => {
 
   const recipients = await Request.listRecipients(row.request_id);
   const providerIdSet = new Set(recipients.map((r) => r.provider_id));
-  res.json({ messages: messages.map((m) => toMessageDto(m, providerIdSet)) });
+  const payments = await Workflow.listPayments([row.request_id]);
+  res.json({
+    // The thread's service request, so the chat header can show the indicator wherever it was opened from.
+    conversation: { id: refOf(row), requestNumber: refOf(row), status: chatStatusFor(row, payments), jobTitle: row.category },
+    messages: messages.map((m) => toMessageDto(m, providerIdSet)),
+  });
 });
 
 // POST /api/conversations/:id/messages  { text }

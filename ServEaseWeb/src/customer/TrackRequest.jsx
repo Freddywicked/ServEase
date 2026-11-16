@@ -94,12 +94,6 @@ const categoryKeyOf = (text) => {
 const pickCategory = (card) =>
   card.serviceCategory ?? card.category ?? card.categoryName ?? card.category_name ?? '';
 
-const TIMELINE_LABELS = [
-  'Request received',
-  'Quotation approved',
-  'Service Provider is on the way',
-  'Completed',
-];
 const PLACEHOLDER_TIME = 'MM/DD/YY 00:00 AM';
 
 // ISO timestamp -> "06/27/26 10:00 AM" (falls back to the placeholder when empty).
@@ -112,8 +106,10 @@ const formatDateTime = (iso) => {
   return `${date} ${time}`;
 };
 
-// The backend timeline is a list of { label, timestamp, description, done } using the
-// provider's job stages; the design shows its own four labels, matched by position.
+// The backend timeline is a list of { label, timestamp, description, subtext?, done } and already
+// matches the request's service location type (Shop-based: Assessing / Repairing / Quality Checking /
+// Completed; Home-based: Request received / Quotation approved / Service Provider is on the way /
+// Completed), so the labels are shown as sent.
 // Indicator flow (see Figma):
 //  - a step stays grey ('pending') until the service provider updates it, then it is blue
 //    with a check ('done');
@@ -125,17 +121,18 @@ const mapTimeline = (steps, isPaid) =>
     const isLast = i === steps.length - 1;
     if (isLast) {
       if (s.done && isPaid) {
-        return { label: TIMELINE_LABELS[i] || s.label, time: s.timestamp ? formatDateTime(s.timestamp) : '', state: 'done' };
+        return { label: s.label, time: s.timestamp ? formatDateTime(s.timestamp) : '', state: 'done' };
       }
       return {
-        label: TIMELINE_LABELS[i] || s.label,
+        label: s.label,
         time: s.done ? 'Payment Pending' : '',
         state: 'completed',
       };
     }
     return {
-      label: TIMELINE_LABELS[i] || s.label,
-      time: s.done && s.timestamp ? formatDateTime(s.timestamp) : '',
+      label: s.label,
+      // `subtext` is a note shown instead of the date (e.g. "Service provider is now heading to your door step").
+      time: s.done && s.subtext ? s.subtext : s.done && s.timestamp ? formatDateTime(s.timestamp) : '',
       state: s.done ? 'done' : 'pending',
     };
   });
@@ -160,8 +157,10 @@ const mapCard = (tab) => (card) => {
         quotation: {
           reason: card.notes || '',
           items: [
+            // Labor, Parts (0.00 when the provider set no price) and the platform Service Fee.
             { label: 'Labor Cost', amount: card.laborCost },
-            ...(Number(card.partsCost) > 0 ? [{ label: 'Parts/Items', amount: card.partsCost }] : []),
+            { label: 'Parts Cost', amount: card.partsCost ?? 0 },
+            { label: 'Service Fee', amount: card.serviceFee ?? 0 },
           ],
           total: card.total,
         },
@@ -220,6 +219,9 @@ const mapCard = (tab) => (card) => {
         kind: 'summary',
         badge: card.statusLabel || 'Declined',
         declinedReason: card.reason || null,
+        // Who closed it and how: the customer declined the quotation / cancelled, or the provider did.
+        closedBy: card.closedBy || 'provider',
+        closedAction: card.closedAction || 'declined',
       };
     case 'diagnosis':
     default:
@@ -487,11 +489,19 @@ function SummaryCard({ request, onFindProvider }) {
       {declined ? (
         <>
           <p className="m-0 mt-[13px] font-[Inter] text-[13px] leading-[16px] text-[#484040]">
-            Declined by the service provider
+            {request.closedBy === 'customer'
+              ? request.closedAction === 'cancelled'
+                ? 'Cancelled by you'
+                : 'You declined the quotation'
+              : request.closedAction === 'cancelled'
+                ? 'Cancelled by the service provider'
+                : 'Declined by the service provider'}
           </p>
-          <p className="m-0 mt-2 font-[Inter] text-[20px] font-bold leading-[24px] text-[#484040]">
-            {request.declinedReason || 'No reason given.'}
-          </p>
+          {(request.declinedReason || request.closedBy !== 'customer') && (
+            <p className="m-0 mt-2 font-[Inter] text-[20px] font-bold leading-[24px] text-[#484040]">
+              {request.declinedReason || 'No reason given.'}
+            </p>
+          )}
           <div className="mt-3 flex justify-end">
             <OutlineButton onClick={onFindProvider}>Find Service Provider</OutlineButton>
           </div>

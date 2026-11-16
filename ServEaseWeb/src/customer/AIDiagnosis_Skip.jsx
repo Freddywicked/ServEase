@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
+import ExitRequestControl from '../components/ExitRequestControl.jsx';
 import { getDraftRequestId, skipAiDiagnosis } from '../api/client';
 
 // Same step progress visual as CreateServiceRequest.jsx — this screen is step 2 of 4.
@@ -57,7 +58,8 @@ export default function AIDiagnosis_Skip() {
 
   return (
     <CustomerSidebar>
-      <div className="box-border px-4 py-6 sm:px-9">
+      <div className="relative box-border px-4 py-6 sm:px-9">
+        <ExitRequestControl requestId={requestId} />
         <StepProgress activeStep={2} />
 
         <h1 className="m-0 mb-4 font-[Quicksand] text-[32px] font-bold text-[#005FCA] sm:text-[40px] lg:text-[48px]">

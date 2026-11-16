@@ -10,30 +10,37 @@ import { getServiceRequest, respondToQuotation } from '../api/client';
    -------------------------------------------------------------------------------------
    Load:  GET /api/service-requests/:requestId -> { request }
           request.providers[] carries each recipient; the one with status 'quoted'
-          holds quote: { labor, parts, notes } (see toCustomerDto in the backend).
+          holds quote: { labor, parts, serviceFee, total, initialFeePercent, initialAmount, notes }
+          (see toCustomerDto / utils/pricing.js in the backend).
    Answer: POST /api/service-requests/:requestId/quotation/respond  body: { approve }
-          approve -> request booked with that provider, then the 20% initial fee is
-          paid on the Payment screen (the exact amount is re-computed server-side).
+          approve -> request booked with that provider, then the initial fee (quote.initialAmount,
+          quote.initialFeePercent of the total) is paid on the Payment screen; the server
+          re-computes and enforces the exact amount.
+          decline -> the quotation is declined and the request moves to the Closed tab.
    ===================================================================================== */
 
 
-const INITIAL_FEE_RATE = 0.2; // initial fee = 20% of the quotation total
 
 // The request DTO (toCustomerDto) carries providers: [{ userId, name, status, quote }].
 // The quotation being reviewed belongs to the provider whose status is 'quoted'.
 const toQuotationView = (request) => {
   const quoted = (request.providers || []).find((p) => p.status === 'quoted' && p.quote);
   if (!quoted) return null;
-  const { labor, parts, notes } = quoted.quote;
+  const { labor, parts, serviceFee, total, initialFeePercent, initialAmount, notes } = quoted.quote;
   return {
     providerName: quoted.name,
     quotation: {
       reason: notes || '',
+      // Labor, Parts (0.00 when the provider set no price) and the platform Service Fee, in this order.
       items: [
         { label: 'Labor', amount: labor },
-        ...(Number(parts) > 0 ? [{ label: 'Parts/Items', amount: parts }] : []),
+        { label: 'Parts', amount: parts ?? 0 },
+        { label: 'Service Fee', amount: serviceFee ?? 0 },
       ],
-      total: Number(labor || 0) + Number(parts || 0),
+      total: Number(total ?? Number(labor || 0) + Number(parts || 0) + Number(serviceFee || 0)),
+      // The backend decides the initial payment; nothing is calculated or hard-coded here.
+      initialFeePercent: initialFeePercent ?? null,
+      initialAmount: initialAmount ?? null,
     },
   };
 };
@@ -105,7 +112,7 @@ function Modal({ onClose, titleId, widthClass, children }) {
   );
 }
 
-function ApproveModal({ onClose, onProceed }) {
+function ApproveModal({ onClose, onProceed, percent }) {
   return (
     <Modal onClose={onClose} titleId="approve-title" widthClass="max-w-[344px]">
       <div className="flex flex-col items-center px-8 pb-6 pt-9 text-center">
@@ -116,7 +123,8 @@ function ApproveModal({ onClose, onProceed }) {
           Service Request Approved
         </h2>
         <p className="m-0 mt-3 font-[Inter] text-[12px] leading-[18px] text-[#5B5959]">
-          You are required to pay the initial fee which is 20% of the total service repair cost.
+          You are required to pay the initial fee which is {percent != null ? `${percent}% of` : 'a part of'} the total
+          service repair cost.
         </p>
         <SmallButton className="mt-5" onClick={onProceed}>
           Proceed to Payment
@@ -204,10 +212,9 @@ export default function MyRequestDetails() {
   };
 
   const handleProceedToPayment = () => {
-    const initialFee = Math.round(request.quotation.total * INITIAL_FEE_RATE * 100) / 100;
     setModal(null);
     navigate(`/customer/requests/${request.id}/payment`, {
-      state: { requestId: request.id, amount: initialFee, paymentType: 'initial' },
+      state: { requestId: request.id, amount: request.quotation.initialAmount, paymentType: 'initial' },
     });
   };
 
@@ -313,7 +320,8 @@ export default function MyRequestDetails() {
 
             <p className="m-0 mt-4 max-w-[790px] font-[Inter] text-[13px] leading-[22px] text-[#5B5959]">
               Note: If you accepted the quotation, you are required to pay the initial fee which is
-              the 20% of the total service repair cost.
+              {quotation.initialFeePercent != null ? ` the ${quotation.initialFeePercent}% of` : ' part of'} the total service
+              repair cost.
             </p>
 
             <div className="mt-5 flex justify-end gap-3">
@@ -326,7 +334,11 @@ export default function MyRequestDetails() {
       </div>
 
       {modal === 'approve' && (
-        <ApproveModal onClose={() => navigate('/customer/requests')} onProceed={handleProceedToPayment} />
+        <ApproveModal
+          onClose={() => navigate('/customer/requests')}
+          onProceed={handleProceedToPayment}
+          percent={request?.quotation?.initialFeePercent ?? null}
+        />
       )}
       {modal === 'decline' && (
         <DeclineModal

@@ -55,6 +55,7 @@ const MessageServiceProvider = ({ navigation }) => {
             contactName: conversation.name,
             jobTitle: conversation.jobTitle,
             isOnline: conversation.isOnline,
+            requestStatus: conversation.requestStatus,
         });
     };
 
@@ -89,6 +90,12 @@ const MessageServiceProvider = ({ navigation }) => {
                             )}
                             <View style={styles.conversationTextWrap}>
                                 <Text style={styles.contactName}>{conversation.name}</Text>
+                                {!!conversation.requestNumber && (
+                    <Text style={styles.requestTag} numberOfLines={1}>
+                        Request #{conversation.requestNumber}
+                        {conversation.requestStatus ? ` · ${conversation.requestStatus}` : ''}
+                    </Text>
+                )}
                                 <Text style={styles.lastMessage} numberOfLines={1}>
                                     {conversation.lastMessage}
                                 </Text>
@@ -144,6 +151,12 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: COLORS.ink900,
         marginBottom: 3,
+    },
+    requestTag: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: COLORS.primary,
+        marginTop: 2,
     },
     lastMessage: {
         fontSize: 12,

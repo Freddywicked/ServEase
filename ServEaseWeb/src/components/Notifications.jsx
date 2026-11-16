@@ -5,9 +5,14 @@ import { openChat } from './MessagingWidget';
 import { getNotifications, markNotificationRead } from '../api/client';
 
 /* =====================================================================================
-   NOTIFICATIONS — bell button + "Notifications" popup (customer and provider headers)
+   NOTIFICATIONS — bell button + unread badge + "Notifications" popup (customer, provider, admin headers)
    -------------------------------------------------------------------------------------
-   Used by CustomerSidebar (viewer="customer") and ServiceProviderSidebar (viewer="provider").
+   Used by CustomerSidebar (viewer="customer"), ServiceProviderSidebar (viewer="provider") and
+   AdminSidebar (viewer="admin").
+   The red number on the bell is the count of UNREAD notifications for that viewer only (99+ above 99).
+   Each viewer asks the backend for its own role's notifications (GET /api/notifications?role=...), so a
+   customer notification never counts on the provider or admin bell. It refreshes every 30 s, when the
+   tab regains focus, and when the popup opens; opening a notification marks it read and the number drops.
    The bell is hidden by the sidebars while the user is on their own dashboard; the dashboard
    shows the same notifications inside its "Notifications" box through `useNotifications`
    (exported below), so loading and click-routing stay in this one file.
@@ -76,6 +81,12 @@ const ROUTES_BY_VIEWER = {
     payment_confirmed: () => '/customer/history?tab=transactions',
     rate_provider: (n) => (n.requestId ? `/customer/requests/${n.requestId}/review` : '/customer/history'),
   },
+  admin: {
+    provider_application: () => '/admin/users',
+    provider_application_submitted: () => '/admin/users',
+    new_provider_application: () => '/admin/users',
+    new_user: () => '/admin/users',
+  },
   provider: {
     new_request: (n) => (n.requestId ? `/serviceprovider/requests/${n.requestId}` : '/serviceprovider/requests'),
     quotation_accepted: () => '/serviceprovider/requests',
@@ -115,13 +126,19 @@ const getRoute = (notification, viewer) =>
 
 /* ------------------------------ DATA LAYER (swap for the backend) ------------------------------ */
 
-// Live data: GET /api/notifications returns the logged-in user's notifications
-// (newest first); the same list serves both viewers — the `viewer` only decides
-// where a click navigates. `readAt` (ISO or null) becomes the local `read` flag.
+// Live data: GET /api/notifications?role=<viewer> returns the logged-in user's notifications that are
+// addressed to that role (newest first). `readAt` (ISO or null) becomes the local `read` flag.
+// Safety net: if the backend tags a notification with a role (`role` / `recipientRole`) that is not this
+// viewer's, it is dropped here too, so it can never light up the wrong bell.
 const notificationsService = {
-  async list() {
-    const data = await getNotifications();
-    return (data?.notifications ?? []).map((n) => ({ ...n, read: Boolean(n.readAt) }));
+  async list(viewer) {
+    const data = await getNotifications(viewer);
+    return (data?.notifications ?? [])
+      .filter((n) => {
+        const role = n.role ?? n.recipientRole;
+        return !role || role === viewer;
+      })
+      .map((n) => ({ ...n, read: Boolean(n.readAt) }));
   },
 
   async markRead(id) {
@@ -197,14 +214,18 @@ export function useNotifications(viewer = 'customer') {
     else console.warn(`No destination for notification type "${notification.type}" (see Notifications.jsx)`);
   };
 
-  return { notifications, reload, openNotification };
+  // Number shown on the bell: unread notifications of this viewer only.
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
+  return { notifications, unreadCount, reload, openNotification };
 }
 
 export { timeAgo };
 
 export default function Notifications({ viewer = 'customer' }) {
   const [open, setOpen] = useState(false);
-  const { notifications, reload, openNotification } = useNotifications(viewer);
+  const { notifications, unreadCount, reload, openNotification } = useNotifications(viewer);
+  const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);
   const containerRef = useRef(null);
 
   // Reload every time the popup is opened; close on outside click / Escape.
@@ -235,12 +256,20 @@ export default function Notifications({ viewer = 'customer' }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-label="Notifications"
+        aria-label={unreadCount > 0 ? `Notifications, ${badgeLabel} unread` : 'Notifications'}
         aria-haspopup="true"
         aria-expanded={open}
-        className="flex cursor-pointer items-center justify-center border-none bg-transparent p-0"
+        className="relative flex cursor-pointer items-center justify-center border-none bg-transparent p-0"
       >
         <img src={bellIcon} alt="" className="h-[27px] w-[27px]" />
+        {unreadCount > 0 && (
+          <span
+            aria-hidden="true"
+            className="absolute -right-[7px] -top-[6px] box-border flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[#D92D20] px-[3px] font-[Inter] text-[10px] font-bold leading-none text-white"
+          >
+            {badgeLabel}
+          </span>
+        )}
       </button>
 
       {open && (

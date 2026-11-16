@@ -11,8 +11,8 @@ import dashboardIconBlack from '../assets/icon_dashboard_black.png';
 import userIconWhite from '../assets/icon_users_white.png';
 import userIconBlack from '../assets/icon_users.png';
 import hamburgerIcon from '../assets/icon_hamburger.png';
-import bellIcon from '../assets/icon_ringbell.png';
 import dropdownIcon from '../assets/icon_dropdown.png';
+import Notifications from './Notifications';
 
 const EXPANDED_WIDTH = 229;
 const COLLAPSED_WIDTH = 84;
@@ -149,12 +149,6 @@ export default function AdminSidebar({ children, initials }) {
     navigate('/login', { replace: true });
   };
 
-  const handleNotificationsClick = () => {
-    // TODO: open a notifications panel once the backend notifications endpoint exists
-    // (e.g. GET /api/admin/notifications).
-    console.log('Notifications clicked');
-  };
-
   // Only admin accounts may see the admin pages; everyone else goes to their own dashboard.
   if (user && user.role !== 'admin') return <Navigate to="/customer/dashboard" replace />;
 
@@ -169,18 +163,9 @@ export default function AdminSidebar({ children, initials }) {
           />
         </div>
 
-        {/* Upper right: notification bell (hidden on the dashboard), user avatar, name + role, dropdown */}
+        {/* Upper right: notification bell with unread badge, user avatar, name + role, dropdown */}
         <div className="mr-4 flex flex-none items-center gap-4 sm:mr-[46px] sm:gap-[33px]">
-          {!dashboardActive && (
-            <button
-              type="button"
-              onClick={handleNotificationsClick}
-              aria-label="Notifications"
-              className="flex cursor-pointer items-center justify-center border-none bg-transparent p-0"
-            >
-              <img src={bellIcon} alt="" className="h-[27px] w-[27px]" />
-            </button>
-          )}
+          <Notifications viewer="admin" />
 
           <div ref={menuRef} className="relative">
             <button
