@@ -12,7 +12,8 @@ import { getNotifications, markNotificationRead } from '../api/client';
    The red number on the bell is the count of UNREAD notifications for that viewer only (99+ above 99).
    Each viewer asks the backend for its own role's notifications (GET /api/notifications?role=...), so a
    customer notification never counts on the provider or admin bell. It refreshes every 30 s, when the
-   tab regains focus, and when the popup opens; opening a notification marks it read and the number drops.
+   tab regains focus, and when the popup opens. Clicking the bell marks everything in the popup as read,
+   so the number disappears; clicking a single notification also opens its destination.
    The bell is hidden by the sidebars while the user is on their own dashboard; the dashboard
    shows the same notifications inside its "Notifications" box through `useNotifications`
    (exported below), so loading and click-routing stay in this one file.
@@ -214,17 +215,28 @@ export function useNotifications(viewer = 'customer') {
     else console.warn(`No destination for notification type "${notification.type}" (see Notifications.jsx)`);
   };
 
+  // Marks a list of notifications read: the badge drops right away, then the backend is told.
+  const markRead = useCallback((items) => {
+    const ids = new Set(items.map((n) => n.id));
+    setNotifications((prev) => prev.map((n) => (ids.has(n.id) ? { ...n, read: true } : n)));
+    items.forEach((n) =>
+      notificationsService
+        .markRead(n.id)
+        .catch((err) => console.error('Failed to mark notification as read', err))
+    );
+  }, []);
+
   // Number shown on the bell: unread notifications of this viewer only.
   const unreadCount = notifications.filter((n) => !n.read).length;
 
-  return { notifications, unreadCount, reload, openNotification };
+  return { notifications, unreadCount, reload, openNotification, markRead };
 }
 
 export { timeAgo };
 
 export default function Notifications({ viewer = 'customer' }) {
   const [open, setOpen] = useState(false);
-  const { notifications, unreadCount, reload, openNotification } = useNotifications(viewer);
+  const { notifications, unreadCount, reload, openNotification, markRead } = useNotifications(viewer);
   const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);
   const containerRef = useRef(null);
 
@@ -245,6 +257,14 @@ export default function Notifications({ viewer = 'customer' }) {
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [open, reload]);
+
+  // Opening the bell means the customer has seen what is in the popup: everything that is unread
+  // (including anything that arrives while it stays open) is marked read, so the red number goes away.
+  useEffect(() => {
+    if (!open) return;
+    const unread = notifications.filter((n) => !n.read);
+    if (unread.length > 0) markRead(unread);
+  }, [open, notifications, markRead]);
 
   const handleOpenNotification = (notification) => {
     setOpen(false);

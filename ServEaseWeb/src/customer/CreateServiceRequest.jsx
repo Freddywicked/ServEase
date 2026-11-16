@@ -30,6 +30,11 @@ const toOption = (item) =>
 const FALLBACK_UPLOAD_LIMITS = { maxImages: 4, maxVideos: 1, maxImageMb: 10, maxVideoMb: 50 };
 const BYTES_PER_MB = 1024 * 1024;
 
+// Appointments can only be booked inside these hours. The backend sends them as `appointmentHours`
+// ({ start: '9:00 AM', end: '4:00 PM' } in GET /service-requests/options); this is only the fallback.
+// Time slots outside the window are never shown, whatever list the backend returns.
+const FALLBACK_APPOINTMENT_HOURS = { startMinutes: 9 * 60, endMinutes: 16 * 60 };
+
 // Google Maps JavaScript API key. Add VITE_GOOGLE_MAPS_API_KEY=... to your .env (Maps JavaScript API enabled).
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
@@ -120,7 +125,7 @@ const slotToMinutes = (label) => {
 // day, `loadSlots(date)` asks the backend which of that day's slots are still free (a slot that is
 // already booked is shown disabled). Selecting a date and a time and pressing Confirm hands the chosen
 // appointment back to the parent form.
-function AppointmentModal({ initialDate, timeSlots, loadSlots, onClose, onConfirm }) {
+function AppointmentModal({ initialDate, timeSlots, hours, loadSlots, onClose, onConfirm }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const start = initialDate || today;
@@ -130,7 +135,16 @@ function AppointmentModal({ initialDate, timeSlots, loadSlots, onClose, onConfir
   const [selectedDate, setSelectedDate] = useState(start);
   const [selectedSlot, setSelectedSlot] = useState(null);
 
-  const baseSlots = useMemo(() => timeSlots.map(normalizeSlot), [timeSlots]);
+  // Only slots inside the booking hours (9 AM - 4 PM by default) are offered.
+  const inHours = ({ time }) => {
+    const minutes = slotToMinutes(time);
+    return minutes != null && minutes >= hours.startMinutes && minutes <= hours.endMinutes;
+  };
+  const baseSlots = useMemo(
+    () => timeSlots.map(normalizeSlot).filter(inHours),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [timeSlots, hours.startMinutes, hours.endMinutes]
+  );
   const [slots, setSlots] = useState(baseSlots);
   const [slotsLoading, setSlotsLoading] = useState(false);
 
@@ -144,7 +158,9 @@ function AppointmentModal({ initialDate, timeSlots, loadSlots, onClose, onConfir
     setSlotsLoading(true);
     Promise.resolve(loadSlots ? loadSlots(selectedDate) : null)
       .then((list) => {
-        if (!cancelled) setSlots(Array.isArray(list) && list.length > 0 ? list.map(normalizeSlot) : baseSlots);
+        if (!cancelled) {
+          setSlots(Array.isArray(list) && list.length > 0 ? list.map(normalizeSlot).filter(inHours) : baseSlots);
+        }
       })
       .catch(() => {
         if (!cancelled) setSlots(baseSlots); // availability could not be checked: offer the plain list
@@ -627,6 +643,13 @@ export default function CreateServiceRequest() {
           radiusRange: hasRange ? { min: minKm, max: maxKm } : null,
           defaultMapCenter: hasCenter ? { lat: Number(c.lat), lng: Number(c.lng) } : null,
           uploadLimits: { ...FALLBACK_UPLOAD_LIMITS, ...(data?.uploadLimits || {}) },
+          appointmentHours: (() => {
+            const startMinutes = slotToMinutes(data?.appointmentHours?.start);
+            const endMinutes = slotToMinutes(data?.appointmentHours?.end);
+            return startMinutes != null && endMinutes != null && endMinutes >= startMinutes
+              ? { startMinutes, endMinutes }
+              : FALLBACK_APPOINTMENT_HOURS;
+          })(),
         });
         if (hasRange) {
           setSearchRadiusKm(
@@ -1016,6 +1039,7 @@ export default function CreateServiceRequest() {
         <AppointmentModal
           initialDate={appointment?.date}
           timeSlots={options?.timeSlots ?? []}
+          hours={options?.appointmentHours ?? FALLBACK_APPOINTMENT_HOURS}
           loadSlots={loadSlots}
           onClose={() => setIsCalendarOpen(false)}
           onConfirm={handleConfirmAppointment}
