@@ -10,7 +10,7 @@ const { authenticate } = require('../middleware/auth');
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: 1 }, // one photo, 5 MB, same as the provider documents
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 }, // legacy single-photo endpoint
   fileFilter: (req, file, cb) => {
     if (!file.mimetype.startsWith('image/')) {
       const error = new Error('Only image files are allowed.');
@@ -21,6 +21,37 @@ const upload = multer({
   },
 });
 
+// Request creation accepts the old `photo` field as well as the web app's `photos` / `video`.
+// Multer's global size limit allows videos; the per-image 5 MB rule is checked below.
+const uploadMedia = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024, files: 6 },
+  fileFilter: (req, file, cb) => {
+    const isPhoto = ['photo', 'photos'].includes(file.fieldname) && file.mimetype.startsWith('image/');
+    const isVideo = file.fieldname === 'video' && file.mimetype.startsWith('video/');
+    if (!isPhoto && !isVideo) {
+      const error = new Error('Attach images in photo/photos and a video in video.');
+      error.status = 400;
+      return cb(error);
+    }
+    return cb(null, true);
+  },
+});
+
+const runMediaUpload = (middleware) => (req, res, next) =>
+  middleware(req, res, (err) => {
+    if (err) {
+      err.status = err.status || 400;
+      if (err.code === 'LIMIT_FILE_SIZE') err.message = 'Videos must be 50 MB or smaller.';
+      return next(err);
+    }
+    const files = req.files ? Object.values(req.files).flat() : req.file ? [req.file] : [];
+    if (files.some((file) => file.mimetype.startsWith('image/') && file.size > 5 * 1024 * 1024)) {
+      return next(new ApiError(400, 'Each photo must be 5 MB or smaller.'));
+    }
+    return next();
+  });
+
 // Runs multer and turns its errors into clean 400 responses.
 const uploadPhoto = (req, res, next) =>
   upload.single('photo')(req, res, (err) => {
@@ -29,6 +60,15 @@ const uploadPhoto = (req, res, next) =>
     if (err.code === 'LIMIT_FILE_SIZE') err.message = 'The photo must be 5 MB or smaller.';
     return next(err);
   });
+
+const uploadRequestMedia = runMediaUpload(
+  uploadMedia.fields([
+    { name: 'photo', maxCount: 1 },
+    { name: 'photos', maxCount: 4 },
+    { name: 'video', maxCount: 1 },
+  ])
+);
+const uploadVideo = runMediaUpload(uploadMedia.single('video'));
 
 // Provider endpoints are only for users who have a service provider profile.
 const requireProvider = asyncHandler(async (req, res, next) => {
@@ -43,7 +83,7 @@ const workflow = require('../controllers/workflow_controllers');
 
 // ----- customer: mounted at /api/service-requests -----
 const customer = express.Router();
-customer.post('/', authenticate, uploadPhoto, controller.create);
+customer.post('/', authenticate, uploadRequestMedia, controller.create);
 customer.get('/', authenticate, controller.listMine);
 // Static paths must come before '/:requestId' — 'active'/'tracking' would
 // otherwise be parsed as a request id (and 400 on parseRequestId).
@@ -56,6 +96,7 @@ customer.get('/options', authenticate, controller.listCreateOptions);
 // Mobile create-request flow: the photo and the AI diagnosis happen BEFORE the request
 // row exists (it is created on submit), so these take no :requestId.
 customer.post('/photos', authenticate, uploadPhoto, controller.uploadPhoto);
+customer.post('/videos', authenticate, uploadVideo, controller.uploadVideo);
 customer.post('/diagnose', authenticate, controller.diagnoseDraft);
 customer.get('/:requestId', authenticate, controller.getOne);
 customer.post('/:requestId/ai-diagnosis', authenticate, controller.aiDiagnosis);

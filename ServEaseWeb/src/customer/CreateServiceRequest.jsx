@@ -8,7 +8,7 @@ import {
   isPastSlotToday,
   parseAppointmentHours,
   slotToMinutes,
-} from '../utils/appointmentSlots';
+} from '../../utils/appointmentSlots';
 import ExitRequestControl from '../components/ExitRequestControl.jsx';
 import {
   createServiceRequest,
@@ -34,7 +34,7 @@ const toOption = (item) =>
 
 // Photo / video limits come from the backend (`uploadLimits` in GET /service-requests/options).
 // These values are only a fallback for when the backend does not send them yet.
-const FALLBACK_UPLOAD_LIMITS = { maxImages: 4, maxVideos: 1, maxImageMb: 10, maxVideoMb: 50 };
+const FALLBACK_UPLOAD_LIMITS = { maxImages: 4, maxVideos: 1, maxImageMb: 5, maxVideoMb: 50 };
 const BYTES_PER_MB = 1024 * 1024;
 
 // Google Maps JavaScript API key. Add VITE_GOOGLE_MAPS_API_KEY=... to your .env (Maps JavaScript API enabled).

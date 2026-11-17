@@ -18,7 +18,7 @@ const INITIAL_FEE_RATE = 0.2;
 //   SERVICE_FEE_MODE  = 'fixed' | 'percent'   (default 'fixed')
 //   SERVICE_FEE_VALUE = amount in PHP when fixed, percent when 'percent'   (default 20, the Figma sample)
 // The fee is calculated ONCE, when the provider sends the quotation, and saved in quotations.service_fee
-// (see migrations/quotation_service_fee.sql). Changing the rule later therefore only affects quotations
+// (see migrations/011_quotation_service_fee.sql). Changing the rule later therefore only affects quotations
 // created afterwards. Older rows with no saved fee fall back to the current rule.
 const SERVICE_FEE_MODE = process.env.SERVICE_FEE_MODE === 'percent' ? 'percent' : 'fixed';
 const configuredFee = Number(process.env.SERVICE_FEE_VALUE);

@@ -175,6 +175,17 @@ export const uploadServiceRequestPhoto = (asset) => {
     return request('/service-requests/photos', { method: 'POST', formData, timeoutMs: 60000 }).then(pick('photo'));
 };
 
+// Videos use a separate multipart field and endpoint, but return the same storage-path shape.
+export const uploadServiceRequestVideo = (asset) => {
+    const formData = new FormData();
+    formData.append('video', {
+        uri: asset.uri,
+        name: asset.fileName || `video-${Date.now()}.mp4`,
+        type: asset.type || 'video/mp4',
+    });
+    return request('/service-requests/videos', { method: 'POST', formData, timeoutMs: 120000 }).then(pick('video'));
+};
+
 // Reverse-geocodes on the backend so the Google Maps key never ships inside the app.
 export const reverseGeocode = ({ latitude, longitude }) =>
     request('/location/reverse-geocode', { query: { latitude, longitude } }).then(pick('location'));
@@ -259,6 +270,9 @@ export const createServiceRequest = (draft, extra = {}) =>
             category: draft.categoryKey,
             description: draft.description.trim(),
             photoPath: draft.photoPath,
+            attachmentPaths: (draft.mediaItems ?? [])
+                .filter((item) => item.path && item.status !== 'uploading')
+                .map((item) => ({ path: item.path, type: item.type })),
             latitude: draft.location?.latitude ?? null,
             longitude: draft.location?.longitude ?? null,
             address: draft.location?.address ?? null,

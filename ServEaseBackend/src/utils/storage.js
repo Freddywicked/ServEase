@@ -1,6 +1,7 @@
 // Works with either export style from config/supabase.js:
 //   module.exports = supabase         or         module.exports = { supabase }
 const supabaseModule = require('../config/supabase');
+const { randomUUID } = require('node:crypto');
 const supabase = supabaseModule.supabase || supabaseModule;
 
 // PRIVATE buckets: provider IDs/selfies, customers' repair photos, profile photos. No public URLs.
@@ -38,7 +39,7 @@ const uploadFile = async (bucket, userId, kind, file) => {
   await ensureBucket(bucket);
 
   const ext = (file.originalname.split('.').pop() || 'bin').toLowerCase();
-  const path = `${userId}/${kind}-${Date.now()}.${ext}`;
+  const path = `${userId}/${kind}-${Date.now()}-${randomUUID()}.${ext}`;
 
   const { error } = await supabase.storage
     .from(bucket)
@@ -51,8 +52,9 @@ const uploadFile = async (bucket, userId, kind, file) => {
 // Same behaviour as before.
 const uploadProviderFile = (userId, kind, file) => uploadFile(BUCKET, userId, kind, file);
 
-// Customer's photo for a service request. The app stores the returned path on the request.
-const uploadServiceRequestPhoto = (userId, file) => uploadFile(SERVICE_REQUEST_BUCKET, userId, 'photo', file);
+// Customer's photo or video for a service request. The app stores the returned path on the request.
+const uploadServiceRequestPhoto = (userId, file) =>
+  uploadFile(SERVICE_REQUEST_BUCKET, userId, file.mimetype.startsWith('video/') ? 'video' : 'photo', file);
 
 // Short-lived link for showing a request photo (tracking cards, the provider's request view,
 // the AI diagnosis call). Returns null if there is no path or signing fails.

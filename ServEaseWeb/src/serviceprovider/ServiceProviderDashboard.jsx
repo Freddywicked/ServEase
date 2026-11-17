@@ -7,7 +7,7 @@ import {
   buildSlots,
   isPastSlotToday,
   parseAppointmentHours,
-} from '../utils/appointmentSlots';
+} from '../../utils/appointmentSlots';
 import {
   getProviderAvailability,
   getProviderDashboard,

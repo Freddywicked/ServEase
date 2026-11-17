@@ -238,7 +238,9 @@ const customerView = async (row) => {
 
 // ================= CUSTOMER =================
 
-// POST /api/service-requests  (multipart: category, description, photo?, appointmentDate?, appointmentTime?, latitude?, longitude?)
+// POST /api/service-requests
+// Web multipart: category, description, photos? (repeat, max 4), video? (max 1), appointment fields.
+// Mobile JSON: preferredDate/preferredTime plus attachmentPaths and the legacy photoPath.
 // Creates the request as a draft (request_status 'New'); the customer then continues with the AI step.
 // The mobile app stores the diagnosis under its own field names (see
 // POST /service-requests/diagnose); map them back to the stored jsonb shape.
@@ -296,17 +298,31 @@ const create = asyncHandler(async (req, res) => {
     request_status: resolvedByAi ? 'Resolved' : providerId ? 'Pending' : 'New',
   });
 
-  // Photos live in SERVICE_REQUEST_ATTACHMENT, one row per file (ERD). Multipart uploads
-  // arrive as req.file; the mobile app uploads first (POST /photos) and sends the path.
-  if (req.file) {
-    const path = await Request.uploadPhoto(req.user.user_id, req.file);
-    await Request.addAttachment({ request_id: row.request_id, file_url: path, filename: req.file.originalname });
-  } else if (req.body.photoPath) {
+  // Store every web multipart file and every pre-uploaded mobile attachment. `photoPath` remains
+  // supported for older mobile builds; the set prevents it duplicating the first item in attachmentPaths.
+  const files = req.files ? Object.values(req.files).flat() : req.file ? [req.file] : [];
+  const storedPaths = new Set();
+  const addStoredAttachment = async (path, filename) => {
+    const normalizedPath = String(path || '').trim();
+    if (!normalizedPath || storedPaths.has(normalizedPath)) return;
+    storedPaths.add(normalizedPath);
     await Request.addAttachment({
       request_id: row.request_id,
-      file_url: String(req.body.photoPath),
-      filename: String(req.body.photoPath).split('/').pop() || 'photo',
+      file_url: normalizedPath,
+      filename: filename || normalizedPath.split('/').pop() || 'attachment',
     });
+  };
+
+  for (const file of files) {
+    const path = await Request.uploadPhoto(req.user.user_id, file);
+    await addStoredAttachment(path, file.originalname);
+  }
+
+  const attachmentPaths = Array.isArray(req.body.attachmentPaths) ? [...req.body.attachmentPaths] : [];
+  if (req.body.photoPath) attachmentPaths.push({ path: req.body.photoPath, type: 'photo' });
+  for (const attachment of attachmentPaths) {
+    const path = typeof attachment === 'string' ? attachment : attachment?.path;
+    await addStoredAttachment(path);
   }
 
   // Picked a provider: the request lands in their Incoming Service Requests list,
@@ -818,6 +834,7 @@ const listCreateOptions = (req, res) => {
       defaultKm: DEFAULT_CUSTOMER_RADIUS_KM,
     },
     defaultMapCenter: lat !== null && lng !== null ? { lat, lng } : null,
+    uploadLimits: { maxImages: 4, maxVideos: 1, maxImageMb: 5, maxVideoMb: 50 },
   });
 };
 
@@ -829,6 +846,14 @@ const uploadPhoto = asyncHandler(async (req, res) => {
   if (!req.file) throw new ApiError(400, 'Attach a photo');
   const path = await Request.uploadPhoto(req.user.user_id, req.file);
   res.status(201).json({ photo: { path } });
+});
+
+// POST /api/service-requests/videos (multipart, field "video") -> { video: { path } }
+// Uses the same private bucket and attachment flow as photos, with a 50 MB route limit.
+const uploadVideo = asyncHandler(async (req, res) => {
+  if (!req.file) throw new ApiError(400, 'Attach a video');
+  const path = await Request.uploadPhoto(req.user.user_id, req.file);
+  res.status(201).json({ video: { path } });
 });
 
 // POST /api/service-requests/diagnose  body: { category, description, photoPath?, latitude?, longitude? }
@@ -989,6 +1014,7 @@ module.exports = {
   listTimeSlots,
   listCreateOptions,
   uploadPhoto,
+  uploadVideo,
   diagnoseDraft,
   reverseGeocode,
   radiusMap,
