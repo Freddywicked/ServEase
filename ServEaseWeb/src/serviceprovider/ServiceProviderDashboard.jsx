@@ -3,6 +3,12 @@ import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
 import ServiceProviderSidebar from '../components/ServiceProviderSidebar.jsx';
 import {
+  FALLBACK_APPOINTMENT_HOURS,
+  buildSlots,
+  isPastSlotToday,
+  parseAppointmentHours,
+} from '../utils/appointmentSlots';
+import {
   getProviderAvailability,
   getProviderDashboard,
   me,
@@ -33,14 +39,9 @@ const MONTH_NAMES = [
 const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 const YEAR_RANGE = 6; // years shown before/after the current year in the year dropdown
 
-// The provider's working hours. Structurally this is schedule configuration rather than
-// per-user data, so it's kept as a constant like the nav items above — but it could be
-// swapped for a backend-fetched list (e.g. GET /api/provider/working-hours) if a provider's
-// hours become customizable later.
-const TIME_SLOTS = [
-  '08:00 AM', '09:00 AM', '10:00 AM', '11:00 AM',
-  '01:00 PM', '02:00 PM', '03:00 PM', '04:00 PM',
-];
+// The provider's calendar offers the same time slots as the customer's appointment picker: 9:00 AM to
+// 4:00 PM, one slot per hour (see utils/appointmentSlots.js). The backend can set the hours through
+// `appointmentHours` in GET /api/provider/dashboard.
 
 function toDateKey(date) {
   const y = date.getFullYear();
@@ -155,12 +156,19 @@ function EarningsFigure({ amount, label }) {
 // then a time slot on that date, and can mark that slot unavailable (or, with no slot picked,
 // mark the whole day unavailable). All slot statuses come from the backend per date — nothing
 // about a provider's actual availability is hard-coded here.
-function CalendarModal({ onClose }) {
+function CalendarModal({ hours, onClose }) {
   const today = useMemo(() => new Date(), []);
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [selectedDate, setSelectedDate] = useState(today);
   const [selectedSlot, setSelectedSlot] = useState(null);
+
+  // 09:00 AM ... 04:00 PM, one per hour.
+  const timeSlots = useMemo(
+    () => buildSlots(hours),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [hours.startMinutes, hours.endMinutes, hours.stepMinutes]
+  );
 
   // The provider's saved availability from the backend (GET /api/providers/availability), keyed
   // by date, then by time slot: { '2026-09-09': { '10:00 AM': 'unavailable' } }. Any date/slot
@@ -323,12 +331,14 @@ function CalendarModal({ onClose }) {
         <p className="m-0 mb-2 mt-5 font-[Quicksand] text-[13px] font-bold text-black">Select Time</p>
 
         <div className="grid grid-cols-2 gap-2">
-          {TIME_SLOTS.length === 0 && (
+          {timeSlots.length === 0 && (
             <p className="col-span-2 m-0 text-[12px] text-[#817C7C]">No time slots configured</p>
           )}
-          {TIME_SLOTS.map((slot) => {
+          {timeSlots.map(({ time: slot }) => {
             const status = dayAvailability[slot]; // undefined = available, 'unavailable' = blocked
-            const isUnavailable = status === 'unavailable';
+            // Slots of today that already started can't be blocked any more.
+            const isUnavailable =
+              status === 'unavailable' || isPastSlotToday(slot, selectedDateKey === toDateKey(new Date()));
             const isSelected = slot === selectedSlot;
 
             return (
@@ -378,6 +388,7 @@ export default function ServiceProviderDashboard() {
   const [provider, setProvider] = useState(undefined); // undefined = still loading, null = never applied
   const [loadError, setLoadError] = useState('');
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [appointmentHours, setAppointmentHours] = useState(FALLBACK_APPOINTMENT_HOURS);
 
   // GET /api/provider/dashboard — stat cards, pending requests, active repair, earnings.
   const [stats, setStats] = useState(null); // { activeJobs, thisMonth, rating }
@@ -391,6 +402,7 @@ export default function ServiceProviderDashboard() {
     getProviderDashboard()
       .then((data) => {
         if (cancelled) return;
+        setAppointmentHours(parseAppointmentHours(data?.appointmentHours));
         setStats({
           activeJobs: data?.stats?.activeJobs ?? 0,
           thisMonth: data?.stats?.jobsThisMonth ?? 0,
@@ -510,7 +522,7 @@ export default function ServiceProviderDashboard() {
         </div>
       </div>
 
-      {isCalendarOpen && <CalendarModal onClose={() => setIsCalendarOpen(false)} />}
+      {isCalendarOpen && <CalendarModal hours={appointmentHours} onClose={() => setIsCalendarOpen(false)} />}
     </ServiceProviderSidebar>
   );
 }

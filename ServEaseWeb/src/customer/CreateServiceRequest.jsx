@@ -2,6 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronLeft, ChevronRight, Play, X } from 'lucide-react';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
+import {
+  FALLBACK_APPOINTMENT_HOURS,
+  buildSlots,
+  isPastSlotToday,
+  parseAppointmentHours,
+  slotToMinutes,
+} from '../utils/appointmentSlots';
 import ExitRequestControl from '../components/ExitRequestControl.jsx';
 import {
   createServiceRequest,
@@ -29,11 +36,6 @@ const toOption = (item) =>
 // These values are only a fallback for when the backend does not send them yet.
 const FALLBACK_UPLOAD_LIMITS = { maxImages: 4, maxVideos: 1, maxImageMb: 10, maxVideoMb: 50 };
 const BYTES_PER_MB = 1024 * 1024;
-
-// Appointments can only be booked inside these hours. The backend sends them as `appointmentHours`
-// ({ start: '9:00 AM', end: '4:00 PM' } in GET /service-requests/options); this is only the fallback.
-// Time slots outside the window are never shown, whatever list the backend returns.
-const FALLBACK_APPOINTMENT_HOURS = { startMinutes: 9 * 60, endMinutes: 16 * 60 };
 
 // Google Maps JavaScript API key. Add VITE_GOOGLE_MAPS_API_KEY=... to your .env (Maps JavaScript API enabled).
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
@@ -113,19 +115,11 @@ const normalizeSlot = (slot) =>
         available: slot.available !== false && !slot.booked,
       };
 
-// "9:00 AM" / "4:00 PM" -> minutes since midnight (null when it can't be read).
-const slotToMinutes = (label) => {
-  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(String(label).trim());
-  if (!m) return null;
-  const hours = (Number(m[1]) % 12) + (m[3].toUpperCase() === 'PM' ? 12 : 0);
-  return hours * 60 + Number(m[2]);
-};
-
 // Appointment date/time picker modal. The time slots come from the backend; when the customer picks a
 // day, `loadSlots(date)` asks the backend which of that day's slots are still free (a slot that is
 // already booked is shown disabled). Selecting a date and a time and pressing Confirm hands the chosen
 // appointment back to the parent form.
-function AppointmentModal({ initialDate, timeSlots, hours, loadSlots, onClose, onConfirm }) {
+function AppointmentModal({ initialDate, hours, loadSlots, onClose, onConfirm }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const start = initialDate || today;
@@ -135,15 +129,11 @@ function AppointmentModal({ initialDate, timeSlots, hours, loadSlots, onClose, o
   const [selectedDate, setSelectedDate] = useState(start);
   const [selectedSlot, setSelectedSlot] = useState(null);
 
-  // Only slots inside the booking hours (9 AM - 4 PM by default) are offered.
-  const inHours = ({ time }) => {
-    const minutes = slotToMinutes(time);
-    return minutes != null && minutes >= hours.startMinutes && minutes <= hours.endMinutes;
-  };
+  // Every slot of the booking hours (9 AM - 4 PM, hourly). Always complete, never outside the window.
   const baseSlots = useMemo(
-    () => timeSlots.map(normalizeSlot).filter(inHours),
+    () => buildSlots(hours),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [timeSlots, hours.startMinutes, hours.endMinutes]
+    [hours.startMinutes, hours.endMinutes, hours.stepMinutes]
   );
   const [slots, setSlots] = useState(baseSlots);
   const [slotsLoading, setSlotsLoading] = useState(false);
@@ -158,9 +148,12 @@ function AppointmentModal({ initialDate, timeSlots, hours, loadSlots, onClose, o
     setSlotsLoading(true);
     Promise.resolve(loadSlots ? loadSlots(selectedDate) : null)
       .then((list) => {
-        if (!cancelled) {
-          setSlots(Array.isArray(list) && list.length > 0 ? list.map(normalizeSlot).filter(inHours) : baseSlots);
-        }
+        if (cancelled) return;
+        // The backend says which slots are taken; every other slot of the day stays available.
+        const taken = new Map(
+          (Array.isArray(list) ? list : []).map(normalizeSlot).map((x) => [slotToMinutes(x.time), x.available])
+        );
+        setSlots(baseSlots.map((slot) => ({ ...slot, available: taken.get(slot.minutes) ?? true })));
       })
       .catch(() => {
         if (!cancelled) setSlots(baseSlots); // availability could not be checked: offer the plain list
@@ -175,12 +168,7 @@ function AppointmentModal({ initialDate, timeSlots, hours, loadSlots, onClose, o
   }, [selectedKey]);
 
   // Today's slots that have already started can't be chosen.
-  const isPastSlot = (time) => {
-    if (selectedKey !== toDateKey(new Date())) return false;
-    const minutes = slotToMinutes(time);
-    const now = new Date();
-    return minutes != null && minutes <= now.getHours() * 60 + now.getMinutes();
-  };
+  const isPastSlot = (time) => isPastSlotToday(time, selectedKey === toDateKey(new Date()));
 
   const goToMonth = (offset) => {
     const next = new Date(viewYear, viewMonth + offset, 1);
@@ -643,13 +631,7 @@ export default function CreateServiceRequest() {
           radiusRange: hasRange ? { min: minKm, max: maxKm } : null,
           defaultMapCenter: hasCenter ? { lat: Number(c.lat), lng: Number(c.lng) } : null,
           uploadLimits: { ...FALLBACK_UPLOAD_LIMITS, ...(data?.uploadLimits || {}) },
-          appointmentHours: (() => {
-            const startMinutes = slotToMinutes(data?.appointmentHours?.start);
-            const endMinutes = slotToMinutes(data?.appointmentHours?.end);
-            return startMinutes != null && endMinutes != null && endMinutes >= startMinutes
-              ? { startMinutes, endMinutes }
-              : FALLBACK_APPOINTMENT_HOURS;
-          })(),
+          appointmentHours: parseAppointmentHours(data?.appointmentHours),
         });
         if (hasRange) {
           setSearchRadiusKm(
@@ -1038,7 +1020,6 @@ export default function CreateServiceRequest() {
       {isCalendarOpen && (
         <AppointmentModal
           initialDate={appointment?.date}
-          timeSlots={options?.timeSlots ?? []}
           hours={options?.appointmentHours ?? FALLBACK_APPOINTMENT_HOURS}
           loadSlots={loadSlots}
           onClose={() => setIsCalendarOpen(false)}
