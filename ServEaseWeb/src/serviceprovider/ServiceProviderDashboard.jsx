@@ -152,16 +152,20 @@ function EarningsFigure({ amount, label }) {
   );
 }
 
-// Calendar / availability modal opened from "Manage your Calendar". A provider picks a date,
-// then a time slot on that date, and can mark that slot unavailable (or, with no slot picked,
-// mark the whole day unavailable). All slot statuses come from the backend per date — nothing
-// about a provider's actual availability is hard-coded here.
+// Calendar / availability modal opened from "Manage your Calendar" (Figma: Manage Calendar).
+// The provider picks a date, optionally one or more time slots on it, and presses
+//   - "Mark as Available"   (green) or
+//   - "Mark as Unavailable" (red).
+// With no time picked the action applies to the whole day. Customers only see (and can only book)
+// providers who are available on the day and time of their request, so this is what feeds that check.
+// Saved slot by slot with PUT /api/providers/availability { date, slot, status: 'available' | 'unavailable' };
+// every slot status comes from the backend per date — nothing about availability is hard-coded here.
 function CalendarModal({ hours, onClose }) {
   const today = useMemo(() => new Date(), []);
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [selectedDate, setSelectedDate] = useState(today);
-  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [selectedSlots, setSelectedSlots] = useState(() => new Set()); // empty = the whole day
 
   // 09:00 AM ... 04:00 PM, one per hour.
   const timeSlots = useMemo(
@@ -174,8 +178,9 @@ function CalendarModal({ hours, onClose }) {
   // by date, then by time slot: { '2026-09-09': { '10:00 AM': 'unavailable' } }. Any date/slot
   // missing from this map is treated as available. Re-fetched whenever the visible month changes.
   const [availability, setAvailability] = useState({});
-  const [isSaving, setIsSaving] = useState(false);
+  const [savingStatus, setSavingStatus] = useState(null); // 'available' | 'unavailable' while saving
   const [calendarError, setCalendarError] = useState('');
+  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -196,9 +201,22 @@ function CalendarModal({ hours, onClose }) {
   }, [viewYear, viewMonth]);
 
   const selectedDateKey = toDateKey(selectedDate);
+  const isToday = selectedDateKey === toDateKey(new Date());
   const dayAvailability = availability[selectedDateKey] || {};
+  const isBlocked = (slot) => dayAvailability[slot] === 'unavailable';
 
   const grid = useMemo(() => buildMonthGrid(viewYear, viewMonth), [viewYear, viewMonth]);
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+  // Slots of today that already started can't be changed any more.
+  const isSlotPast = (slot) => isPastSlotToday(slot, isToday);
+  const changeableSlots = timeSlots.map((s) => s.time).filter((slot) => !isSlotPast(slot));
+
+  // What the buttons act on: the picked slots, or every slot of the day when none is picked.
+  const targetSlots =
+    selectedSlots.size > 0 ? changeableSlots.filter((slot) => selectedSlots.has(slot)) : changeableSlots;
+  const canMarkAvailable = targetSlots.some((slot) => isBlocked(slot));
+  const canMarkUnavailable = targetSlots.some((slot) => !isBlocked(slot));
 
   const goToMonth = (offset) => {
     const next = new Date(viewYear, viewMonth + offset, 1);
@@ -208,41 +226,81 @@ function CalendarModal({ hours, onClose }) {
 
   const handleSelectDate = (date) => {
     setSelectedDate(date);
-    setSelectedSlot(null);
+    setSelectedSlots(new Set());
+    setNotice('');
+    setCalendarError('');
     if (date.getMonth() !== viewMonth || date.getFullYear() !== viewYear) {
       setViewYear(date.getFullYear());
       setViewMonth(date.getMonth());
     }
   };
 
-  const handleMarkUnavailable = async () => {
-    if (!selectedSlot) return;
-    setIsSaving(true);
+  const toggleSlot = (slot) => {
+    setNotice('');
+    setSelectedSlots((prev) => {
+      const next = new Set(prev);
+      if (next.has(slot)) next.delete(slot);
+      else next.add(slot);
+      return next;
+    });
+  };
+
+  // Saves the new status for the target slots (only the ones that actually change).
+  const applyStatus = async (status) => {
+    const slots = targetSlots.filter((slot) => isBlocked(slot) !== (status === 'unavailable'));
+    if (slots.length === 0 || savingStatus) return;
+
+    const dateKey = selectedDateKey;
+    setSavingStatus(status);
     setCalendarError('');
-    try {
-      // Saved on the backend first; the profile page reads the same data.
-      await setProviderAvailability({ date: selectedDateKey, slot: selectedSlot, status: 'unavailable' });
-      setAvailability((prev) => ({
-        ...prev,
-        [selectedDateKey]: { ...prev[selectedDateKey], [selectedSlot]: 'unavailable' },
-      }));
-      setSelectedSlot(null);
-    } catch (err) {
-      setCalendarError(err.message || "Couldn't save your availability. Please try again.");
-    } finally {
-      setIsSaving(false);
+    setNotice('');
+
+    // Saved on the backend first; the profile page and the customers' provider search read the same data.
+    const results = await Promise.allSettled(
+      slots.map((slot) => setProviderAvailability({ date: dateKey, slot, status }))
+    );
+    const saved = slots.filter((_, i) => results[i].status === 'fulfilled');
+
+    if (saved.length > 0) {
+      setAvailability((prev) => {
+        const day = { ...(prev[dateKey] || {}) };
+        saved.forEach((slot) => {
+          if (status === 'unavailable') day[slot] = 'unavailable';
+          else delete day[slot];
+        });
+        return { ...prev, [dateKey]: day };
+      });
     }
+
+    const failed = results.find((r) => r.status === 'rejected');
+    if (failed) {
+      setCalendarError(failed.reason?.message || "Couldn't save your availability. Please try again.");
+    } else {
+      const dayLabel = selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const what = saved.length === timeSlots.length ? 'The whole day' : `${saved.length} time slot${saved.length > 1 ? 's' : ''}`;
+      setNotice(`${what} on ${dayLabel} marked as ${status}.`);
+      setSelectedSlots(new Set());
+    }
+    setSavingStatus(null);
   };
 
   const yearOptions = Array.from({ length: YEAR_RANGE * 2 + 1 }, (_, i) => today.getFullYear() - YEAR_RANGE + i);
 
+  const hint =
+    selectedSlots.size > 0
+      ? `${selectedSlots.size} time${selectedSlots.size > 1 ? 's' : ''} selected`
+      : 'No time selected — the buttons apply to the whole day';
+
+  const actionButton =
+    'box-border h-[35px] w-[140px] cursor-pointer rounded-[10px] border border-[#B1A8A8] font-[SF_Pro,system-ui,sans-serif] text-[10px] font-bold leading-[17px] text-white disabled:cursor-not-allowed disabled:opacity-40';
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-5"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-5"
       onClick={onClose}
     >
       <div
-        className="relative box-border w-full max-w-[340px] rounded-2xl bg-white p-6 font-[Roboto]"
+        className="relative box-border max-h-full w-full max-w-[434px] overflow-y-auto rounded-[10px] bg-white px-[21px] pb-6 pt-[22px] font-[Roboto]"
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -251,108 +309,129 @@ function CalendarModal({ hours, onClose }) {
           aria-label="Close"
           className="absolute right-4 top-4 flex cursor-pointer border-none bg-transparent p-0"
         >
-          <X size={18} color="#000000" />
+          <X size={17} color="#000000" />
         </button>
 
-        <p className="m-0 mb-2 font-[Quicksand] text-[13px] font-bold text-black">Select Date</p>
+        <p className="m-0 mb-2 font-[SF_Pro,system-ui,sans-serif] text-[10px] font-bold leading-[17px] text-[#191818]">
+          Select Date
+        </p>
 
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={() => goToMonth(-1)}
-            aria-label="Previous month"
-            className="flex cursor-pointer border-none bg-transparent p-1"
-          >
-            <ChevronLeft size={18} />
-          </button>
+        <div className="box-border rounded-2xl bg-[#DDDDDD] p-4">
+          <div className="mb-2 flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => goToMonth(-1)}
+              aria-label="Previous month"
+              className="flex h-9 w-9 flex-none cursor-pointer items-center justify-center rounded-full border-none bg-transparent p-0"
+            >
+              <ChevronLeft size={20} color="#1E1E1E" />
+            </button>
 
-          <select
-            value={viewMonth}
-            onChange={(e) => setViewMonth(Number(e.target.value))}
-            className="rounded-md border border-[#DAD2D2] px-2 py-1 text-[13px] font-semibold text-black"
-          >
-            {MONTH_NAMES.map((m, i) => (
-              <option key={m} value={i}>{m}</option>
-            ))}
-          </select>
-
-          <select
-            value={viewYear}
-            onChange={(e) => setViewYear(Number(e.target.value))}
-            className="rounded-md border border-[#DAD2D2] px-2 py-1 text-[13px] font-semibold text-black"
-          >
-            {yearOptions.map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-
-          <button
-            type="button"
-            onClick={() => goToMonth(1)}
-            aria-label="Next month"
-            className="flex cursor-pointer border-none bg-transparent p-1"
-          >
-            <ChevronRight size={18} />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-7 gap-y-1 text-center">
-          {WEEKDAY_LABELS.map((w) => (
-            <span key={w} className="text-[11px] font-semibold text-black/40">{w}</span>
-          ))}
-
-          {grid.map(({ date, inMonth }) => {
-            const key = toDateKey(date);
-            const isSelected = key === selectedDateKey;
-            const isPast = date < new Date(today.getFullYear(), today.getMonth(), today.getDate());
-
-            return (
-              <button
-                key={key}
-                type="button"
-                disabled={isPast}
-                onClick={() => handleSelectDate(date)}
-                className={`mx-auto flex h-7 w-7 items-center justify-center rounded-full text-[13px] ${
-                  isSelected
-                    ? 'bg-black font-bold text-white'
-                    : inMonth
-                    ? isPast
-                      ? 'cursor-not-allowed text-black/25'
-                      : 'cursor-pointer text-black hover:bg-black/5'
-                    : 'cursor-default text-black/25'
-                }`}
+            <div className="flex min-w-0 flex-1 gap-2">
+              <select
+                value={viewMonth}
+                onChange={(e) => setViewMonth(Number(e.target.value))}
+                aria-label="Month"
+                className="box-border h-7 min-w-0 flex-1 rounded-lg border-none bg-white px-[6px] font-[Inter] text-[10px] text-[#1E1E1E]"
               >
-                {date.getDate()}
-              </button>
-            );
-          })}
+                {MONTH_NAMES.map((m, i) => (
+                  <option key={m} value={i}>{m}</option>
+                ))}
+              </select>
+              <select
+                value={viewYear}
+                onChange={(e) => setViewYear(Number(e.target.value))}
+                aria-label="Year"
+                className="box-border h-7 min-w-0 flex-1 rounded-lg border border-[#D9D9D9] bg-white px-[6px] font-[Inter] text-[10px] text-[#1E1E1E]"
+              >
+                {yearOptions.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => goToMonth(1)}
+              aria-label="Next month"
+              className="flex h-9 w-9 flex-none cursor-pointer items-center justify-center rounded-full border-none bg-transparent p-0"
+            >
+              <ChevronRight size={20} color="#1E1E1E" />
+            </button>
+          </div>
+
+          <div className="mx-auto grid w-full max-w-[286px] grid-cols-7 gap-px">
+            {WEEKDAY_LABELS.map((w) => (
+              <span
+                key={w}
+                className="flex h-5 items-center justify-center font-[Geist,Inter,sans-serif] text-[12px] leading-5 text-[#757575]"
+              >
+                {w}
+              </span>
+            ))}
+
+            {grid.map(({ date, inMonth }) => {
+              const key = toDateKey(date);
+              const isSelected = key === selectedDateKey;
+              const isPast = date < startOfToday;
+              // A small red dot marks days where something is already marked unavailable.
+              const hasBlocked = Object.values(availability[key] || {}).includes('unavailable');
+
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  disabled={isPast}
+                  onClick={() => handleSelectDate(date)}
+                  className={`relative flex h-10 w-full items-center justify-center rounded-lg border-none p-0 font-[Inter] text-[10px] leading-[14px] ${
+                    isSelected
+                      ? 'cursor-pointer bg-[#2C2C2C] text-[#F5F5F5]'
+                      : !inMonth
+                      ? 'cursor-default bg-transparent text-[#B3B3B3]'
+                      : isPast
+                      ? 'cursor-not-allowed bg-transparent text-[#B3B3B3]'
+                      : 'cursor-pointer bg-transparent text-[#1E1E1E] hover:bg-black/10'
+                  }`}
+                >
+                  {date.getDate()}
+                  {hasBlocked && inMonth && (
+                    <span className="absolute bottom-[5px] h-[4px] w-[4px] rounded-full bg-[#C62828]" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        <p className="m-0 mb-2 mt-5 font-[Quicksand] text-[13px] font-bold text-black">Select Time</p>
+        <p className="m-0 mb-2 mt-4 font-[SF_Pro,system-ui,sans-serif] text-[10px] font-bold leading-[17px] text-[#191818]">
+          Select Time
+        </p>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-4 gap-2">
           {timeSlots.length === 0 && (
-            <p className="col-span-2 m-0 text-[12px] text-[#817C7C]">No time slots configured</p>
+            <p className="col-span-4 m-0 text-[12px] text-[#817C7C]">No time slots configured</p>
           )}
           {timeSlots.map(({ time: slot }) => {
-            const status = dayAvailability[slot]; // undefined = available, 'unavailable' = blocked
-            // Slots of today that already started can't be blocked any more.
-            const isUnavailable =
-              status === 'unavailable' || isPastSlotToday(slot, selectedDateKey === toDateKey(new Date()));
-            const isSelected = slot === selectedSlot;
+            const blocked = isBlocked(slot);
+            const past = isSlotPast(slot);
+            const chosen = selectedSlots.has(slot);
 
             return (
               <button
                 key={slot}
                 type="button"
-                disabled={isUnavailable}
-                onClick={() => setSelectedSlot(slot)}
-                className={`rounded-md border px-3 py-2 text-[12px] font-semibold ${
-                  isUnavailable
-                    ? 'cursor-not-allowed border-[#DAD2D2] bg-[#F2F2F2] text-black/30 line-through'
-                    : isSelected
-                    ? 'cursor-pointer border-black bg-black text-white'
-                    : 'cursor-pointer border-[#DAD2D2] bg-white text-black hover:border-black/40'
+                disabled={past}
+                aria-pressed={chosen}
+                title={past ? 'This time has already passed' : blocked ? 'Marked unavailable' : undefined}
+                onClick={() => toggleSlot(slot)}
+                className={`box-border h-[33px] rounded-[10px] border px-1 font-[SF_Pro,system-ui,sans-serif] text-[10px] font-bold leading-[17px] ${
+                  past
+                    ? 'cursor-not-allowed border-[#E5E0E0] bg-[#F5F3F3] text-black/30'
+                    : chosen
+                    ? 'cursor-pointer border-[#B1A8A8] bg-[#2C2C2C] text-white'
+                    : blocked
+                    ? 'cursor-pointer border-[#E7B4B4] bg-[#FDECEC] text-[#C62828] line-through'
+                    : 'cursor-pointer border-[#B1A8A8] bg-[#FFFDFD] text-[#414141] hover:border-black/40'
                 }`}
               >
                 {slot}
@@ -361,20 +440,36 @@ function CalendarModal({ hours, onClose }) {
           })}
         </div>
 
-        <div className="mt-4 flex justify-end">
+        <p className="m-0 mt-2 text-center font-[SF_Pro,system-ui,sans-serif] text-[10px] leading-[14px] text-[#817C7C]">
+          {hint}. Crossed-out red times are already unavailable.
+        </p>
+
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-x-[52px] gap-y-3">
           <button
             type="button"
-            onClick={handleMarkUnavailable}
-            disabled={!selectedSlot || isSaving}
-            className={`rounded-md border border-[#DAD2D2] bg-white px-4 py-2 text-[12px] font-semibold text-black ${
-              !selectedSlot || isSaving ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:bg-black/5'
-            }`}
+            onClick={() => applyStatus('available')}
+            disabled={!canMarkAvailable || savingStatus !== null}
+            className={`${actionButton} bg-[#2E7D32]`}
           >
-            {isSaving ? 'Saving…' : 'Mark as Unavailable'}
+            {savingStatus === 'available' ? 'Saving…' : 'Mark as Available'}
+          </button>
+          <button
+            type="button"
+            onClick={() => applyStatus('unavailable')}
+            disabled={!canMarkUnavailable || savingStatus !== null}
+            className={`${actionButton} bg-[#C62828]`}
+          >
+            {savingStatus === 'unavailable' ? 'Saving…' : 'Mark as Unavailable'}
           </button>
         </div>
+
+        {notice && (
+          <p role="status" className="m-0 mt-3 text-center text-[12px] text-[#2E7D32]">
+            {notice}
+          </p>
+        )}
         {calendarError && (
-          <p role="alert" className="m-0 mt-2 text-right font-[Roboto] text-[12px] text-[#B91C1C]">
+          <p role="alert" className="m-0 mt-3 text-center text-[12px] text-[#B91C1C]">
             {calendarError}
           </p>
         )}

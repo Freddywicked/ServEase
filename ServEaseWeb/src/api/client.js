@@ -197,7 +197,8 @@ export const getHomeRepairServices = () =>
 //   GET  /api/providers/availability?from=YYYY-MM-DD&to=YYYY-MM-DD
 //        -> { availability: { 'YYYY-MM-DD': { '10:00 AM': 'unavailable' } } }
 //           (the bare map is accepted too). Dates/slots that are missing are available.
-//   PUT  /api/providers/availability   body: { date: 'YYYY-MM-DD', slot: '10:00 AM', status: 'unavailable' }
+//   PUT  /api/providers/availability   body: { date: 'YYYY-MM-DD', slot: '10:00 AM', status: 'unavailable' | 'available' }
+//        'unavailable' saves the block; 'available' removes it again (so the slot is open to customers).
 // The provider is identified from the login token, like the other provider routes.
 export const getProviderAvailability = async ({ from, to } = {}) => {
   const data = await request(
