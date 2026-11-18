@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import CustomerSidebar from '../components/CustomerSidebar.jsx';
 import UserAvatar from '../components/UserAvatar.jsx';
-import { me, updateProfile } from '../api/client';
+import { me, updateProfile, uploadUserPhoto } from '../api/client';
 import { useAuth } from '../context/auth_context';
 
 // Resolve key variations across backend representations
@@ -22,13 +22,37 @@ const toFields = (source) => ({
   address: pickFirst(source, ADDRESS_KEYS),
 });
 
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+const MAX_PHOTO_SIDE = 512;
+
+// Read an image file and downscale it to a square-bounded JPEG data URL
+const readAndResizeImage = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read the image.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('That file is not a valid image.'));
+      img.onload = () => {
+        const scale = Math.min(1, MAX_PHOTO_SIDE / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
 const FONT_SF = "font-['SF_Pro',system-ui,sans-serif]";
 
 export default function CustomerEditProfile() {
   const { user, loading, setUser } = useAuth();
   const navigate = useNavigate();
   const nameRef = useRef(null);
-  const addressRef = useRef(null);
+  const fileRef = useRef(null);
 
   // Editable fields
   const [name, setName] = useState(user?.name || '');
@@ -37,6 +61,11 @@ export default function CustomerEditProfile() {
 
   // Last values loaded from / saved to the backend (used for Esc-to-revert and change detection)
   const [saved, setSaved] = useState(toFields(user));
+
+  // Newly chosen profile picture: the file is uploaded on Save; the data URL is only its preview.
+  const [photo, setPhoto] = useState(null);
+  const [photoFile, setPhotoFile] = useState(null);
+  const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
 
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -54,6 +83,8 @@ export default function CustomerEditProfile() {
       setEmail(next.email);
       setAddress(next.address);
       setSaved(next);
+      setPhoto(null);
+      setPhotoFile(null);
       setLoadingProfile(false);
     };
 
@@ -82,6 +113,33 @@ export default function CustomerEditProfile() {
     nameRef.current?.select();
   };
 
+  const handlePhotoChange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setErrorMsg('Please choose an image file (JPG, PNG, or WebP).');
+      return;
+    }
+    if (file.size > MAX_PHOTO_BYTES) {
+      setErrorMsg('Profile picture must be 5 MB or smaller.');
+      return;
+    }
+
+    setIsProcessingPhoto(true);
+    try {
+      const preview = await readAndResizeImage(file);
+      setPhoto(preview);
+      setPhotoFile(file);
+      setErrorMsg('');
+    } catch (err) {
+      setErrorMsg(err.message || 'Could not use that image.');
+    } finally {
+      setIsProcessingPhoto(false);
+    }
+  };
+
   const handleNameKeyDown = (e) => {
     if (e.key === 'Escape') {
       setName(saved.name);
@@ -91,31 +149,33 @@ export default function CustomerEditProfile() {
 
   const handleSave = async (e) => {
     e?.preventDefault();
-    if (isSubmitting) return;
+    if (isSubmitting || isProcessingPhoto) return;
 
-    const payload = {
+    const values = {
       name: name.trim(),
       email: email.trim(),
       address: address.trim(),
     };
 
-    if (!payload.name) {
+    if (!values.name) {
       setErrorMsg('Please enter your name.');
       focusName();
       return;
     }
-    if (!payload.address) {
+
+    // PATCH only the text fields that changed, so an unrelated empty address cannot
+    // block a name-only or photo-only update.
+    const changes = {};
+    if (values.name !== saved.name.trim()) changes.name = values.name;
+    if (values.email !== saved.email.trim()) changes.email = values.email;
+    if (values.address !== saved.address.trim()) changes.address = values.address;
+
+    if (changes.address === '') {
       setErrorMsg('Please enter your address.');
-      addressRef.current?.focus();
       return;
     }
 
-    const unchanged =
-      payload.name === saved.name.trim() &&
-      payload.email === saved.email.trim() &&
-      payload.address === saved.address.trim();
-
-    if (unchanged) {
+    if (Object.keys(changes).length === 0 && !photoFile) {
       navigate('/customer/profile');
       return;
     }
@@ -124,11 +184,26 @@ export default function CustomerEditProfile() {
     setErrorMsg('');
 
     try {
-      const updatedUser = await updateProfile(payload);
+      let updatedUser = null;
+      let savedPhotoUrl = null;
 
-      // Keep the global auth context in sync (header name, avatar, etc.)
+      if (Object.keys(changes).length > 0) {
+        updatedUser = await updateProfile(changes);
+      }
+      if (photoFile) {
+        const uploaded = await uploadUserPhoto(photoFile);
+        savedPhotoUrl = uploaded?.photoUrl || null;
+      }
+
+      // Keep the global auth context in sync (header name, avatar, etc.). Prefer the
+      // backend's normalized user over the locally trimmed values.
       if (setUser) {
-        setUser((prev) => ({ ...prev, ...(updatedUser || payload) }));
+        setUser((prev) => ({
+          ...prev,
+          ...changes,
+          ...(updatedUser || {}),
+          ...(savedPhotoUrl ? { photoUrl: savedPhotoUrl } : {}),
+        }));
       }
 
       navigate('/customer/profile');
@@ -197,14 +272,24 @@ export default function CustomerEditProfile() {
           <div className="absolute left-[27px] top-[82px]">
             <UserAvatar
               name={name || user.name}
-              src={user.photoUrl}
+              src={photo || user.photoUrl}
               sizeClass="h-[121px] w-[121px]"
               textClass="text-[64px] leading-[77px]"
             />
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              onChange={handlePhotoChange}
+              className="hidden"
+              tabIndex={-1}
+            />
             <button
               type="button"
-              onClick={focusName}
-              aria-label="Edit name"
+              onClick={() => fileRef.current?.click()}
+              disabled={loadingProfile || isProcessingPhoto || isSubmitting}
+              aria-label="Change profile picture"
+              title="Change profile picture"
               className="absolute bottom-[2px] right-[2px] flex h-[28px] w-[28px] cursor-pointer items-center justify-center rounded-[6px] border-0 bg-white p-0 text-[#1E1E1E] shadow-[0_1px_3px_rgba(0,0,0,0.25)] transition-transform hover:scale-105"
             >
               <svg
@@ -258,10 +343,8 @@ export default function CustomerEditProfile() {
             Address
           </label>
           <input
-            ref={addressRef}
             id="address"
             type="text"
-            required
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             disabled={loadingProfile}
@@ -273,10 +356,10 @@ export default function CustomerEditProfile() {
           <div className="mt-[73px] flex justify-end">
             <button
               type="submit"
-              disabled={isSubmitting || loadingProfile}
+              disabled={isSubmitting || loadingProfile || isProcessingPhoto}
               className={`box-border h-[50px] w-[265px] cursor-pointer rounded-[10px] border border-[#B1A8A8] bg-[linear-gradient(270deg,#04A5A5_0%,#0255AF_100%)] ${FONT_SF} text-[15px] font-bold leading-[170%] text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60`}
             >
-              {isSubmitting ? 'Saving...' : 'Save'}
+              {isProcessingPhoto ? 'Processing...' : isSubmitting ? 'Saving...' : 'Save'}
             </button>
           </div>
         </div>

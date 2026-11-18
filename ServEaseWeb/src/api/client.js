@@ -100,6 +100,13 @@ export const updateProfile = async ({ name, email, address }) => {
   return data.user;
 };
 
+// Upload the signed-in customer's profile photo -> { photoUrl } (signed URL).
+export const uploadUserPhoto = (file) => {
+  const body = new FormData();
+  body.append('photo', file);
+  return request('/users/me/photo', { method: 'POST', body });
+};
+
 // --- Forgot password flow (Forgot Password -> OTP -> New Password) ---
 // Mirrors ServEaseMobile/api/passwordReset.js; same endpoints and payload shapes.
 // Step 1: backend emails a one-time code. Resolves { message, resendAfter }.

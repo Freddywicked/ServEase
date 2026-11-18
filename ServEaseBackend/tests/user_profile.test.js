@@ -19,6 +19,7 @@ const INITIAL_USER = {
 
 let storedUser;
 let lastUpdate;
+let uploadedPhoto;
 
 const supabase = {
   from(table) {
@@ -51,8 +52,11 @@ const supabase = {
 
 mockModule('../src/config/supabase', { supabase });
 mockModule('../src/utils/storage', {
-  uploadUserPhoto: async () => null,
-  getUserPhotoUrl: async () => null,
+  uploadUserPhoto: async (userId, file) => {
+    uploadedPhoto = { userId, file };
+    return 'user-1/profile-photo.jpg';
+  },
+  getUserPhotoUrl: async (path) => (path ? `signed:${path}` : null),
 });
 
 const users = require('../src/controllers/user_controllers');
@@ -76,6 +80,7 @@ const invoke = async (body) => {
 test.beforeEach(() => {
   storedUser = { ...INITIAL_USER };
   lastUpdate = null;
+  uploadedPhoto = null;
 });
 
 test('a name-only edit reaches the users table and returns the updated user', async () => {
@@ -117,4 +122,32 @@ test('an empty name is rejected before any database update', async () => {
 
   assert.equal(lastUpdate, null);
   assert.deepEqual(storedUser, INITIAL_USER);
+});
+
+test('a profile photo upload stores its private path and returns a signed URL', async () => {
+  const file = {
+    originalname: 'avatar.png',
+    mimetype: 'image/png',
+    buffer: Buffer.from('test-image'),
+  };
+  const req = { user: { ...storedUser }, file };
+  const res = {
+    json(payload) {
+      this.body = payload;
+      return this;
+    },
+  };
+  let forwardedError;
+  await users.uploadMyPhoto(req, res, (error) => {
+    forwardedError = error;
+  });
+  if (forwardedError) throw forwardedError;
+
+  assert.deepEqual(uploadedPhoto, { userId: 'user-1', file });
+  assert.deepEqual(lastUpdate, {
+    userId: 'user-1',
+    changes: { photo_url: 'user-1/profile-photo.jpg' },
+  });
+  assert.equal(storedUser.photo_url, 'user-1/profile-photo.jpg');
+  assert.equal(res.body.photoUrl, 'signed:user-1/profile-photo.jpg');
 });
