@@ -75,11 +75,12 @@ const updatePreferences = async (id, { prefersHomeService, searchRadiusKm }) => 
   );
 };
 
-// Customer Edit Profile: email + home address. Pass only the fields being changed.
+// Customer Edit Profile: name + email + home address. Pass only the fields being changed.
 // A duplicate email hits the unique index and db.js turns it into a 409
 // ("Email is already registered").
-const updateProfile = async (id, { email, address }) => {
+const updateProfile = async (id, { name, email, address }) => {
   const changes = {};
+  if (name !== undefined) changes.name = name;
   if (email !== undefined) changes.email = email;
   if (address !== undefined) changes.address = address;
   return unwrap(

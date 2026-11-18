@@ -11,7 +11,7 @@ const MODES = ['customer', 'service_provider'];
 const VERIFIED = 'verified';
 
 // PATCH /api/users/me — body: any of
-//   { email, address,                   // account details (customer Edit Profile screen)
+//   { name, email, address,             // account details (customer Edit Profile screen)
 //     activeMode: 'customer' | 'service_provider',
 //     prefersHomeService: boolean,      // customer's default for the Home Service choice
 //     searchRadiusKm: 5-100 }           // customer's default provider search radius
@@ -19,18 +19,25 @@ const VERIFIED = 'verified';
 // account opens in; it never creates or changes a provider record.
 // Everything is validated before anything is saved, so a bad value changes nothing.
 const updateMe = asyncHandler(async (req, res) => {
-  const { email, address, activeMode, prefersHomeService, searchRadiusKm } = req.body || {};
-  const hasProfile = email !== undefined || address !== undefined;
+  const { name, email, address, activeMode, prefersHomeService, searchRadiusKm } = req.body || {};
+  const hasProfile = name !== undefined || email !== undefined || address !== undefined;
   const hasMode = activeMode !== undefined;
   const hasPreferences = prefersHomeService !== undefined || searchRadiusKm !== undefined;
 
   if (!hasProfile && !hasMode && !hasPreferences) {
-    throw new ApiError(400, 'Send email, address, activeMode, prefersHomeService and/or searchRadiusKm');
+    throw new ApiError(400, 'Send name, email, address, activeMode, prefersHomeService and/or searchRadiusKm');
   }
 
   // Account details. Per-field messages land in `details`, which the mobile app shows
   // under the matching input (err.fieldErrors in api/client.js).
   const profile = {};
+  if (name !== undefined) {
+    const trimmed = String(name).trim();
+    if (!trimmed) {
+      throw new ApiError(400, 'Please fix the highlighted fields', { name: 'Name is required' });
+    }
+    profile.name = trimmed;
+  }
   if (email !== undefined) {
     const normalized = String(email).trim().toLowerCase();
     if (!EMAIL_RE.test(normalized)) {

@@ -92,10 +92,10 @@ export const logout = () => clearToken();
 export const me = () => request('/auth/me');
 
 // Update the signed-in customer's account details and return the updated user.
-export const updateProfile = async ({ email, address }) => {
+export const updateProfile = async ({ name, email, address }) => {
   const data = await request('/users/me', {
     method: 'PATCH',
-    body: { email, address },
+    body: { name, email, address },
   });
   return data.user;
 };

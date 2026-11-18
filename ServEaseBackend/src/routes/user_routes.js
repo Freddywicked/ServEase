@@ -26,7 +26,7 @@ const uploadPhoto = (req, res, next) =>
     return next(err);
   });
 
-// PATCH /api/users/me — body: any of { email, address, activeMode, prefersHomeService, searchRadiusKm }
+// PATCH /api/users/me — body: any of { name, email, address, activeMode, prefersHomeService, searchRadiusKm }
 router.patch('/me', authenticate, users.updateMe);
 
 // POST /api/users/me/photo — multipart, field "photo" -> { photoUrl }
