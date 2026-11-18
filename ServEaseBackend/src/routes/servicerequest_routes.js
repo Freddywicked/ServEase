@@ -93,6 +93,7 @@ customer.get('/tracking', authenticate, workflow.getTracking);
 customer.get('/history', authenticate, workflow.getCustomerHistory);
 // Web create-request form: categories, location types, time slots, radius range, map start.
 customer.get('/options', authenticate, controller.listCreateOptions);
+customer.get('/time-slots', authenticate, controller.getAppointmentSlots);
 // Mobile create-request flow: the photo and the AI diagnosis happen BEFORE the request
 // row exists (it is created on submit), so these take no :requestId.
 customer.post('/photos', authenticate, uploadPhoto, controller.uploadPhoto);
@@ -101,6 +102,7 @@ customer.post('/diagnose', authenticate, controller.diagnoseDraft);
 customer.get('/:requestId', authenticate, controller.getOne);
 customer.post('/:requestId/ai-diagnosis', authenticate, controller.aiDiagnosis);
 customer.post('/:requestId/skip-ai', authenticate, controller.skipAi);
+customer.delete('/:requestId/draft', authenticate, controller.cancelDraft);
 customer.post('/:requestId/resolve', authenticate, controller.resolve);
 customer.get('/:requestId/providers', authenticate, controller.recommendedProviders);
 customer.post('/:requestId/submit', authenticate, controller.submit);
@@ -109,6 +111,8 @@ customer.post('/:requestId/schedule-proposals/:proposalId/accept', authenticate,
 customer.post('/:requestId/schedule-proposals/:proposalId/reject', authenticate, workflow.answerScheduleProposal('rejected'));
 customer.post('/:requestId/payment-requests/:paymentRequestId/approve', authenticate, workflow.answerPaymentRequest('approved'));
 customer.post('/:requestId/payment-requests/:paymentRequestId/reject', authenticate, workflow.answerPaymentRequest('rejected'));
+// Counter-offer on an additional payment (Negotiate modal on the Track screen); the request stays pending.
+customer.post('/:requestId/payment-requests/:paymentRequestId/negotiate', authenticate, workflow.negotiatePaymentRequest);
 customer.post('/:requestId/quotation/respond', authenticate, workflow.respondToQuotation);
 customer.post('/:requestId/payment', authenticate, workflow.payForRequest);
 customer.get('/:requestId/payment-status', authenticate, workflow.getPaymentStatus);

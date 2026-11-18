@@ -175,7 +175,8 @@ export const uploadServiceRequestPhoto = (asset) => {
     return request('/service-requests/photos', { method: 'POST', formData, timeoutMs: 60000 }).then(pick('photo'));
 };
 
-// Videos use a separate multipart field and endpoint, but return the same storage-path shape.
+// Uploads the request's video (max 1, 50 MB, enforced by the backend too) and returns { path }.
+// Same private bucket and same attachment flow as the photos; POST /service-requests/videos.
 export const uploadServiceRequestVideo = (asset) => {
     const formData = new FormData();
     formData.append('video', {
@@ -183,7 +184,7 @@ export const uploadServiceRequestVideo = (asset) => {
         name: asset.fileName || `video-${Date.now()}.mp4`,
         type: asset.type || 'video/mp4',
     });
-    return request('/service-requests/videos', { method: 'POST', formData, timeoutMs: 120000 }).then(pick('video'));
+    return request('/service-requests/videos', { method: 'POST', formData, timeoutMs: 180000 }).then(pick('video'));
 };
 
 // Reverse-geocodes on the backend so the Google Maps key never ships inside the app.
@@ -269,10 +270,13 @@ export const createServiceRequest = (draft, extra = {}) =>
             clientRequestId: draft.clientRequestId,
             category: draft.categoryKey,
             description: draft.description.trim(),
-            photoPath: draft.photoPath,
+            photoPath: draft.photoPath, // first photo, kept for older backends; the backend skips it if it is also in attachmentPaths
+            // Every photo and the video uploaded on step 1 (draft.mediaItems). The provider sees them all
+            // on ViewServiceRequest.
             attachmentPaths: (draft.mediaItems ?? [])
                 .filter((item) => item.path && item.status !== 'uploading')
                 .map((item) => ({ path: item.path, type: item.type })),
+            searchRadiusKm: draft.searchRadiusKm ?? null,
             latitude: draft.location?.latitude ?? null,
             longitude: draft.location?.longitude ?? null,
             address: draft.location?.address ?? null,
@@ -289,7 +293,11 @@ export const createServiceRequest = (draft, extra = {}) =>
 
 export const getActiveRepair = async () => {
     try {
-        return pick('activeRepair')(await request('/service-requests/active'));
+        // The backend sends every active repair in `activeRepairs` (newest first; only requests the customer
+        // approved AND paid) and the newest one in `activeRepair`. Older backends only send `activeRepair`.
+        const data = await request('/service-requests/active');
+        if (Array.isArray(data?.activeRepairs)) return data.activeRepairs;
+        return pick('activeRepair')(data);
     } catch (error) {
         // 404 can mean "no active repair" OR "this route doesn't exist yet" (server.js answers
         // `Cannot GET /api/...`). Only the first is an empty state; the second should surface.
@@ -485,6 +493,14 @@ export const updateJobProgress = (requestId, { step }) =>
 // (quotation + any approved additional payments) so they can Proceed to Payment.
 export const completeJob = (requestId) =>
     request(`/provider/service-requests/${requestId}/complete`, { method: 'POST' });
+
+// Nav bar badges on the provider's Requests and Jobs tabs (utils/providerTabBadges.js).
+//   GET  /provider/badge-counts        -> { requests, jobs }   how many arrived since the provider last opened that tab
+//   POST /provider/badge-counts/seen   { tab: 'requests' | 'jobs' }  -> { requests, jobs }   (clears that tab's badge)
+export const getProviderBadgeCounts = () => request('/provider/badge-counts');
+
+export const markProviderBadgeSeen = (tab) =>
+    request('/provider/badge-counts/seen', { method: 'POST', body: { tab } });
 
 /* ============================================================================
  * PROVIDER COMMUNICATION  (the provider-side API calls are live, above; the

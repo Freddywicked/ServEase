@@ -355,6 +355,14 @@ export const answerPaymentRequest = (requestId, paymentRequestId, answer) =>
     { method: 'POST' }
   );
 
+// Counter-offer on an additional payment (Negotiate modal on Track). The request stays pending.
+// body: { proposedAmount?: number, message?: string } -> { ok, status, proposedAmount }.
+export const negotiatePaymentRequest = (requestId, paymentRequestId, { proposedAmount, message } = {}) =>
+  request(
+    `/service-requests/${encodeURIComponent(requestId)}/payment-requests/${encodeURIComponent(paymentRequestId)}/negotiate`,
+    { method: 'POST', body: { proposedAmount, message } }
+  );
+
 // Approve/decline a provider's quotation (MyRequestDetails.jsx) -> { ok, status }.
 export const respondToQuotation = (requestId, approve) =>
   request(`/service-requests/${encodeURIComponent(requestId)}/quotation/respond`, {
@@ -393,12 +401,11 @@ export const getCustomerHistory = (type = 'all') =>
 
 // --- Notifications (bell + dashboard boxes) ---
 
-// -> { notifications: [{ id, type, message, requestId, role, readAt, createdAt }] }
-// `role` ('customer' | 'provider' | 'admin') is the side the bell belongs to: the backend returns only the
-// notifications addressed to that role of the logged-in user, so a customer notification never shows up
-// (or counts) on the provider bell, and vice versa.
-export const getNotifications = (role) =>
-  request(`/notifications${role ? `?role=${encodeURIComponent(role)}` : ''}`);
+// -> { notifications: [{ id, type, message, requestId, readAt, createdAt }] }
+// `audience` ('customer' | 'provider') selects that side's notifications on the backend. Admin is
+// intentionally unfiltered because the backend has no admin audience.
+export const getNotifications = (audience) =>
+  request(`/notifications${audience ? `?audience=${encodeURIComponent(audience)}` : ''}`);
 
 export const markNotificationRead = (notificationId) =>
   request(`/notifications/${encodeURIComponent(notificationId)}/read`, { method: 'POST' });
@@ -406,6 +413,19 @@ export const markNotificationRead = (notificationId) =>
 // The logged-in provider's own profile. photoUrl is a signed URL for
 // service_providers.profile_photo (the photo uploaded through the provider profile editor).
 export const getMyProviderProfile = () => request('/providers/me/profile');
+
+// Provider Edit Profile (ServiceProviderEditProfile.jsx). Send only the fields that changed:
+// { email, address, availabilityDays: ['Mon', ...], availabilityHours: '9:00 AM - 5:00 PM' | null,
+//   companyName, companyAddress }. Resolves the updated profile (same shape as getMyProviderProfile).
+export const updateMyProviderProfile = (changes) =>
+  request('/providers/me/profile', { method: 'PATCH', body: changes });
+
+// Upload a new provider profile photo (multipart field "photo") -> { photoUrl } (signed URL).
+export const uploadProviderPhoto = (file) => {
+  const body = new FormData();
+  body.append('photo', file);
+  return request('/providers/me/photo', { method: 'POST', body });
+};
 
 // --- Browse service providers (Find Service Providers / provider profile) ---
 

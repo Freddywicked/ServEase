@@ -49,5 +49,8 @@ router.get('/jobs/:jobId', workflow.getJob);
 router.patch('/jobs/:jobId/status', uploadPhoto, workflow.updateJobStatus);
 router.post('/jobs/:jobId/additional-parts', workflow.notifyAdditionalParts);
 router.get('/earnings', workflow.getEarnings);
+// Nav bar badges on the mobile Requests and Jobs tabs.
+router.get('/badge-counts', workflow.getProviderBadgeCounts);
+router.post('/badge-counts/seen', workflow.markProviderBadgeSeen);
 
 module.exports = router;

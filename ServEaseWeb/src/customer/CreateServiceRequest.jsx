@@ -19,6 +19,31 @@ import {
 import calendarIcon from '../assets/icon_calendar.png';
 import photoIcon from '../assets/icon_photo.png';
 
+// Step progress bar for the 4-step "Creating Service Request" flow.
+// Keep this identical on every step screen and render it directly BELOW the <h1>.
+// `activeStep` is 1-indexed.
+function StepProgress({ activeStep, totalSteps = 4 }) {
+  return (
+    <div
+      role="progressbar"
+      aria-label="Service request progress"
+      aria-valuemin={1}
+      aria-valuemax={totalSteps}
+      aria-valuenow={activeStep}
+      aria-valuetext={`Step ${activeStep} of ${totalSteps}`}
+      className="mb-8 flex w-full gap-3"
+    >
+      {Array.from({ length: totalSteps }, (_, i) => (
+        <div
+          key={i}
+          className={`h-[9px] flex-1 rounded-[10px] transition-colors duration-300 ${i < activeStep ? 'bg-[#0255AF]' : 'bg-[#D9D9D9]'}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+
 // Everything the form offers — the categories, the service location types, the appointment
 // time slots, the search-radius range and where the map opens — comes from the backend
 // (GET /api/service-requests/options, see getServiceRequestOptions in api/client). Nothing about
@@ -89,21 +114,6 @@ function formatAppointment(date, time) {
   if (!date || !time) return null;
   const label = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   return `${label}, ${time}`;
-}
-
-// Step progress bar shared visual for the multi-step "Creating Service Request" flow.
-// `activeStep` is 1-indexed; this screen is step 1 of 4.
-function StepProgress({ activeStep, totalSteps = 4 }) {
-  return (
-    <div className="mb-8 flex w-full gap-3">
-      {Array.from({ length: totalSteps }, (_, i) => (
-        <div
-          key={i}
-          className={`h-[9px] flex-1 rounded-[10px] ${i < activeStep ? 'bg-[#0255AF]' : 'bg-[#D9D9D9]'}`}
-        />
-      ))}
-    </div>
-  );
 }
 
 // A slot from the backend is either "9:00 AM" or { time, available }.

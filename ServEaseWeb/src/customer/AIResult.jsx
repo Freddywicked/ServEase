@@ -10,14 +10,24 @@ import {
 } from '../api/client';
 import loadingIcon from '../assets/icon_loading.png';
 
-// Same step progress visual as the previous two screens — this screen is step 3 of 4.
+// Step progress bar for the 4-step "Creating Service Request" flow.
+// Keep this identical on every step screen and render it directly BELOW the <h1>.
+// `activeStep` is 1-indexed.
 function StepProgress({ activeStep, totalSteps = 4 }) {
   return (
-    <div className="mb-6 flex w-full gap-3">
+    <div
+      role="progressbar"
+      aria-label="Service request progress"
+      aria-valuemin={1}
+      aria-valuemax={totalSteps}
+      aria-valuenow={activeStep}
+      aria-valuetext={`Step ${activeStep} of ${totalSteps}`}
+      className="mb-8 flex w-full gap-3"
+    >
       {Array.from({ length: totalSteps }, (_, i) => (
         <div
           key={i}
-          className={`h-[9px] flex-1 rounded-[10px] ${i < activeStep ? 'bg-[#0255AF]' : 'bg-[#D9D9D9]'}`}
+          className={`h-[9px] flex-1 rounded-[10px] transition-colors duration-300 ${i < activeStep ? 'bg-[#0255AF]' : 'bg-[#D9D9D9]'}`}
         />
       ))}
     </div>
@@ -70,13 +80,12 @@ export default function AIResult() {
 
   return (
     <CustomerSidebar>
-      <div className="relative box-border px-4 py-6 sm:px-9">
+      <div className="relative box-border w-full px-5 py-8 sm:px-10 lg:py-10 lg:pl-[47px] lg:pr-[57px]">
         <ExitRequestControl requestId={requestId} />
-        <StepProgress activeStep={3} />
-
-        <h1 className="m-0 mb-6 font-[Quicksand] text-[32px] font-bold text-[#005FCA] sm:text-[40px] lg:text-[48px]">
+        <h1 className="m-0 mb-4 font-[Quicksand] text-[32px] font-bold leading-tight text-[#005FCA] sm:text-[40px] lg:text-[48px]">
           Creating Service Request
         </h1>
+        <StepProgress activeStep={3} />
 
         {status === 'loading' && (
           <div className="flex flex-col items-center justify-center gap-4 py-16 text-center">

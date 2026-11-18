@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Image, Text, TouchableOpacity, Keyboard, Platform, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useChatUnreadCount, useChatUnreadPolling } from '../utils/chatUnread';
+import { useTrackBadges, useTrackBadgePolling } from '../utils/trackBadges';
 
 const NAVY = '#18315B'; // matches the design: active circle + labels
 
@@ -56,8 +57,12 @@ const CustomerNavBar = ({ navigationRef, routeName }) => {
     // Polls only while the bar is visible (i.e. the user is signed in on a tab screen).
     useChatUnreadPolling(!!activeTab);
     const unreadChatCount = useChatUnreadCount();
-    // Add more tabs here later (e.g. a Requests count) without touching the render code.
-    const badgeCounts = { MessageCustomer: unreadChatCount };
+    // Track icon indicator: requests with something new for the customer (new quotation, provider
+    // progress, ...). Polled like the chat count; cleared by tapping the Track icon (see handlePress).
+    useTrackBadgePolling(!!activeTab, routeName);
+    const { counts: trackCounts, markNavSeen } = useTrackBadges();
+    // Add more tabs here later without touching the render code.
+    const badgeCounts = { MessageCustomer: unreadChatCount, Track: trackCounts.nav };
     const [keyboardVisible, setKeyboardVisible] = useState(false);
 
     // Hide the bar while the keyboard is open (chat input, search bar) so it doesn't
@@ -73,11 +78,19 @@ const CustomerNavBar = ({ navigationRef, routeName }) => {
         };
     }, []);
 
+    // Being on the Track screen means the customer is looking at it, so its nav indicator stays cleared
+    // (e.g. a quotation arrives while Track is open, or Track was opened from a deep link).
+    useEffect(() => {
+        if (routeName === 'Track' && trackCounts.nav > 0) markNavSeen();
+    }, [routeName, trackCounts.nav, markNavSeen]);
+
     if (!activeTab || keyboardVisible) return null;
 
     const handlePress = (tabKey) => {
         // Compare with the screen we're actually on (not the highlighted tab), so Home
         // still works from History, where Home is highlighted but we're not on the dashboard.
+        // Tapping the Track icon clears its indicator right away (the per-tab ones on Track stay until tapped).
+        if (tabKey === 'Track') markNavSeen();
         if (tabKey === routeName || !navigationRef.isReady()) return;
         navigationRef.navigate(tabKey);
     };

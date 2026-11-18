@@ -26,10 +26,16 @@ const { getProviderFileUrl, getUserPhotoUrl } = require('../utils/storage');
 const { analyzeSentiment } = require('../utils/ai_sentiment');
 const { supabase } = require('../config/supabase');
 const {
+  APPOINTMENT_HOURS,
+  formatAppointmentSlot,
+  isWholeDayBlocked,
+} = require('../utils/appointment_slots');
+const {
   INITIAL_FEE_RATE,
   CUSTOMER_DECLINED_QUOTATION_REASON,
   quoteBreakdown,
   serviceFeeFor,
+  initialAmountFor,
   feeSplit,
 } = require('../utils/pricing');
 
@@ -104,26 +110,28 @@ const paymentReceipt = async (row, payment) => {
     serviceFee,
     total,
     method: payment.method,
+    initialPercent: payment.stage === 'initial' ? Math.round(INITIAL_FEE_RATE * 10000) / 100 : null,
     reference: payment.paymongo_payment_id || payment.checkout_session_id || '',
   };
 };
 
 // What is still due per payment stage (server-computed, so the apps never decide the amount):
-//   initial    = INITIAL_FEE_RATE of the total (labor + parts + service fee), minus what was paid as 'initial'
-//   additional = approved additional payments not paid yet (no service fee on these)
-//   final      = total + approved additional - everything already paid
+//   initial    = 20% of (labor + parts), plus 5% of that initial provider amount
+//   additional = approved additional payments not paid yet (no service fee)
+//   final      = total + approved additional - everything already paid; includes the remaining 5% fee
 const computePaymentDue = async (row) => {
   const [recipients, quotations, paymentRequests, payments] = await Promise.all([
     Request.listRecipients(row.request_id),
     Request.listQuotations(row.request_id),
     Workflow.listPaymentRequests([row.request_id]),
-    Workflow.listPayments([row.request_id]),
+    Workflow.listPayments([row.request_id]).then(reconcilePendingPayments),
   ]);
 
   const providerId = pickProviderId(row, recipients);
   const quote = quotations.find((q) => q.provider_id === providerId) || quotations[0] || null;
   const breakdown = quote ? quoteBreakdown(quote) : null;
   const quoteTotal = breakdown ? breakdown.total : 0;
+  const initialCharge = breakdown ? initialAmountFor(breakdown.labor, breakdown.parts) : 0;
   const approvedExtras = paymentRequests
     .filter((p) => p.status === 'approved')
     .reduce((sum, p) => sum + Number(p.amount || 0), 0);
@@ -141,7 +149,7 @@ const computePaymentDue = async (row) => {
     paid: round2(paid),
     serviceFee: breakdown ? breakdown.serviceFee : 0,
     due: {
-      initial: round2(Math.max(0, quoteTotal * INITIAL_FEE_RATE - paidFor('initial'))),
+      initial: round2(Math.max(0, initialCharge - paidFor('initial'))),
       additional: round2(Math.max(0, approvedExtras - paidFor('additional'))),
       final: round2(Math.max(0, total - paid)),
     },
@@ -216,6 +224,56 @@ const markNotificationsSeen = asyncHandler(async (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Provider tab badges (mobile nav bar: Requests + Jobs) ----
+// The numbers are notifications the provider has not "tab-seen" yet. They use their own column
+// (notifications.tab_seen_at, see migrations/provider_tab_badges.sql) so tapping the bell
+// (seen_at) and opening a tab clear their badges independently.
+//   Requests = 'new_request'        (a customer sent this provider a request)
+//   Jobs     = 'quotation_accepted' (a customer approved the provider's quotation -> a new job)
+const TAB_BADGE_TYPES = {
+  requests: ['new_request'],
+  jobs: ['quotation_accepted'],
+};
+
+const countUnseenTabNotifications = async (userId, types) => {
+  const { count, error } = await supabase
+    .from('notifications')
+    .select('notification_id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .in('type', types)
+    .is('tab_seen_at', null);
+  if (error) throw new ApiError(500, 'Could not load the tab counts');
+  return count ?? 0;
+};
+
+const providerBadgeCounts = async (userId) => {
+  const [requests, jobs] = await Promise.all([
+    countUnseenTabNotifications(userId, TAB_BADGE_TYPES.requests),
+    countUnseenTabNotifications(userId, TAB_BADGE_TYPES.jobs),
+  ]);
+  return { requests, jobs };
+};
+
+// GET /api/provider/badge-counts -> { requests, jobs }
+const getProviderBadgeCounts = asyncHandler(async (req, res) => {
+  res.json(await providerBadgeCounts(req.user.user_id));
+});
+
+// POST /api/provider/badge-counts/seen  body: { tab: 'requests' | 'jobs' } -> { requests, jobs }
+// Called when the provider taps (or lands on) that tab: clears only that tab's badge.
+const markProviderBadgeSeen = asyncHandler(async (req, res) => {
+  const types = TAB_BADGE_TYPES[String(req.body.tab || '')];
+  if (!types) throw new ApiError(400, "tab must be 'requests' or 'jobs'");
+  const { error } = await supabase
+    .from('notifications')
+    .update({ tab_seen_at: new Date().toISOString() })
+    .eq('user_id', req.user.user_id)
+    .in('type', types)
+    .is('tab_seen_at', null);
+  if (error) throw new ApiError(500, 'Could not update the tab badge');
+  res.json(await providerBadgeCounts(req.user.user_id));
+});
+
 // GET /api/notifications?limit -> { notifications: [{ id, type, message, requestId, readAt, createdAt }] }
 const listNotifications = asyncHandler(async (req, res) => {
   const audience = audienceOf(req);
@@ -250,31 +308,38 @@ const markNotificationRead = asyncHandler(async (req, res) => {
 
 // ============================ CUSTOMER ============================
 
-// GET /api/service-requests/active -> { activeRepair } (200 with null = none)
-// The dashboard's "Active Repair" card: the newest request still in play.
+// GET /api/service-requests/active -> { activeRepair, activeRepairs } (activeRepair null / [] = none)
+// The dashboard's "Active Repair" card. A request is an ACTIVE REPAIR only once the provider quoted it,
+// the customer approved the quotation (Approved / In Progress) AND paid it (a paid payment exists).
+// Requests still Pending (sent, quoted, waiting for the customer) or approved-but-unpaid are NOT active.
+// `activeRepair` is the newest one (kept for the web app); `activeRepairs` lists up to 5, newest first.
+const ACTIVE_REPAIR_LIMIT = 5;
 const getActiveRepair = asyncHandler(async (req, res) => {
-  const rows = (await Request.listForCustomer(req.user.user_id)).filter((r) =>
-    ['Pending', 'Approved', 'In Progress'].includes(r.request_status)
+  const inProgress = (await Request.listForCustomer(req.user.user_id)).filter((r) =>
+    ['Approved', 'In Progress'].includes(r.request_status)
   );
-  const row = rows[0];
-  if (!row) return res.json({ activeRepair: null });
+  if (inProgress.length === 0) return res.json({ activeRepair: null, activeRepairs: [] });
 
-  const recipients = await Request.listRecipients(row.request_id);
-  const providerId = pickProviderId(row, recipients);
-  const users = await Request.findUsersByIds([providerId].filter(Boolean));
-  res.json({
-    activeRepair: {
-      requestId: refOf(row),
-      requestNumber: refOf(row),
-      status: row.request_status,
-      statusLabel: row.request_status,
-      category: row.category,
-      // The customer's problem description (service_requests.description) for the dashboard card.
-      description: row.description || '',
-      providerName: users[providerId]?.name || null,
-      createdAt: row.created_at,
-    },
-  });
+  const payments = await Workflow.listPayments(inProgress.map((r) => r.request_id)).catch(() => []);
+  const paidIds = new Set(payments.filter((p) => p.status === 'paid').map((p) => p.request_id));
+  const rows = inProgress.filter((r) => paidIds.has(r.request_id)).slice(0, ACTIVE_REPAIR_LIMIT);
+  if (rows.length === 0) return res.json({ activeRepair: null, activeRepairs: [] });
+
+  const recipientLists = await Promise.all(rows.map((r) => Request.listRecipients(r.request_id)));
+  const providerIds = rows.map((r, i) => pickProviderId(r, recipientLists[i]));
+  const users = await Request.findUsersByIds(providerIds.filter(Boolean));
+  const activeRepairs = rows.map((row, i) => ({
+    requestId: refOf(row),
+    requestNumber: refOf(row),
+    status: row.request_status,
+    statusLabel: row.request_status,
+    category: row.category,
+    // The customer's problem description (service_requests.description) for the dashboard card.
+    description: row.description || '',
+    providerName: users[providerIds[i]]?.name || null,
+    createdAt: row.created_at,
+  }));
+  res.json({ activeRepair: activeRepairs[0], activeRepairs });
 });
 
 // ---------------------------- TRACKING (customer) ----------------------------
@@ -283,36 +348,48 @@ const getActiveRepair = asyncHandler(async (req, res) => {
 // documented above getTrackedRequests in the mobile app's servicerequest_api.js.
 
 // The customer's tracking indicator depends on how the service is delivered (service_requests
-// .service_location_type, 'home' | 'shop'; anything else is treated as shop):
-//   Shop-based: Assessing -> Repairing -> Quality Checking -> Completed   (all pushed by the provider)
-//   Home-based: Request received -> Quotation approved -> Service Provider is on the way -> Completed
-//               (the first two come from the request itself; the provider pushes 'On the way' and 'Completed')
-const STEP_LABELS = { 'Quality Check': 'Quality Checking', 'On the way': 'Service Provider is on the way' };
-const ON_THE_WAY_NOTE = 'Service provider is now heading to your door step';
-const HOME_PROVIDER_STAGES = ['On the way', 'Completed'];
+// .service_location_type, 'home' | 'shop'; anything else is treated as shop). Every step is pushed
+// by the service provider (POST .../progress or PATCH /provider/jobs/:id/status):
+//   Shop-based: Assessing -> Repairing -> Quality Checking -> Completed
+//   Home-based: Preparing -> Service Provider is on the way -> Arrived at the Customer's location -> Completed
+const STEP_LABELS = {
+  'Quality Check': 'Quality Checking',
+  'On the way': 'Service Provider is on the way',
+  Arrived: "Arrived at the Customer's location",
+};
+const HOME_PROVIDER_STAGES = ['Preparing', 'On the way', 'Arrived', 'Completed'];
 
 const locationTypeOf = (row) => (row.service_location_type === 'home' ? 'home' : 'shop');
-// Progress steps the provider may push for this request (see updateJobProgress).
+// Progress steps the provider may push for this request (see updateJobProgress / updateJobStatus).
 const stagesFor = (row) => (locationTypeOf(row) === 'home' ? HOME_PROVIDER_STAGES : JOB_STAGES);
 
-const buildTimeline = (row, updates, approvedAt) => {
-  const stepOf = (step) => {
+// [{ label, timestamp, description, done }] in the order of the request's own step list.
+// A step the provider skipped is shown as done once a LATER step was pushed (it cannot be
+// "arrived" while "preparing" is still grey), and a request already marked Completed always
+// has its last step done.
+const buildTimeline = (row, updates /* , approvedAt (kept for callers) */) => {
+  const steps = stagesFor(row).map((step) => {
     const hit = updates.find((u) => u.step === step);
-    return { label: STEP_LABELS[step] || step, timestamp: hit ? hit.created_at : null, description: hit?.notes || null, done: Boolean(hit) };
-  };
-  if (locationTypeOf(row) === 'home') {
-    const onTheWay = stepOf('On the way');
-    const completed = stepOf('Completed');
-    // While the provider is travelling, the step shows this note instead of the date.
-    if (onTheWay.done && !completed.done) onTheWay.subtext = ON_THE_WAY_NOTE;
-    return [
-      { label: 'Request received', timestamp: row.created_at, description: null, done: true },
-      { label: 'Quotation approved', timestamp: approvedAt || null, description: null, done: true },
-      onTheWay,
-      completed,
-    ];
+    return {
+      label: STEP_LABELS[step] || step,
+      timestamp: hit ? hit.created_at : null,
+      description: hit?.notes || null,
+      done: Boolean(hit),
+    };
+  });
+  const last = steps.length - 1;
+  if (row.request_status === 'Completed' && !steps[last].done) {
+    steps[last].done = true;
+    steps[last].timestamp = row.updated_at || null;
   }
-  return JOB_STAGES.map(stepOf);
+  const lastDone = steps.reduce((max, step, i) => (step.done ? i : max), -1);
+  for (let i = lastDone - 1; i >= 0; i -= 1) {
+    if (!steps[i].done) {
+      steps[i].done = true;
+      steps[i].timestamp = steps[i + 1].timestamp;
+    }
+  }
+  return steps;
 };
 
 const getTracking = asyncHandler(async (req, res) => {
@@ -330,7 +407,7 @@ const getTracking = asyncHandler(async (req, res) => {
       Workflow.listScheduleProposals(requestIds),
       Workflow.listPaymentRequests(requestIds),
       Workflow.listProgressUpdates(requestIds),
-      Workflow.listPayments(requestIds).catch(() => []),
+      Workflow.listPayments(requestIds).then(reconcilePendingPayments).catch(() => []),
     ]);
 
   const providerIds = [
@@ -352,6 +429,10 @@ const getTracking = asyncHandler(async (req, res) => {
       providerName,
       // 'home' | 'shop' — the app shows the matching tracking indicator.
       serviceLocationType: locationTypeOf(row),
+      // The Track screen's Categories dropdown filters on this (Home Repair | Automotive |
+      // IT-Related Devices | Phone Device).
+      category: row.category,
+      serviceCategory: row.category,
     };
     const cardId = (suffix) => `${refOf(row)}-${suffix}`;
     const my = (list) => list.filter((x) => x.request_id === row.request_id);
@@ -558,6 +639,50 @@ const answerPaymentRequest = (answer) =>
     res.json({ ok: true, status: answer });
   });
 
+// POST /api/service-requests/:requestId/payment-requests/:paymentRequestId/negotiate
+// body: { proposedAmount?, message? } — the customer's counter-offer on an additional payment.
+// It does not answer the request: it stays 'pending' so the customer can still approve or
+// decline it later. The counter-offer is posted in the request's chat thread (so the provider
+// sees it with the rest of the conversation) and the provider is notified.
+const negotiatePaymentRequest = asyncHandler(async (req, res) => {
+  const row = await getOwnedRequest(req);
+  const pr = await Workflow.findPaymentRequest(req.params.paymentRequestId);
+  if (!pr || pr.request_id !== row.request_id) throw new ApiError(404, 'Payment request not found');
+  if (pr.status !== 'pending') throw new ApiError(409, 'This payment request was already answered');
+
+  const hasAmount =
+    req.body.proposedAmount !== undefined && req.body.proposedAmount !== null && req.body.proposedAmount !== '';
+  const proposedAmount = hasAmount ? Number(req.body.proposedAmount) : null;
+  if (hasAmount && (!Number.isFinite(proposedAmount) || proposedAmount <= 0)) {
+    throw new ApiError(400, 'Enter a valid amount');
+  }
+  const note = String(req.body.message || '').trim();
+  if (!hasAmount && !note) throw new ApiError(400, 'Enter an amount or a message for the service provider');
+  if (note.length > 500) throw new ApiError(400, 'Messages are limited to 500 characters');
+
+  const text =
+    `Negotiation for the additional ${peso(pr.amount)} on ${refOf(row)}` +
+    (hasAmount ? `: I can pay ${peso(proposedAmount)} instead.` : '.') +
+    (note ? ` ${note}` : '');
+  await Workflow.addMessage({
+    request_id: row.request_id,
+    sender_id: req.user.user_id,
+    body: text,
+    seen_by_customer: true,
+    seen_by_provider: false,
+  });
+  const customerName = await customerNameOf(row);
+  await Workflow.notify({
+    userId: pr.provider_id,
+    type: 'payment_negotiation',
+    message: `${customerName} wants to negotiate the additional ${peso(pr.amount)} for ${refOf(row)}${
+      hasAmount ? ` (offered ${peso(proposedAmount)})` : ''
+    }. Check your messages.`,
+    requestId: row.request_id,
+  });
+  res.status(201).json({ ok: true, status: 'pending', proposedAmount });
+});
+
 // POST /api/service-requests/:requestId/quotation/respond  body: { approve }
 // approve: the request is booked with that provider (ERD: "Accepted by").
 // decline: the quotation is refused and the request is closed (it moves to the customer's Closed tab,
@@ -637,6 +762,29 @@ const markPaymentPaid = async (payment, paymongoPaymentId = null) => {
     }
   }
   return updated;
+};
+
+// A PayMongo payment stays 'pending' in our table until the webhook (or the Payment screen's
+// status poll) marks it paid. If the customer comes back to Track / pays again before that
+// happens, the request would still look unpaid and "Proceed to Payment" would show again.
+// So every read that decides what is due asks PayMongo about the pending checkouts first.
+const reconcilePendingPayments = async (payments) => {
+  if (!config.paymongo.secretKey) return payments;
+  return Promise.all(
+    payments.map(async (p) => {
+      if (p.status !== 'pending' || !p.checkout_session_id) return p;
+      try {
+        const session = await paymongo.getCheckoutSession(p.checkout_session_id);
+        if (paymongo.sessionIsPaid(session)) {
+          const paid = session.attributes.payments?.find((x) => x?.attributes?.status === 'paid');
+          return await markPaymentPaid(p, paid?.id || null);
+        }
+      } catch (err) {
+        console.error('[paymongo] reconcile failed:', err.message); // keep the stored status
+      }
+      return p;
+    })
+  );
 };
 
 const payForRequest = asyncHandler(async (req, res) => {
@@ -860,7 +1008,8 @@ const paymentReturn = (req, res) => {
   // not set on the deployed server, which would strand web customers on localhost.
   const originParam = /^https?:\/\//i.test(String(req.query.origin || '')) ? String(req.query.origin) : '';
   const webOrigin = (originParam || config.clientOrigin.split(',')[0].trim()).replace(/\/+$/, '');
-  const webTrackUrl = `${webOrigin}/customer/requests?payment=${status}`;
+  const webTab = ok ? TRACK_TAB_BY_STAGE[req.query.stage] || 'done' : '';
+  const webTrackUrl = `${webOrigin}/customer/requests?payment=${status}${webTab ? `&tab=${webTab}` : ''}`;
 
   if (req.query.client === 'web') {
     return res.redirect(webTrackUrl);
@@ -1000,13 +1149,22 @@ const sendQuotation = asyncHandler(async (req, res) => {
     status: 'quoted',
     responded_at: new Date().toISOString(),
   });
+  const breakdown = quoteBreakdown(quote);
   await Workflow.notify({
     userId: row.customer_id,
     type: 'quotation_received',
-    message: `You received a quotation for ${refOf(row)}: ${peso(quote.total ?? labor + parts + serviceFeeFor(labor, parts))}.`,
+    message: `You received a quotation for ${refOf(row)}: ${peso(breakdown.total)}.`,
     requestId: row.request_id,
   });
-  res.status(201).json({ quotation: { id: quote.quotation_id, labor, parts, total: labor + parts } });
+  res.status(201).json({
+    quotation: {
+      id: quote.quotation_id,
+      labor: breakdown.labor,
+      parts: breakdown.parts,
+      serviceFee: breakdown.serviceFee,
+      total: breakdown.total,
+    },
+  });
 });
 
 // POST /api/provider/service-requests/:requestId/schedule-proposals  body: { scheduledAt, reason }
@@ -1069,10 +1227,18 @@ const updateJobProgress = asyncHandler(async (req, res) => {
   if (row.request_status === 'Approved') {
     await Request.update(row.request_number, { request_status: 'In Progress' });
   }
+  // The last step finishes the job (same effect as POST .../complete) so the customer gets
+  // "Proceed to Payment" whichever endpoint the provider app used.
+  if (step === 'Completed' && row.request_status !== 'Completed') {
+    await Request.update(row.request_number, { request_status: 'Completed' });
+  }
   await Workflow.notify({
     userId: row.customer_id,
-    type: 'progress_update',
-    message: `${refOf(row)} update: ${step}.`,
+    type: step === 'Completed' ? 'job_completed' : 'progress_update',
+    message:
+      step === 'Completed'
+        ? `${refOf(row)} is done! Open Track to proceed to payment.`
+        : `${refOf(row)} update: ${STEP_LABELS[step] || step}.`,
     requestId: row.request_id,
   });
   res.status(201).json({ ok: true, step });
@@ -1111,8 +1277,9 @@ const providerRequests = async (providerId, statuses) => {
 };
 
 const toJobDto = (row, customer, updates, payments) => {
+  const stages = stagesFor(row); // Shop-based vs Home-based steps
   const doneSteps = (updates || []).map((u) => u.step);
-  const lastIndex = doneSteps.reduce((max, step) => Math.max(max, JOB_STAGES.indexOf(step)), -1);
+  const lastIndex = doneSteps.reduce((max, step) => Math.max(max, stages.indexOf(step)), -1);
   const status =
     row.request_status === 'Completed' ? 'Done' : row.request_status === 'Pending' ? 'Pending' : 'Active';
   return {
@@ -1124,9 +1291,10 @@ const toJobDto = (row, customer, updates, payments) => {
     statusLabel: status,
     aiSuggestion: row.ai_diagnosis?.status === 'done' ? row.ai_diagnosis.probableCause : null,
     aiConfidence: row.ai_diagnosis?.status === 'done' ? row.ai_diagnosis.confidencePercent ?? null : null,
-    stages: JOB_STAGES,
+    stages,
+    serviceLocationType: locationTypeOf(row),
     currentStepIndex: Math.max(lastIndex, 0),
-    currentStepLabel: lastIndex >= 0 ? JOB_STAGES[lastIndex] : 'Not started',
+    currentStepLabel: lastIndex >= 0 ? stages[lastIndex] : 'Not started',
     progressPaymentPaid: (payments || []).length > 0,
     // Sum of what the customer has actually paid so far (the web Active Jobs card shows it).
     paidTotal: (payments || [])
@@ -1156,6 +1324,7 @@ const getProviderDashboard = asyncHandler(async (req, res) => {
   const newest = active[0];
 
   res.json({
+    appointmentHours: APPOINTMENT_HOURS,
     stats: {
       activeJobs: active.length,
       jobsThisMonth: thisMonth.length,
@@ -1206,9 +1375,10 @@ const listJobs = asyncHandler(async (req, res) => {
 const getJob = asyncHandler(async (req, res) => {
   const { row } = await getProviderRequest(req);
   const updates = await Workflow.listProgressUpdates([row.request_id]);
-  const lastIndex = updates.reduce((max, u) => Math.max(max, JOB_STAGES.indexOf(u.step)), -1);
+  const stages = stagesFor(row);
+  const lastIndex = updates.reduce((max, u) => Math.max(max, stages.indexOf(u.step)), -1);
   res.json({
-    job: { id: refOf(row), stages: JOB_STAGES, currentStage: lastIndex >= 0 ? JOB_STAGES[lastIndex] : '' },
+    job: { id: refOf(row), stages, currentStage: lastIndex >= 0 ? stages[lastIndex] : '' },
   });
 });
 
@@ -1216,7 +1386,8 @@ const getJob = asyncHandler(async (req, res) => {
 const updateJobStatus = asyncHandler(async (req, res) => {
   const { row } = await getProviderRequest(req);
   const stage = String(req.body.stage || '').trim();
-  if (!JOB_STAGES.includes(stage)) throw new ApiError(400, `Stage must be one of: ${JOB_STAGES.join(', ')}`);
+  const allowedStages = stagesFor(row);
+  if (!allowedStages.includes(stage)) throw new ApiError(400, `Stage must be one of: ${allowedStages.join(', ')}`);
 
   let photoPath = null;
   if (req.file) photoPath = await Request.uploadPhoto(req.user.user_id, req.file);
@@ -1237,7 +1408,7 @@ const updateJobStatus = asyncHandler(async (req, res) => {
   await Workflow.notify({
     userId: row.customer_id,
     type: 'progress_update',
-    message: `${refOf(row)} update: ${stage}.`,
+    message: `${refOf(row)} update: ${STEP_LABELS[stage] || stage}.`,
     requestId: row.request_id,
   });
   res.json({ ok: true, stage });
@@ -1506,10 +1677,7 @@ const to24h = (slot) => {
   return `${String(h).padStart(2, '0')}:${m[2]}`;
 };
 
-const to12h = (slot24) => {
-  const h = Number(slot24.slice(0, 2));
-  return `${h % 12 === 0 ? 12 : h % 12}:00 ${h >= 12 ? 'PM' : 'AM'}`;
-};
+const to12h = (slot24) => formatAppointmentSlot(slot24);
 
 const availabilityPayload = (rows) => {
   const availability = {};
@@ -1552,13 +1720,8 @@ const currentCalendarSlot = () => {
   };
 };
 
-// The bookable slots of one calendar day, matching each provider dashboard's
-// TIME_SLOTS (web: 8-11 AM + 1-4 PM; mobile: 9 AM-5 PM). Blocking every slot of
-// either list is how a provider marks the whole day unavailable on the calendar.
-const WEB_DAY_SLOTS = ['08:00', '09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00'];
-const MOBILE_DAY_SLOTS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
-const isWholeDayBlocked = (slots) =>
-  WEB_DAY_SLOTS.every((s) => slots.has(s)) || MOBILE_DAY_SLOTS.every((s) => slots.has(s));
+// Blocking every universal appointment slot marks the whole day unavailable.
+// Profile working hours are independent and never alter this calendar grid.
 
 // Ids of the providers unavailable right now: they marked the current date/hour
 // slot unavailable, OR they blocked the whole of today on the calendar (the
@@ -1571,7 +1734,7 @@ const unavailableProviderIds = async (providerIds) => {
   const blockedByProvider = new Map();
   rows.forEach((r) => {
     if (!blockedByProvider.has(r.provider_id)) blockedByProvider.set(r.provider_id, new Set());
-    blockedByProvider.get(r.provider_id).add(r.slot);
+    blockedByProvider.get(r.provider_id).add(to24h(String(r.slot).slice(0, 5)) || to24h(r.slot));
   });
   const unavailable = new Set();
   blockedByProvider.forEach((slots, providerId) => {
@@ -1748,12 +1911,15 @@ module.exports = {
   markNotificationRead,
   getUnreadNotificationCount,
   markNotificationsSeen,
+  getProviderBadgeCounts,
+  markProviderBadgeSeen,
   getActiveRepair,
   getCustomerHistory,
   getPaymentDue,
   getTracking,
   answerScheduleProposal,
   answerPaymentRequest,
+  negotiatePaymentRequest,
   respondToQuotation,
   payForRequest,
   getPaymentStatus,

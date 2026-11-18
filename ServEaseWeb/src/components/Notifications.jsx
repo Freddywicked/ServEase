@@ -10,7 +10,7 @@ import { getNotifications, markNotificationRead } from '../api/client';
    Used by CustomerSidebar (viewer="customer"), ServiceProviderSidebar (viewer="provider") and
    AdminSidebar (viewer="admin").
    The red number on the bell is the count of UNREAD notifications for that viewer only (99+ above 99).
-   Each viewer asks the backend for its own role's notifications (GET /api/notifications?role=...), so a
+   Each viewer asks the backend for its own role's notifications (GET /api/notifications?audience=...), so a
    customer notification never counts on the provider or admin bell. It refreshes every 30 s, when the
    tab regains focus, and when the popup opens. Clicking the bell marks everything in the popup as read,
    so the number disappears; clicking a single notification also opens its destination.
@@ -32,7 +32,7 @@ import { getNotifications, markNotificationRead } from '../api/client';
    DESTINATIONS (edit freely)
      type                           viewer     opens
      -----------------------------  ---------  ------------------------------------------------
-     quotation_received             customer   /customer/requests?tab=approved
+     quotation_received             customer   /customer/requests?tab=sent
      schedule_proposed              customer   /customer/requests?tab=approved
      request_accepted               customer   /customer/requests?tab=ongoing
      provider_on_the_way            customer   /customer/requests?tab=ongoing
@@ -68,7 +68,7 @@ import { getNotifications, markNotificationRead } from '../api/client';
 
 const ROUTES_BY_VIEWER = {
   customer: {
-    quotation_received: () => '/customer/requests?tab=approved',
+    quotation_received: () => '/customer/requests?tab=sent',
     schedule_proposal: () => '/customer/requests?tab=approved',
     schedule_proposed: () => '/customer/requests?tab=approved',
     request_accepted: () => '/customer/requests?tab=ongoing',
@@ -127,7 +127,7 @@ const getRoute = (notification, viewer) =>
 
 /* ------------------------------ DATA LAYER (swap for the backend) ------------------------------ */
 
-// Live data: GET /api/notifications?role=<viewer> returns the logged-in user's notifications that are
+// Live data: GET /api/notifications?audience=<viewer> returns the logged-in user's notifications that are
 // addressed to that role (newest first). `readAt` (ISO or null) becomes the local `read` flag.
 // Safety net: if the backend tags a notification with a role (`role` / `recipientRole`) that is not this
 // viewer's, it is dropped here too, so it can never light up the wrong bell.

@@ -33,7 +33,7 @@ import { getPaymentDue, getPaymentStatus, payForRequest } from '../api/client';
           Polled after the payment to confirm it; once paid, the receipt popup opens.
           The payment (or its `receipt` object) feeds the receipt — see buildReceipt below
           for the fields it reads (receiptNo, requestNumber, paidAt, customerName,
-          providerName, subtotal, serviceFee, total, method, reference).
+          providerName, subtotal, parts, serviceFee, total, method, reference, initialPercent).
    Optional router state used as a fallback for the receipt: requestNumber, customerName,
    providerName, serviceFee.
    ===================================================================================== */
@@ -68,21 +68,26 @@ const MONTHS = [
 const METHOD_LABELS = { gcash: 'GCash', qrph: 'QRPh', card: 'Debit/Credit Card', cash: 'Cash' };
 
 // Per payment stage: what the receipt calls it, the line item, and the modal subtitle.
+// `subtitle` receives the receipt so the initial-fee wording can show the percentage the
+// backend charged (e.g. "Your 20% initial payment has been processed.").
 const STAGE_COPY = {
   initial: {
     type: 'Initial Fee',
     lineItem: 'Initial repair payment',
-    subtitle: 'Your initial payment has been processed.',
+    subtitle: (r) =>
+      r?.initialPercent
+        ? `Your ${r.initialPercent}% initial payment has been processed.`
+        : 'Your initial payment has been processed.',
   },
   additional: {
     type: 'Additional payment fee',
     lineItem: 'Additional payment',
-    subtitle: 'The payment for additional parts has been processed.',
+    subtitle: () => 'The payment for additional parts has been processed.',
   },
   final: {
     type: 'Final Fee',
     lineItem: 'Final repair payment',
-    subtitle: 'Your final payment has been processed.',
+    subtitle: () => 'Your final payment has been processed.',
   },
 };
 
@@ -113,7 +118,19 @@ function buildReceipt(payment, methodId, fallback = {}) {
   const stageCopy = STAGE_COPY[fallback.stage] || STAGE_COPY.initial;
   const total = Number(src.total ?? src.amount ?? fallback.total) || 0;
   const serviceFee = Number(src.serviceFee ?? src.service_fee ?? fallback.serviceFee ?? 0) || 0;
+  const parts = Number(src.parts ?? src.partsTotal ?? src.parts_total ?? 0) || 0;
+  const subtotal = Number(src.subtotal ?? total - serviceFee - parts) || 0;
   const method = src.method ?? methodId;
+
+  // The charged total includes this stage's service fee, so it retains the configured 20%
+  // booking-payment percentage. Dividing the subtotal would incorrectly remove the fee share.
+  const repairTotal = Number(fallback.repairTotal) || 0;
+  const percentFromBackend = Number(src.initialPercent ?? src.initial_percent ?? fallback.initialPercent);
+  const initialPercent = Number.isFinite(percentFromBackend) && percentFromBackend > 0
+    ? percentFromBackend
+    : fallback.stage === 'initial' && repairTotal > 0 && total > 0
+      ? Math.round((total / repairTotal) * 100)
+      : null;
 
   return {
     receiptNo: src.receiptNo ?? src.receipt_number ?? '',
@@ -123,9 +140,11 @@ function buildReceipt(payment, methodId, fallback = {}) {
     customerName: src.customerName ?? src.customer_name ?? fallback.customerName ?? '',
     providerName: src.providerName ?? src.provider_name ?? fallback.providerName ?? '',
     lineItem: stageCopy.lineItem,
-    subtotal: Number(src.subtotal ?? total - serviceFee) || 0,
+    subtotal,
+    parts,
     serviceFee,
     total,
+    initialPercent,
     methodLabel: METHOD_LABELS[method] || METHOD_LABELS[methodId] || '—',
     reference: src.reference ?? src.paymentReference ?? src.payment_reference ?? '',
   };
@@ -149,7 +168,7 @@ function ReceiptCard({ receipt }) {
     : '';
 
   return (
-    <div className="box-border min-h-[410px] w-full rounded-[10px] border-[5px] border-[#18315B] bg-white pb-[16px] pl-[34px] pr-[22px] pt-[10px] font-[Inter]">
+    <div className="box-border min-h-[410px] w-full rounded-[10px] border-[5px] border-[#18315B] bg-white pb-[15px] pl-[34px] pr-[22px] pt-[10px] font-[Inter]">
       {/* Header: logo on the left, title centred across the card */}
       <div className="relative -ml-[17px] flex h-[54px] items-center">
         <img src={receiptLogo} alt="ServEase" className="h-[54px] w-[54px] flex-none object-contain" />
@@ -159,7 +178,7 @@ function ReceiptCard({ receipt }) {
       </div>
 
       {/* Details */}
-      <div className="mt-[14px] pb-[5px] pl-[4px]">
+      <div className="mt-[14px] pb-[6px] pl-[4px]">
         <MetaRow label="Receipt no." value={receipt.receiptNo} className="leading-[19px]" />
         <MetaRow label="Service Request" value={requestNumber} className="leading-[19px]" />
         <MetaRow label="Date Paid" value={receipt.datePaid} className="leading-[19px]" />
@@ -169,7 +188,7 @@ function ReceiptCard({ receipt }) {
       <Divider />
 
       {/* Parties */}
-      <div className="grid grid-cols-2 py-[10px] text-center leading-[14px] text-black">
+      <div className="grid grid-cols-2 pb-[8px] pt-[10px] text-center leading-[14px] text-black">
         <div className="min-w-0">
           <p className="m-0 truncate text-[10px] font-bold">{receipt.customerName || '—'}</p>
           <p className="m-0 text-[9px] italic">Received from</p>
@@ -182,39 +201,39 @@ function ReceiptCard({ receipt }) {
 
       <Divider />
 
-      {/* Items */}
-      <div className="mt-[6px] pl-[4px] text-[11px] text-black">
-        <div className="flex h-[22px] items-center font-bold">
+      {/* Items — Parts and Service Fee always appear (₱0 when there are none), as in the Figma */}
+      <div className="mt-[8px] pl-[4px] text-[11px] leading-[17px] text-black">
+        <div className="flex h-[17px] items-center font-bold">
           <span className="flex-1">Description</span>
           <span className={AMOUNT_COL}>Amount</span>
         </div>
-        <div className="flex h-[22px] items-center">
+        <div className="mt-[5px] flex h-[17px] items-center">
           <span className="flex-1">{receipt.lineItem}</span>
           <span className={AMOUNT_COL}>{formatReceiptPeso(receipt.subtotal)}</span>
         </div>
-        {receipt.serviceFee > 0 && (
-          <div className="flex h-[19px] items-center">
-            <span className="flex-1">Service Fee</span>
-            <span className={AMOUNT_COL}>{formatReceiptPeso(receipt.serviceFee)}</span>
-          </div>
-        )}
+        <div className="flex h-[17px] items-center">
+          <span className="flex-1">Parts</span>
+          <span className={AMOUNT_COL}>{formatReceiptPeso(receipt.parts)}</span>
+        </div>
+        <div className="flex h-[17px] items-center">
+          <span className="flex-1">Service Fee</span>
+          <span className={AMOUNT_COL}>{formatReceiptPeso(receipt.serviceFee)}</span>
+        </div>
       </div>
 
-      <div className="mt-[2px]">
+      <div className="mt-[0px]">
         <Divider />
       </div>
 
-      <div className="mt-[6px] flex h-[22px] items-center pl-[4px] text-[11px] text-black">
+      <div className="mt-[8px] flex h-[17px] items-center pl-[4px] text-[11px] leading-[17px] text-black">
         <span className="flex-1">TOTAL</span>
         <span className={AMOUNT_COL}>{formatReceiptPeso(receipt.total)}</span>
       </div>
 
       {/* Footer */}
-      <div className="mt-[20px]">
+      <div className="mt-[21px]">
         <MetaRow label="Payment Method" value={receipt.methodLabel} className="leading-[24px]" />
-        {receipt.reference && (
-          <MetaRow label="Payment Reference" value={receipt.reference} className="leading-[24px]" />
-        )}
+        <MetaRow label="Payment Reference" value={receipt.reference} className="leading-[24px]" />
       </div>
     </div>
   );
@@ -224,7 +243,7 @@ function ReceiptCard({ receipt }) {
  * Props:
  *   receipt        object from buildReceipt()
  *   isCashFinal    true after a cash FINAL payment -> "Payment Completed" wording
- *   subtitle       line under the title (STAGE_COPY[stage].subtitle)
+ *   subtitle       line under the title (STAGE_COPY[stage].subtitle(receipt))
  *   primaryLabel   "Done" or "Rate and Review"
  *   onClose        X button
  *   onPrimary      Done / Rate and Review button
@@ -259,7 +278,7 @@ function PaymentReceiptModal({
         aria-labelledby="payment-receipt-title"
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4"
       >
-        <div className="relative box-border flex max-h-[92vh] w-full max-w-[701px] flex-col rounded-[10px] bg-white pb-[34px] pl-[44px] pr-[33px] pt-[37px]">
+        <div className="relative box-border flex max-h-[92vh] w-full max-w-[701px] flex-col rounded-[10px] bg-white pb-[29px] pl-[44px] pr-[33px] pt-[37px]">
           <button
             type="button"
             onClick={onClose}
@@ -276,7 +295,7 @@ function PaymentReceiptModal({
             {isCashFinal ? 'Payment Completed' : 'Payment Processed'}
           </h2>
           <p className="m-0 font-[Inter] text-[13px] leading-[22px] text-[#5B5959]">
-            {isCashFinal ? 'Payment completed.' : subtitle}
+            {isCashFinal ? 'Payment completed.' : subtitle?.(receipt)}
           </p>
 
           <div className="mt-[20px] min-h-0 flex-1 overflow-y-auto">
@@ -285,18 +304,18 @@ function PaymentReceiptModal({
             </div>
           </div>
 
-          <div className="mt-[29px] flex items-center justify-end gap-[15px]">
+          <div className="mt-[28px] flex items-center justify-end gap-[17px]">
             <button
               type="button"
               onClick={() => window.print()}
-              className="h-[29px] w-[151px] cursor-pointer rounded-[10px] border border-[#B1A8A8] bg-[linear-gradient(270deg,#04A5A5_0%,#0255AF_100%)] font-[Inter] text-[10px] font-bold leading-[17px] text-white hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0255AF]"
+              className="h-[35px] w-[150px] cursor-pointer rounded-[10px] border border-[#B1A8A8] bg-[linear-gradient(270deg,#04A5A5_0%,#0255AF_100%)] font-[Inter] text-[13px] font-bold leading-[22px] text-white hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0255AF]"
             >
               Download Receipt
             </button>
             <button
               type="button"
               onClick={onPrimary}
-              className="h-[27px] w-[115px] cursor-pointer rounded-[10px] border border-[#B1A8A8] bg-[#FFFDFD] font-[Inter] text-[10px] font-bold leading-[17px] text-[#414141] hover:bg-[#F3F3F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0255AF]"
+              className="h-[35px] w-[150px] cursor-pointer rounded-[10px] border border-[#B1A8A8] bg-[#FFFDFD] font-[Inter] text-[13px] font-bold leading-[22px] text-[#414141] hover:bg-[#F3F3F3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0255AF]"
             >
               {primaryLabel}
             </button>
@@ -319,6 +338,8 @@ export default function Payment({ requestId, amount, paymentType, onBack, onCont
   // The amount is read from the backend (payment-due); the router-state amount is
   // only a preview until the server answers.
   const [dueAmount, setDueAmount] = useState(amount ?? state?.amount ?? null);
+  // Total repair cost from payment-due; only used to work out the initial-fee percentage.
+  const [repairTotal, setRepairTotal] = useState(null);
   const [error, setError] = useState('');
   const [processing, setProcessing] = useState(false);
   // Receipt popup ("Payment Processed" / "Payment Completed") shown after every payment.
@@ -330,6 +351,7 @@ export default function Payment({ requestId, amount, paymentType, onBack, onCont
     getPaymentDue(resolvedRequestId)
       .then((data) => {
         if (cancelled) return;
+        if (Number.isFinite(Number(data?.total))) setRepairTotal(Number(data.total));
         const serverAmount = data?.due?.[resolvedType];
         if (Number.isFinite(serverAmount) && serverAmount > 0) setDueAmount(serverAmount);
       })
@@ -361,6 +383,7 @@ export default function Payment({ requestId, amount, paymentType, onBack, onCont
         customerName: state?.customerName,
         providerName: state?.providerName,
         serviceFee: state?.serviceFee,
+        repairTotal,
       }),
     );
   };

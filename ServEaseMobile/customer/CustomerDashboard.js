@@ -53,6 +53,15 @@ const getProblemDetails = (item) => {
     return item.aiDiagnosis ? String(formatAiSuggestion(item.aiDiagnosis) || '').trim() : '';
 };
 
+// Active Repair = a repair that is actually underway: the provider quoted, the customer approved AND
+// paid. The backend only sends those, but a request that is still Pending (sent / quoted / unpaid)
+// must never show here, so anything with a non-active status is dropped as a safety net too.
+const ACTIVE_REPAIR_STATUSES = ['approved', 'in progress', 'in_progress', 'ongoing', 'active'];
+const isActiveRepair = (item) => {
+    const status = String(item?.status ?? item?.statusLabel ?? '').trim().toLowerCase();
+    return !status || ACTIVE_REPAIR_STATUSES.includes(status);
+};
+
 const CustomerDashboard = ({ navigation, route }) => {
     const { user, provider, refreshUser } = useAuth();
     const resetDraft = useServiceRequestDraftStore((state) => state.resetDraft);
@@ -78,7 +87,7 @@ const CustomerDashboard = ({ navigation, route }) => {
             const activeData = Array.isArray(repairResult.value)
                 ? repairResult.value
                 : [repairResult.value];
-            setActiveRepairs(activeData.slice(0, PREVIEW_LIMIT));
+            setActiveRepairs(activeData.filter(isActiveRepair).slice(0, PREVIEW_LIMIT));
         } else {
             setActiveRepairs([]);
         }

@@ -2,6 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { View, Image, Text, TouchableOpacity, Keyboard, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useChatUnreadCount, useChatUnreadPolling } from '../utils/chatUnread';
+import {
+    useProviderBadgeCounts,
+    useProviderBadgePolling,
+    markProviderTabSeen,
+    setProviderViewingTab,
+} from '../utils/providerTabBadges';
 
 const NAVY = '#18315B';
 
@@ -33,6 +39,20 @@ const ACTIVE_TAB_BY_ROUTE = {
     ConversationServiceProvider: 'MessageServiceProvider', // opened from Chat
 };
 
+// Tabs whose badge is a "new since you last looked" counter kept by the backend
+// (key = the backend's tab name). The chat badge keeps using the chat-unread hook.
+const SEEN_KEY_BY_TAB = {
+    IncomingServiceRequest: 'requests',
+    Jobs: 'jobs',
+};
+
+// The badge is "seen" only when the provider is ON the tab's own screen (a detail screen
+// such as ViewServiceRequest highlights Requests but does not clear it).
+const SEEN_KEY_BY_ROUTE = {
+    IncomingServiceRequest: 'requests',
+    Jobs: 'jobs',
+};
+
 /**
  * Rendered ONCE at the app root, next to (not inside) the navigator, so it never
  * takes part in screen-transition animations. See the App.js wiring.
@@ -48,8 +68,24 @@ const ServiceProviderNavBar = ({ navigationRef, routeName }) => {
     // Polls only while the bar is visible (i.e. the user is signed in on a tab screen).
     useChatUnreadPolling(!!activeTab);
     const unreadChatCount = useChatUnreadCount();
-    // Add more tabs here later (e.g. a Requests count) without touching the render code.
-    const badgeCounts = { MessageServiceProvider: unreadChatCount };
+
+    // Unread Requests / Jobs counters from the backend (see utils/providerTabBadges.js).
+    useProviderBadgePolling(!!activeTab);
+    const { requests: newRequestCount, jobs: newJobCount } = useProviderBadgeCounts();
+
+    // While the provider is on the Requests or Jobs screen nothing counts as unseen,
+    // however they got there (tab tap, dashboard card, back button).
+    useEffect(() => {
+        setProviderViewingTab(SEEN_KEY_BY_ROUTE[routeName] || null);
+    }, [routeName]);
+
+    // Add more tabs here later without touching the render code.
+    const badgeCounts = {
+        IncomingServiceRequest: newRequestCount,
+        Jobs: newJobCount,
+        MessageServiceProvider: unreadChatCount,
+    };
+    const badgeWord = { MessageServiceProvider: 'unread' }; // everything else reads "new"
 
     // Hide the bar while the keyboard is open (chat, notes and cost inputs), so it
     // doesn't ride up on top of the keyboard.
@@ -66,6 +102,10 @@ const ServiceProviderNavBar = ({ navigationRef, routeName }) => {
     if (!activeTab || keyboardVisible) return null;
 
     const handlePress = (tabKey) => {
+        // Tapping Requests/Jobs clears its badge right away, even when we're already on it.
+        const seenKey = SEEN_KEY_BY_TAB[tabKey];
+        if (seenKey) markProviderTabSeen(seenKey);
+
         // Compare with the screen we're actually on (not the highlighted tab), so Home
         // still works from Earnings, where Home is highlighted but we're not on the dashboard.
         if (tabKey === routeName || !navigationRef.isReady()) return;
@@ -84,7 +124,7 @@ const ServiceProviderNavBar = ({ navigationRef, routeName }) => {
                             style={styles.tabItem}
                             onPress={() => handlePress(tab.key)}
                             accessibilityRole="button"
-                            accessibilityLabel={badgeCount > 0 ? `${tab.label}, ${badgeCount} unread` : tab.label}
+                            accessibilityLabel={badgeCount > 0 ? `${tab.label}, ${badgeCount} ${badgeWord[tab.key] || 'new'}` : tab.label}
                             accessibilityState={{ selected: isActive }}
                         >
                             <View style={styles.iconSlot}>
@@ -180,6 +220,7 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
     },
     label: {
+        fontFamily: 'Poppins-Regular', // Figma font; assets/fonts/Poppins-Regular.ttf (falls back to the system font if missing)
         fontSize: 12,
         lineHeight: 18,
         color: NAVY,

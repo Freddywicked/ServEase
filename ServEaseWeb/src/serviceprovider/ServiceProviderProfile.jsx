@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import ServiceProviderSidebar from '../components/ServiceProviderSidebar.jsx';
 import UserAvatar from '../components/UserAvatar.jsx';
 import * as api from '../api/client';
@@ -128,46 +128,13 @@ const getAvailability = (provider) => {
   return { days: texts[0] ?? '', hours: texts[1] ?? '' };
 };
 
-// ── Availability from the provider's calendar ─────────────────────────────
-// The provider manages availability on the dashboard ("Manage your Calendar"): they block
-// dates / time slots. The profile shows a summary of that saved data.
-
-// Keep in sync with TIME_SLOTS in ServiceProviderDashboard.jsx (the provider's working hours).
-const TIME_SLOTS = [
-  '08:00 AM', '09:00 AM', '10:00 AM', '11:00 AM',
-  '01:00 PM', '02:00 PM', '03:00 PM', '04:00 PM',
-];
+// ── Availability = the provider's working hours ──────────────────────────
+// Set on the Edit Profile screen (days + start/end time, e.g. a shop that opens 10:00 AM -
+// 6:00 PM, or a freelancer's own hours). It is NOT the calendar: the time slots under
+// "Manage your Calendar" are the universal appointment slots, and a provider can still accept
+// a request outside their working hours.
 
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const DAYS_AHEAD = 7; // the summary looks at the next 7 days, starting today
-
-const toDateKey = (date) => {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-};
-
-// '08:00 AM' -> { hour24: 8 }
-const slotHour24 = (slot) => {
-  const [time, meridiem] = slot.split(' ');
-  const hour = Number(time.split(':')[0]) % 12;
-  return meridiem === 'PM' ? hour + 12 : hour;
-};
-
-const formatHour = (hour24) => {
-  const meridiem = hour24 >= 12 ? 'PM' : 'AM';
-  const hour = hour24 % 12 === 0 ? 12 : hour24 % 12;
-  return `${hour}:00 ${meridiem}`;
-};
-
-// Working hours covered by the time slots, e.g. '8:00 AM - 5:00 PM' (each slot is one hour).
-const getWorkingHours = () => {
-  if (TIME_SLOTS.length === 0) return '';
-  const start = slotHour24(TIME_SLOTS[0]);
-  const end = slotHour24(TIME_SLOTS[TIME_SLOTS.length - 1]) + 1;
-  return `${formatHour(start)} - ${formatHour(end)}`;
-};
 
 // ['Monday','Tuesday','Wednesday','Friday'] -> 'Monday - Wednesday, Friday'
 const formatDayRanges = (days) => {
@@ -185,20 +152,13 @@ const formatDayRanges = (days) => {
   return ranges.join(', ');
 };
 
-// availabilityByDate: { '2026-10-05': { '10:00 AM': 'unavailable' } } (same shape the calendar
-// uses). A day counts as available when at least one of its time slots is not blocked.
-const summarizeAvailability = (availabilityByDate, today = new Date()) => {
-  const availableDays = [];
-  for (let offset = 0; offset < DAYS_AHEAD; offset += 1) {
-    const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset);
-    const blocked = availabilityByDate?.[toDateKey(date)] || {};
-    const hasFreeSlot = TIME_SLOTS.some((slot) => blocked[slot] !== 'unavailable');
-    if (hasFreeSlot) availableDays.push(WEEKDAYS[(date.getDay() + 6) % 7]);
-  }
-  return {
-    days: availableDays.length > 0 ? formatDayRanges(availableDays) : 'Not available this week',
-    hours: getWorkingHours(),
-  };
+// GET /api/providers/me/profile -> other: { availabilityDays: ['Mon', ...] | null,
+// availabilityHours: '10:00 AM - 6:00 PM' | null }
+const buildWorkingHours = (other) => {
+  const days = (Array.isArray(other?.availabilityDays) ? other.availabilityDays : [])
+    .map((value) => WEEKDAYS.find((day) => day.slice(0, 3).toLowerCase() === String(value).slice(0, 3).toLowerCase()))
+    .filter(Boolean);
+  return { days: formatDayRanges(days), hours: other?.availabilityHours || '' };
 };
 
 function EditButton({ onClick, className = '' }) {
@@ -298,8 +258,9 @@ function ReviewCard({ review }) {
 
 export default function ServiceProviderProfile() {
   const { user, loading } = useAuth();
+  const navigate = useNavigate();
   const [provider, setProvider] = useState(undefined); // undefined = still loading, null = never applied
-  const [availabilityByDate, setAvailabilityByDate] = useState(null); // null = not loaded
+  const [workingHours, setWorkingHours] = useState(null); // { days, hours } from the profile endpoint; null = not loaded
   const [account, setAccount] = useState(null); // user fields returned by GET /api/me (may have more than useAuth)
   const [providerPhotoUrl, setProviderPhotoUrl] = useState(null); // signed URL from GET /api/providers/me/profile
   const [loadError, setLoadError] = useState('');
@@ -351,36 +312,11 @@ export default function ServiceProviderProfile() {
     api
       .getMyProviderProfile()
       .then((data) => {
-        if (!cancelled) setProviderPhotoUrl(data?.photoUrl || null);
+        if (cancelled) return;
+        setProviderPhotoUrl(data?.photoUrl || null);
+        setWorkingHours(buildWorkingHours(data?.other));
       })
       .catch(() => {}); // keep the account photo / initial fallback when unavailable
-    return () => {
-      cancelled = true;
-    };
-  }, [provider]);
-
-  // Availability the provider saved from "Manage your Calendar" on the dashboard. Fetched every
-  // time the profile opens, so changes made on the calendar show up here.
-  // Needs api/client.js to export getProviderAvailability({ from, to }) that calls the same
-  // backend availability data the calendar saves to (e.g. GET /api/provider/availability) and
-  // resolves to { 'YYYY-MM-DD': { '10:00 AM': 'unavailable' } }.
-  useEffect(() => {
-    if (!provider) return undefined;
-    const loadAvailability = api.getProviderAvailability;
-    if (typeof loadAvailability !== 'function') {
-      if (import.meta.env.DEV) {
-        console.warn('[profile] api/client.js has no getProviderAvailability(); availability not loaded.');
-      }
-      return undefined;
-    }
-    let cancelled = false;
-    const today = new Date();
-    const last = new Date(today.getFullYear(), today.getMonth(), today.getDate() + DAYS_AHEAD - 1);
-    loadAvailability({ from: toDateKey(today), to: toDateKey(last) })
-      .then((result) => {
-        if (!cancelled) setAvailabilityByDate(result || {});
-      })
-      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -437,29 +373,16 @@ export default function ServiceProviderProfile() {
   const address = pickFirst(profile, ADDRESS_KEYS);
   const providerAddress = pickFirst(provider, ADDRESS_KEYS) || address;
   const services = getServices(provider);
-  // Prefer the calendar data; fall back to availability columns on the provider record, if any.
-  const availability =
-    availabilityByDate !== null ? summarizeAvailability(availabilityByDate) : getAvailability(provider);
+  // Working hours saved on the Edit Profile screen; the provider record's text column until loaded.
+  const availability = workingHours ?? getAvailability(provider);
   const availabilityLines = [availability.days, availability.hours].filter(Boolean);
 
-  const handleEditProfile = () => {
-    // TODO (backend-ready): open the edit form for the profile (name / photo), then save it, e.g.
-    // await api.updateProfile({ name });   // PATCH /api/me
-    console.log('Edit profile clicked');
-  };
-
-  const handleEditAccount = () => {
-    // TODO (backend-ready): open the edit form for the account details, then save it, e.g.
-    // await api.updateProfile({ email, phone, address });   // PATCH /api/me
-    console.log('Edit account details clicked');
-  };
-
-  const handleEditOther = () => {
-    // TODO (backend-ready): open the edit form for the services, availability and service
-    // address, then save it, e.g.
-    // await api.updateProviderProfile({ services, availability, address });   // PATCH /api/provider
-    console.log('Edit other details clicked');
-  };
+  // All three Edit buttons open the same edit screen (ServiceProviderEditProfile.jsx), which
+  // loads and saves the photo, account details, availability and company details.
+  const goToEditProfile = () => navigate('/serviceprovider/profile/edit');
+  const handleEditProfile = goToEditProfile;
+  const handleEditAccount = goToEditProfile;
+  const handleEditOther = goToEditProfile;
 
   return (
     <ServiceProviderSidebar>

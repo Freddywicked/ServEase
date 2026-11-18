@@ -7,7 +7,6 @@ import {
   clearDraftRequestId,
   getDraftRequestId,
   getRecommendedProviders,
-  getServiceRequest,
   submitServiceRequest,
 } from '../api/client';
 
@@ -61,19 +60,42 @@ const toProviderCard = (p) => ({
   availability: p.availabilitySchedule || (p.offersHomeServices ? 'Offers home services' : ''),
   recommended: Boolean(p.recommended),
   matchesCategory: Boolean(p.matchesCategory),
+  distanceKm: p.distanceKm != null ? Number(p.distanceKm) : null,
+  homeServiceRadiusKm: p.homeServiceRadiusKm != null ? Number(p.homeServiceRadiusKm) : null,
+  offersHomeServices: Boolean(p.offersHomeServices),
 });
 
-// A provider is only shown when ALL of these hold. The backend is the one that must filter (see the
-// notes in the reply); this is a safety net so a provider who is out of reach, unavailable on the
-// requested day, or in another line of work is never displayed even if the backend lets one through.
+// A provider is only shown when ALL of these hold. The backend already filters (see recommendedProviders
+// in servicerequest_controllers.js); this is a second safety net so a provider who is out of reach,
+// unavailable on the requested day, or in another line of work is never displayed, even if the backend
+// lets one through. It runs on the server's own numbers (radiusKm comes with the response), so it can
+// never disagree with the backend about the radius.
 //   - available      : false -> busy / marked unavailable on the requested day
 //   - matchesCategory: false -> specialization does not match the request's category
-//   - distanceKm     : farther than the search radius the customer set in step 1
-const isEligible = (p, radiusKm) => {
+//   - distanceKm     : farther than the customer's search radius (and, for a HOME request, farther
+//                      than the provider's own home-service range)
+const isEligible = (p, { radiusKm, locationType }) => {
   if (p.available === false) return false;
   if (p.matchesCategory === false) return false;
-  if (radiusKm && p.distanceKm != null && Number(p.distanceKm) > radiusKm) return false;
+  const distance = p.distanceKm != null ? Number(p.distanceKm) : null;
+  if (distance !== null) {
+    if (radiusKm && distance > radiusKm) return false;
+    if (locationType === 'home' && p.homeServiceRadiusKm != null && distance > Number(p.homeServiceRadiusKm)) {
+      return false;
+    }
+  }
+  if (locationType === 'home' && p.offersHomeServices === false) return false;
   return true;
+};
+
+// "Nov 18, 2026 · 10:00 AM" from the request's saved schedule (date is 'YYYY-MM-DD').
+const formatSchedule = (schedule) => {
+  if (!schedule?.date) return '';
+  const date = new Date(`${schedule.date}T00:00:00`);
+  const dateText = Number.isNaN(date.getTime())
+    ? schedule.date
+    : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return [dateText, schedule.time].filter(Boolean).join(' · ');
 };
 
 export default function RecommendServiceProvider() {
@@ -95,8 +117,9 @@ export default function RecommendServiceProvider() {
   // instead of navigating away (same behaviour as the mobile app).
   const seenIdsRef = useRef(new Set());
 
-  // The customer's search radius (km) from step 1, read once from the draft request.
-  const radiusKmRef = useRef(undefined); // undefined = not loaded yet, null = unknown
+  // What the list was filtered by (sent by the backend with the providers): the customer's search
+  // radius, the requested date/time and how many providers were left out and why.
+  const [scope, setScope] = useState({ radiusKm: null, schedule: null, hidden: null });
 
   // Always re-fetches from the backend: the ranked list (category match first,
   // then rating, then distance, with availability for the request's preferred
@@ -109,19 +132,16 @@ export default function RecommendServiceProvider() {
       setStatus('loading');
       setNotice('');
       try {
-        if (radiusKmRef.current === undefined) {
-          try {
-            const { request: draft } = await getServiceRequest(requestId);
-            const km = Number(draft?.searchRadiusKm ?? draft?.search_radius_km ?? draft?.radiusKm);
-            radiusKmRef.current = Number.isFinite(km) && km > 0 ? km : null;
-          } catch {
-            radiusKmRef.current = null;
-          }
-        }
         const data = await getRecommendedProviders(requestId);
+        const radiusKm = Number(data?.radiusKm);
+        const filters = {
+          radiusKm: Number.isFinite(radiusKm) && radiusKm > 0 ? radiusKm : null,
+          locationType: data?.serviceLocationType ?? null,
+        };
+        setScope({ radiusKm: filters.radiusKm, schedule: data?.schedule ?? null, hidden: data?.hidden ?? null });
         const ranked = (data?.providers ?? [])
-          .filter((p) => isEligible(p, radiusKmRef.current))
-          .map(toProviderCard);
+          .map(toProviderCard)
+          .filter((p) => isEligible(p, filters));
         if (!findAnother) seenIdsRef.current.clear();
 
         let next = findAnother ? ranked.filter((p) => !seenIdsRef.current.has(p.id)) : ranked;
@@ -207,6 +227,14 @@ export default function RecommendServiceProvider() {
         <p className="m-0 mt-4 max-w-[520px] font-[SF_Pro,system-ui,sans-serif] text-[20px] leading-[24px] text-[#484040]">
           Matched by specialization, customer satisfaction sentiments, ratings and distance from you.
         </p>
+        {status === 'done' && (scope.radiusKm || scope.schedule?.date) && (
+          <p className="m-0 mt-2 font-[Roboto] text-[13px] text-[#817C7C]">
+            Showing only providers
+            {scope.radiusKm ? ` within ${scope.radiusKm} km of your location` : ''}
+            {scope.radiusKm && scope.schedule?.date ? ' and' : ''}
+            {scope.schedule?.date ? ` free on ${formatSchedule(scope.schedule)}` : ''}.
+          </p>
+        )}
 
         {status === 'loading' && (
           <p className="m-0 mt-10 font-[Roboto] text-[14px] text-[#817C7C]">
@@ -219,11 +247,31 @@ export default function RecommendServiceProvider() {
           </p>
         )}
         {status === 'done' && providers.length === 0 && (
-          <p className="m-0 mt-10 font-[Roboto] text-[14px] text-[#817C7C]">
-            No service providers match your request right now. Only providers within your search radius,
-            available on your preferred schedule and specialized in this category are shown. Try a larger
-            radius or a different date or time.
-          </p>
+          <div className="mt-10 max-w-[520px] font-[Roboto] text-[14px] text-[#817C7C]">
+            <p className="m-0">
+              No service providers match your request right now. Only providers within your search radius,
+              available on your preferred schedule and specialized in this category are shown. Try a larger
+              radius or a different date or time.
+            </p>
+            {scope.hidden && (
+              <ul className="m-0 mt-2 list-disc pl-5 text-[13px]">
+                {scope.hidden.outOfRange > 0 && (
+                  <li>
+                    {scope.hidden.outOfRange} outside your {scope.radiusKm ? `${scope.radiusKm} km ` : ''}search
+                    radius (or their own home-service range)
+                  </li>
+                )}
+                {scope.hidden.unavailable > 0 && (
+                  <li>{scope.hidden.unavailable} not available on your requested date and time</li>
+                )}
+                {scope.hidden.unknownDistance > 0 && (
+                  <li>{scope.hidden.unknownDistance} whose location could not be measured</li>
+                )}
+                {scope.hidden.noHomeService > 0 && <li>{scope.hidden.noHomeService} that do not offer home service</li>}
+                {scope.hidden.category > 0 && <li>{scope.hidden.category} in a different line of work</li>}
+              </ul>
+            )}
+          </div>
         )}
 
         <div className="mt-[41px] overflow-x-auto">

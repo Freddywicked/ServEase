@@ -249,6 +249,11 @@ export default function ServiceRequestDetails() {
 
   const { customer, ai } = request;
   const canRespond = request.status === 'new'; // quoted requests were already answered
+  // New backend responses include typed attachments. Fall back to the legacy image-only `photos`
+  // field while an older server is still deployed.
+  const attachments = Array.isArray(request.attachments)
+    ? request.attachments
+    : (request.photos || []).map((url) => ({ url, type: 'image', filename: null }));
 
   return (
     <ServiceProviderSidebar>
@@ -295,16 +300,28 @@ export default function ServiceRequestDetails() {
             {request.concern}
           </p>
 
-          {request.photos.length > 0 ? (
+          {attachments.length > 0 ? (
             <div className="ml-1 mt-[14px] grid max-w-[617px] grid-cols-2 gap-2 sm:grid-cols-3">
-              {request.photos.map((src) => (
-                <img
-                  key={src}
-                  src={src}
-                  alt="Uploaded by the customer"
-                  className="h-[136px] w-full rounded-[4px] object-cover"
-                />
-              ))}
+              {attachments.map((attachment, index) =>
+                attachment.type === 'video' ? (
+                  <video
+                    key={`${attachment.url}-${index}`}
+                    src={attachment.url}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    aria-label={attachment.filename || `Customer video ${index + 1}`}
+                    className="h-[136px] w-full rounded-[4px] bg-black object-contain"
+                  />
+                ) : (
+                  <img
+                    key={`${attachment.url}-${index}`}
+                    src={attachment.url}
+                    alt={attachment.filename || `Customer upload ${index + 1}`}
+                    className="h-[136px] w-full rounded-[4px] object-cover"
+                  />
+                )
+              )}
             </div>
           ) : (
             <div className="ml-1 mt-[14px] flex h-[136px] w-full max-w-[617px] items-center justify-center bg-[#D9D9D9]">

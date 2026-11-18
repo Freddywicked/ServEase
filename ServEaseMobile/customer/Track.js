@@ -13,6 +13,8 @@ import {
     rejectAdditionalPayment,
 } from '../api/servicerequest_api';
 import { formatDateTime } from '../utils/formatters';
+// Shared "new" indicator state (also drives the Track icon on CustomerNavBar).
+import { useTrackBadges, TAB_SOURCES, ACTION_CARD_TYPES } from '../utils/trackBadges';
 
 /* ============================================================================
  * Track (Customer app) — "My Requests"
@@ -68,10 +70,11 @@ import { formatDateTime } from '../utils/formatters';
  * because the customer can pick another schedule in RecommendServiceProvider. Search for the tag
  * "[SCHEDULE PROPOSAL - DISABLED]" in this file to find (and restore) every piece of it.
  *
- * Notification count on each tab = requests in that tab that need the customer's attention:
- * the backend flags one with `isUnread: true`, and anything waiting on the customer
- * (quotation to approve, new schedule, additional payment, unpaid final balance) counts too.
- * Counts are always derived from the loaded data; nothing is hard-coded.
+ * Red indicators: ONE per status tab (Pending / Active / Completed / Closed), never on the Active
+ * sub-tabs. A tab's count = cards in it the customer has not seen yet: a new card, or one the
+ * provider just updated. Tapping the tab clears it. The Track icon on the nav bar has its own
+ * indicator that clears when that icon is tapped. All of it lives in utils/trackBadges.js and is
+ * derived from the loaded data; nothing is hard-coded.
  *
  * Reloads on focus and on pull-to-refresh. For live updates the moment the provider acts,
  * see the commented Realtime subscription inside the component.
@@ -89,15 +92,14 @@ const MAX_BADGE_COUNT = 99;
 // Customer-facing tabs. `sources` are the properties of the tracking response whose cards belong
 // to the tab, so the backend contract (sent / approved / ongoing / declined / done) is unchanged.
 const STATUS_FILTERS = [
-    { key: 'pending', label: 'Pending', sources: ['sent'] },
-    { key: 'active', label: 'Active', sources: ['approved', 'ongoing'] },
-    { key: 'completed', label: 'Completed', sources: ['done'] },
-    { key: 'closed', label: 'Closed', sources: ['declined'] },
+    { key: 'pending', label: 'Pending', sources: TAB_SOURCES.pending },
+    { key: 'active', label: 'Active', sources: TAB_SOURCES.active },
+    { key: 'completed', label: 'Completed', sources: TAB_SOURCES.completed },
+    { key: 'closed', label: 'Closed', sources: TAB_SOURCES.closed },
 ];
 
-// Cards that sit waiting on the customer's answer.
-// [SCHEDULE PROPOSAL - DISABLED] 'schedule' used to be in this list.
-const ACTION_CARD_TYPES = ['quotation', 'payment'];
+// Cards that sit waiting on the customer's answer are ACTION_CARD_TYPES (utils/trackBadges.js).
+// [SCHEDULE PROPOSAL - DISABLED] 'schedule' used to be in that list.
 
 // Sections inside the Active tab (labels only; the cards in each come from the backend).
 const ACTIVE_SECTIONS = [
@@ -120,14 +122,6 @@ const findTab = (key) => STATUS_FILTERS.find((tab) => tab.key === key || tab.sou
 // A request is paid once the customer settled the remaining balance, which is what moves it to
 // Completed. A backend `isPaid` flag wins; the tab is the fallback.
 const isPaidRequest = (request, tab) => request.isPaid ?? tab.key === 'completed';
-
-const needsAttention = (request, tab) =>
-    request.isUnread === true ||
-    ACTION_CARD_TYPES.includes(request.cardType) ||
-    (request.cardType === 'completed' && !isPaidRequest(request, tab));
-
-const getTabNotificationCount = (groups, tab) =>
-    getTabRequests(groups, tab).filter((request) => needsAttention(request, tab)).length;
 
 // Badge text on the expandable cards. Not part of the card contract, so it is chosen by cardType;
 // a backend-supplied `statusLabel` wins if one is ever sent.
@@ -205,18 +199,12 @@ const NotificationBadge = ({ count }) => {
     );
 };
 
-// Cards in a section that need the customer's attention (drives the small red count on the sub-tab).
-const getSectionCount = (requests, sectionKey, tab) =>
-    sectionKey === 'quotations'
-        ? requests.filter(isQuotationCard).length
-        : requests.filter((request) => isOngoingCard(request) && needsAttention(request, tab)).length;
-
 // "Quotations | On-going" underlined sub-tabs shown under the Active pill (Figma).
-const SectionTabs = ({ sections, selectedKey, counts, onSelect }) => (
+// No indicator here: the red count lives on the status tab only.
+const SectionTabs = ({ sections, selectedKey, onSelect }) => (
     <View style={styles.sectionTabRow}>
         {sections.map((section) => {
             const isSelected = section.key === selectedKey;
-            const count = counts?.[section.key] ?? 0;
             return (
                 <TouchableOpacity
                     key={section.key}
@@ -224,11 +212,10 @@ const SectionTabs = ({ sections, selectedKey, counts, onSelect }) => (
                     onPress={() => onSelect(section.key)}
                     accessibilityRole="button"
                     accessibilityState={{ selected: isSelected }}
-                    accessibilityLabel={count ? `${section.label}, ${count} need attention` : section.label}
+                    accessibilityLabel={section.label}
                 >
                     <View style={styles.sectionTabLabelWrap}>
                         <Text style={[styles.sectionTabText, isSelected && styles.sectionTabTextSelected]}>{section.label}</Text>
-                        <NotificationBadge count={count} />
                     </View>
                     <View style={[styles.sectionTabBar, isSelected && styles.sectionTabBarSelected]} />
                 </TouchableOpacity>
@@ -264,20 +251,24 @@ const Track = ({ navigation, route }) => {
     const [negotiateTarget, setNegotiateTarget] = useState(null);
     const [negotiateMessage, setNegotiateMessage] = useState('');
     const [negotiateAmount, setNegotiateAmount] = useState('');
+    // Red indicators on the status tabs (shared with the nav bar's Track icon).
+    const { counts: badgeCounts, sync: syncBadges, markTabSeen } = useTrackBadges();
 
     const loadTracking = useCallback(async ({ refresh = false } = {}) => {
         if (refresh) setIsRefreshing(true);
         else setIsLoading(true);
         setErrorMessage('');
         try {
-            setGroups(await getTrackedRequests());
+            const data = await getTrackedRequests();
+            setGroups(data);
+            syncBadges(data);
         } catch (error) {
             setErrorMessage(error.message);
         } finally {
             setIsLoading(false);
             setIsRefreshing(false);
         }
-    }, []);
+    }, [syncBadges]);
 
     // Reload every time the customer comes back to this tab (e.g. after sending a request).
     // A `tab` route param (from the PayMongo return deep link, the Payment screen or
@@ -329,15 +320,11 @@ const Track = ({ navigation, route }) => {
     const visibleRequests = searchTerm
         ? sectionRequests.filter((request) => getSearchableText(request).includes(searchTerm))
         : sectionRequests;
-    const sectionCounts = isActiveTab
-        ? {
-              quotations: getSectionCount(statusRequests, 'quotations', selectedStatus),
-              ongoing: getSectionCount(statusRequests, 'ongoing', selectedStatus),
-          }
-        : null;
 
+    // Tapping a status tab opens it and clears that tab's red indicator (even if it is already open).
     const handleSelectStatus = (status) => {
         setSelectedStatus(status);
+        markTabSeen(status.key);
     };
 
     const handleRequestPress = (request) => {
@@ -836,7 +823,7 @@ const Track = ({ navigation, route }) => {
                 <View style={styles.statusTabRow}>
                     {STATUS_FILTERS.map((status, index) => {
                         const isSelected = status.key === selectedStatus.key;
-                        const count = getTabNotificationCount(groups, status);
+                        const count = badgeCounts[status.key] ?? 0;
                         return (
                             <View key={status.key} style={[styles.statusTabWrap, index > 0 && styles.statusTabWrapSpaced]}>
                                 <TouchableOpacity
@@ -860,7 +847,6 @@ const Track = ({ navigation, route }) => {
                     <SectionTabs
                         sections={ACTIVE_SECTIONS}
                         selectedKey={activeSection}
-                        counts={sectionCounts}
                         onSelect={setSectionChoice}
                     />
                 )}

@@ -42,6 +42,17 @@ const update = async (requestNo, patch) =>
       .single()
   );
 
+// Delete only an unsubmitted draft owned by the customer. Related attachment rows cascade in the DB.
+const deleteDraft = async (requestId, customerUserId) =>
+  unwrap(
+    await supabase
+      .from(REQUESTS)
+      .delete()
+      .eq('request_id', requestId)
+      .eq('customer_id', customerUserId)
+      .eq('request_status', 'New')
+  );
+
 // Everything past the draft stage, newest first (Track Requests / History).
 const listForCustomer = async (customerUserId) =>
   unwrap(
@@ -118,20 +129,43 @@ const listQuotationsForProvider = async (providerUserId, requestIds) => {
 };
 
 // ---------- service_request_attachments ----------
-const addAttachment = async ({ request_id, file_url, filename }) =>
-  unwrap(await supabase.from(ATTACHMENTS).insert({ request_id, file_url, filename }).select().single());
+const addAttachment = async ({ request_id, file_url, filename, media_type = 'image' }) =>
+  unwrap(
+    await supabase
+      .from(ATTACHMENTS)
+      .insert({ request_id, file_url, filename, media_type })
+      .select()
+      .single()
+  );
 
-// { [request_id]: [signedUrl, ...] } — file_url stores a private storage path, so
-// each photo is signed on the way out (same approach as the admin document viewer).
-const photoUrlsFor = async (requestIds) => {
+// { [request_id]: [{ url, type, filename }, ...] } — keep the media type alongside the signed URL
+// so clients never have to guess whether an attachment is a photo or a video from its extension.
+const attachmentsFor = async (requestIds) => {
   if (requestIds.length === 0) return {};
   const rows = unwrap(await supabase.from(ATTACHMENTS).select('*').in('request_id', requestIds));
   const map = {};
   for (const row of rows) {
     const url = await getServiceRequestPhotoUrl(row.file_url);
-    if (url) (map[row.request_id] ||= []).push(url);
+    if (url) {
+      (map[row.request_id] ||= []).push({
+        url,
+        type: row.media_type === 'video' ? 'video' : 'image',
+        filename: row.filename || null,
+      });
+    }
   }
   return map;
+};
+
+// Legacy image-only shape for older consumers. New code should use attachmentsFor().
+const photoUrlsFor = async (requestIds) => {
+  const attachments = await attachmentsFor(requestIds);
+  return Object.fromEntries(
+    Object.entries(attachments).map(([requestId, items]) => [
+      requestId,
+      items.filter((item) => item.type === 'image').map((item) => item.url),
+    ])
+  );
 };
 
 // ---------- users / providers ----------
@@ -317,6 +351,7 @@ module.exports = {
   findByRequestNo,
   findByIds,
   update,
+  deleteDraft,
   listForCustomer,
   addRecipients,
   listRecipients,
@@ -327,6 +362,7 @@ module.exports = {
   listQuotations,
   listQuotationsForProvider,
   addAttachment,
+  attachmentsFor,
   photoUrlsFor,
   findUsersByIds,
   listVerifiedProviders,

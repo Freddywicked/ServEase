@@ -195,7 +195,7 @@ export default function CustomerEditProfile() {
                 type="button"
                 onClick={handleDone}
                 disabled={isSubmitting}
-                className="box-border h-[36px] min-w-[88px] cursor-pointer rounded-[10px] border border-[#55575B] bg-white px-4 font-['SF_Pro',system-ui,sans-serif] text-[15px] font-bold text-black transition-colors hover:bg-gray-100 disabled:opacity-50"
+                className="box-border h-[50px] w-[265px] cursor-pointer rounded-[10px] border border-[#B1A8A8] bg-[linear-gradient(270deg,#04A5A5_0%,#0255AF_100%)] font-['SF_Pro',system-ui,sans-serif] text-[15px] font-bold leading-[170%] text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isSubmitting ? 'Saving...' : 'Done'}
               </button>

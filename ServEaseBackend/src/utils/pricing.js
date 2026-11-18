@@ -3,30 +3,21 @@
 // due) and servicerequest_controllers.js (the customer's request details), so the mobile and web apps
 // always see the same numbers.
 //
-//   total          = labor + parts + service fee
-//   initial payment = INITIAL_FEE_RATE (20%) of the total. The service fee is part of the total, but it is
-//                     a different thing from the 20% initial payment.
+//   provider total  = labor + parts
+//   service fee     = 5% of the provider amount covered by an initial/final payment
+//   initial payment = 20% of the provider total + 5% of that initial provider amount
+//   final payment   = the remaining provider amount + the remaining service fee
+// Additional payments carry no service fee. The 20% booking payment and the 5% platform fee
+// are separate charges with separate purposes.
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-// Initial payment the customer makes after approving a quotation (20% so customers who cannot afford
-// 50% can still pay). Change it here only.
+// Initial payment the customer makes to confirm the booking and secure the appointment slot.
 const INITIAL_FEE_RATE = 0.2;
+// ServEase's platform fee, applied only to initial and final payments (never additional payments).
+const SERVICE_FEE_RATE = 0.05;
 
-// SERVICE FEE (platform fee). NOT FINALIZED: fixed amount or percentage of (labor + parts)?
-// Until that is decided it is configurable without touching code:
-//   SERVICE_FEE_MODE  = 'fixed' | 'percent'   (default 'fixed')
-//   SERVICE_FEE_VALUE = amount in PHP when fixed, percent when 'percent'   (default 20, the Figma sample)
-// The fee is calculated ONCE, when the provider sends the quotation, and saved in quotations.service_fee
-// (see migrations/011_quotation_service_fee.sql). Changing the rule later therefore only affects quotations
-// created afterwards. Older rows with no saved fee fall back to the current rule.
-const SERVICE_FEE_MODE = process.env.SERVICE_FEE_MODE === 'percent' ? 'percent' : 'fixed';
-const configuredFee = Number(process.env.SERVICE_FEE_VALUE);
-const SERVICE_FEE_VALUE =
-  process.env.SERVICE_FEE_VALUE !== undefined && Number.isFinite(configuredFee) && configuredFee >= 0 ? configuredFee : 20;
-
-const serviceFeeFor = (labor, parts) =>
-  SERVICE_FEE_MODE === 'percent' ? round2(((Number(labor) || 0) + (Number(parts) || 0)) * (SERVICE_FEE_VALUE / 100)) : round2(SERVICE_FEE_VALUE);
+const serviceFeeFor = (labor, parts) => round2(((Number(labor) || 0) + (Number(parts) || 0)) * SERVICE_FEE_RATE);
 
 // A quotations row -> { labor, parts, serviceFee, total }. Parts is 0 when the provider set no price.
 // Uses the fee saved on the quotation; only rows without one are calculated with the current rule.
@@ -39,7 +30,13 @@ const quoteBreakdown = (q) => {
   return { labor, parts, serviceFee, total: round2(labor + parts + serviceFee) };
 };
 
-const initialAmountFor = (total) => round2((Number(total) || 0) * INITIAL_FEE_RATE);
+const initialBaseAmountFor = (labor, parts) => round2(((Number(labor) || 0) + (Number(parts) || 0)) * INITIAL_FEE_RATE);
+
+// Provider booking amount plus this stage's own 5% service fee: 300 + 15 = 315 for a 1,500 quote.
+const initialAmountFor = (labor, parts) => {
+  const initialBase = initialBaseAmountFor(labor, parts);
+  return round2(initialBase + serviceFeeFor(initialBase));
+};
 
 // What the customer apps read from providers[].quote (RequestDetails.js).
 const toQuoteDto = (q) => {
@@ -50,19 +47,21 @@ const toQuoteDto = (q) => {
     serviceFee: b.serviceFee,
     total: b.total,
     initialFeePercent: Math.round(INITIAL_FEE_RATE * 10000) / 100,
-    initialAmount: initialAmountFor(b.total),
+    initialAmount: initialAmountFor(b.labor, b.parts),
   };
 };
 
-// How much of each PAID payment is platform fee (Option A: the fee is spread over the initial and the
-// final payment in the same proportion as the rest of the bill; additional payments carry no fee).
-//   total 2,100 (labor 1,500 + parts 500 + fee 100): initial 420 -> fee 20, final 1,680 -> fee 80.
-// Returns a Map(payment_id -> fee portion). Used for receipts (subtotal / service fee / total) and to keep
-// the fee out of the provider's earnings.
+// How much of each PAID payment is ServEase's 5% platform fee. Initial and final payments include
+// their own fee; additional payments carry none. The provider keeps the rest of each payment.
+// For a 1,500 provider quotation: initial = 300 + 15, final = 1,200 + 60.
+// Returns a Map(payment_id -> fee portion) for receipts and provider earnings.
 const feeSplit = (quote, payments) => {
   const out = new Map();
   if (!quote) return out;
-  const { serviceFee, total } = quoteBreakdown(quote);
+  const { labor, parts, serviceFee } = quoteBreakdown(quote);
+  const initialBase = initialBaseAmountFor(labor, parts);
+  const initialFee = serviceFeeFor(initialBase);
+  const initialCharge = round2(initialBase + initialFee);
   let remaining = serviceFee;
   [...payments]
     .filter((p) => p.status === 'paid')
@@ -70,8 +69,8 @@ const feeSplit = (quote, payments) => {
     .forEach((p) => {
       const amount = Number(p.amount) || 0;
       let share = 0;
-      if (p.stage === 'initial' && total > 0) share = round2((amount * serviceFee) / total);
-      else if (p.stage === 'final') share = amount; // the final payment takes whatever fee is left
+      if (p.stage === 'initial' && initialCharge > 0) share = round2((amount * initialFee) / initialCharge);
+      else if (p.stage === 'final') share = amount; // capped below to whatever fee remains
       share = Math.max(0, Math.min(share, remaining, amount));
       remaining = round2(remaining - share);
       out.set(p.payment_id, share);

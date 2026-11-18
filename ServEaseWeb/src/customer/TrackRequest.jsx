@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Check, ChevronDown, Search } from 'lucide-react';
+import { Check, ChevronDown, Search, X } from 'lucide-react';
 import CustomerSidebar from '../components/CustomerSidebar';
 import { openChat } from '../components/MessagingWidget';
 import {
   answerPaymentRequest,
   answerScheduleProposal,
+  getPaymentDue,
   getTrackingCards,
+  negotiatePaymentRequest,
 } from '../api/client';
 
 /* =====================================================================================
@@ -18,12 +20,15 @@ import {
    declined) into the shape the card components render.
 
    Figma layout (Track / SR - SENT / SR - APPROVED):
-     - Search bar + two dropdowns: "Categories" and "Status".
+     - Search bar + two dropdowns: "Categories" and "Status". The two filters are independent:
+       a card is listed only when it passes the Status, the Category AND the search box.
      - Status: All | Pending | Active | Completed | Closed
-         Pending   -> backend group "sent"
-         Active    -> backend groups "approved" (sub-tab "Quotations") and
-                      "ongoing" (sub-tab "On-going")
-         Completed -> backend group "done"
+         Pending   -> backend group "sent" (requests still waiting for the provider)
+         Active    -> sub-tab "Quotations": every quotation waiting for the customer's answer
+                      (they arrive in backend group "sent", mapCard()/regroup moves them here)
+                      plus the provider's answer-needed cards (backend group "approved");
+                      sub-tab "On-going": backend group "ongoing"
+         Completed -> backend group "done" (final payment settled)
          Closed    -> backend group "declined"
      - Categories: All | IT-Related Devices | Phone Devices | Automotive | Home.
        Filtering uses the category the backend sends on each card
@@ -32,7 +37,9 @@ import {
    Actions:
      schedule proposal     -> POST /api/service-requests/:id/schedule-proposals/:pid/accept|reject
      additional payment    -> POST /api/service-requests/:id/payment-requests/:pid/approve|reject
-     negotiate             -> opens the chat with the provider (no extra endpoint)
+     negotiate             -> Negotiate modal -> POST .../payment-requests/:pid/negotiate
+                              (counter-offer is posted to the chat + the provider is notified;
+                              the payment request stays pending)
      quotation review      -> MyRequestDetails.jsx (/customer/requests/:requestId)
      final payment         -> Payment.jsx (/customer/requests/:requestId/payment)
    ===================================================================================== */
@@ -84,10 +91,10 @@ const CATEGORY_OPTIONS = [
 const categoryKeyOf = (text) => {
   const t = String(text || '').toLowerCase();
   if (!t) return '';
-  if (/phone/.test(t)) return 'phone';
+  if (/phone|mobile|smartphone/.test(t)) return 'phone';
   if (/auto|vehicle|\bcar\b|motor/.test(t)) return 'automotive';
   if (/home|plumb|carpent|electric|appliance|handyman/.test(t)) return 'home';
-  if (/\bit\b|computer|laptop|device/.test(t)) return 'it';
+  if (/\bit\b|it-related|computer|laptop|device/.test(t)) return 'it';
   return '';
 };
 
@@ -106,33 +113,41 @@ const formatDateTime = (iso) => {
   return `${date} ${time}`;
 };
 
+// Step time shown under a tracking step (Figma: "Jun 24 9:12 AM").
+const formatStepTime = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  return `${date} ${time}`;
+};
+
 // The backend timeline is a list of { label, timestamp, description, subtext?, done } and already
-// matches the request's service location type (Shop-based: Assessing / Repairing / Quality Checking /
-// Completed; Home-based: Request received / Quotation approved / Service Provider is on the way /
-// Completed), so the labels are shown as sent.
+// matches the request's service location type, so the labels are shown as sent:
+//   Shop-based: Assessing / Repairing / Quality Checking / Completed
+//   Home-based: Preparing / Service Provider is on the way / Arrived at the Customer's location / Completed
 // Indicator flow (see Figma):
 //  - a step stays grey ('pending') until the service provider updates it, then it is blue
 //    with a check ('done');
 //  - the last step, "Completed", is a darker grey ('completed') until the customer has paid
-//    the remaining balance. Once the provider marked it completed but the balance is unpaid
-//    it reads "Payment Pending"; after payment it turns blue like the other steps.
-const mapTimeline = (steps, isPaid) =>
+//    the remaining balance. While unpaid, Home-based shows the time the provider finished and
+//    Shop-based reads "Payment Pending"; after payment it turns blue like the other steps.
+const mapTimeline = (steps, isPaid, locationType) =>
   steps.map((s, i) => {
     const isLast = i === steps.length - 1;
+    const stamp = s.timestamp ? formatStepTime(s.timestamp) : '';
     if (isLast) {
-      if (s.done && isPaid) {
-        return { label: s.label, time: s.timestamp ? formatDateTime(s.timestamp) : '', state: 'done' };
-      }
+      if (s.done && isPaid) return { label: s.label, time: stamp, state: 'done' };
       return {
         label: s.label,
-        time: s.done ? 'Payment Pending' : '',
+        time: s.done ? (locationType === 'home' ? stamp : 'Payment Pending') : '',
         state: 'completed',
       };
     }
     return {
       label: s.label,
-      // `subtext` is a note shown instead of the date (e.g. "Service provider is now heading to your door step").
-      time: s.done && s.subtext ? s.subtext : s.done && s.timestamp ? formatDateTime(s.timestamp) : '',
+      time: s.done ? s.subtext || stamp : '',
       state: s.done ? 'done' : 'pending',
     };
   });
@@ -147,11 +162,15 @@ const mapCard = (tab) => (card) => {
     providerId: card.providerId,
     providerName: card.providerName,
     category: pickCategory(card),
+    locationType: card.serviceLocationType === 'home' ? 'home' : 'shop',
   };
   switch (card.cardType) {
     case 'quotation':
       return {
         ...base,
+        // Every quotation belongs in Active > Quotations (not Pending), even though the
+        // backend files it under "sent" while the request is still open.
+        status: 'approved',
         kind: 'quotation',
         badge: card.statusLabel || 'Approve Quote?',
         quotation: {
@@ -195,7 +214,7 @@ const mapCard = (tab) => (card) => {
         finalPayment: card.total,
         isPaid: false,
         awaitingPayment: false,
-        timeline: mapTimeline(card.timeline || [], false),
+        timeline: mapTimeline(card.timeline || [], false, base.locationType),
       };
     case 'completed': {
       // Provider marked the job completed. It is only finished (Completed status) once the
@@ -209,8 +228,9 @@ const mapCard = (tab) => (card) => {
         badge: isPaid ? 'Completed' : 'In progress',
         finalPayment: card.finalAmount,
         isPaid,
+        // A paid job never offers "Proceed to Payment" again.
         awaitingPayment: !isPaid,
-        timeline: mapTimeline(card.timeline || [], isPaid),
+        timeline: mapTimeline(card.timeline || [], isPaid, base.locationType),
       };
     }
     case 'declined':
@@ -670,15 +690,180 @@ function ProgressCard({ request, onPayFinal, onMessage }) {
   );
 }
 
+/* ------------------------------------ negotiate modal ------------------------------------ */
+
+// Opened by the Negotiate button of an additional-payment card. The customer can counter with an
+// amount, a message, or both; it is sent to the provider without answering the request, so
+// Approve / Decline stay available afterwards.
+function NegotiateModal({ request, onClose, onSubmit }) {
+  const [amount, setAmount] = useState('');
+  const [message, setMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const [problem, setProblem] = useState('');
+  const amountRef = useRef(null);
+  const requested = Number(request.additionalPayment.amount || 0);
+
+  useEffect(() => {
+    amountRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && !sending) onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose, sending]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (sending) return;
+    const trimmed = message.trim();
+    const hasAmount = amount.trim() !== '';
+    const value = Number(amount);
+    if (hasAmount && (!Number.isFinite(value) || value <= 0)) {
+      setProblem('Enter a valid amount greater than zero.');
+      return;
+    }
+    if (!hasAmount && !trimmed) {
+      setProblem('Enter the amount you can pay or a message for the service provider.');
+      return;
+    }
+    setSending(true);
+    setProblem('');
+    try {
+      await onSubmit({ proposedAmount: hasAmount ? value : undefined, message: trimmed });
+    } catch (err) {
+      setProblem(err.message || 'Could not send your offer. Please try again.');
+      setSending(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget && !sending) onClose();
+      }}
+    >
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="negotiate-title"
+        onSubmit={submit}
+        className="box-border w-full max-w-[460px] rounded-[14px] border border-[#818080] bg-white p-6 shadow-xl"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 id="negotiate-title" className="m-0 font-[Inter] text-[18px] font-bold leading-[26px] text-[#292727]">
+              Negotiate additional payment
+            </h2>
+            <p className="m-0 font-[Inter] text-[13px] leading-[20px] text-[#5B5959]">
+              Request #{request.id} · {request.providerName}
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            disabled={sending}
+            className="flex-none cursor-pointer rounded-full border-none bg-transparent p-1 text-[#484040] hover:bg-[#F3F3F3]"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="mt-4 box-border rounded-[10px] border border-[#B1A8A8] bg-[#FFFED3] px-3 py-2">
+          <p className="m-0 font-[Inter] text-[12px] font-bold leading-[20px] text-[#BB8157]">
+            Provider is asking for ₱ {formatAmount(requested)}
+          </p>
+          {request.additionalPayment.note && (
+            <p className="m-0 font-[Inter] text-[11px] leading-[17px] text-[#292727]">
+              {request.additionalPayment.note}
+            </p>
+          )}
+        </div>
+
+        <label htmlFor="negotiate-amount" className="mt-4 block font-[Inter] text-[12px] font-bold text-[#191818]">
+          Amount you can pay (optional)
+        </label>
+        <div className="relative mt-1">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-[Inter] text-[14px] text-[#484040]">
+            ₱
+          </span>
+          <input
+            id="negotiate-amount"
+            ref={amountRef}
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+            className="box-border h-[40px] w-full rounded-[10px] border border-[#7E7A7A] bg-white pl-8 pr-3 font-[Inter] text-[14px] text-[#292727] outline-none focus-visible:border-[#0255AF] focus-visible:ring-1 focus-visible:ring-[#0255AF]"
+          />
+        </div>
+
+        <label htmlFor="negotiate-message" className="mt-3 block font-[Inter] text-[12px] font-bold text-[#191818]">
+          Message to the service provider
+        </label>
+        <textarea
+          id="negotiate-message"
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          maxLength={500}
+          rows={4}
+          placeholder="Explain your offer or ask for a breakdown of the extra cost."
+          className="mt-1 box-border w-full resize-none rounded-[10px] border border-[#7E7A7A] bg-white p-3 font-[Inter] text-[14px] leading-[20px] text-[#292727] outline-none placeholder:text-[#718096] focus-visible:border-[#0255AF] focus-visible:ring-1 focus-visible:ring-[#0255AF]"
+        />
+        <p className="m-0 mt-1 text-right font-[Inter] text-[11px] text-[#7C7979]">{message.length}/500</p>
+
+        {problem && (
+          <p role="alert" className="m-0 mt-2 font-[Inter] text-[13px] text-[#B91C1C]">
+            {problem}
+          </p>
+        )}
+
+        <p className="m-0 mt-3 font-[Inter] text-[11px] leading-[16px] text-[#7C7979]">
+          Your offer is sent to the provider. The request stays open until you approve or decline it.
+        </p>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <OutlineButton onClick={onClose}>Cancel</OutlineButton>
+          <button
+            type="submit"
+            disabled={sending}
+            className="box-border h-[31px] min-w-[110px] cursor-pointer rounded-[10px] border border-[#B1A8A8] bg-[#DEBF6A] px-5 font-[Inter] text-[12px] font-bold leading-[20px] text-white hover:bg-[#CFAF55] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0255AF]"
+          >
+            {sending ? 'Sending…' : 'Send offer'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 /* ------------------------------------ page ------------------------------------ */
+
+const EMPTY_GROUPS = () => Object.fromEntries(GROUP_ORDER.map((key) => [key, []]));
+
+const EMPTY_TEXT = {
+  all: 'No requests to show here yet.',
+  pending: 'No pending requests.',
+  active: 'No active requests here.',
+  completed: 'No completed requests yet.',
+  closed: 'No closed requests.',
+};
 
 export default function TrackRequest() {
   const navigate = useNavigate();
 
   // Filters. status / category = null until the customer picks one (placeholder label shows
   // and everything is listed). `activeSub` is the sub-tab under the "Active" status.
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab');
+  const paymentParam = searchParams.get('payment');
   const initialView = TAB_TO_VIEW[tabFromUrl] || {};
   const [status, setStatus] = useState(initialView.status ?? null);
   const [activeSub, setActiveSub] = useState(initialView.sub ?? 'approved');
@@ -691,31 +876,42 @@ export default function TrackRequest() {
   }, [tabFromUrl]);
 
   const [search, setSearch] = useState('');
-  const [cardsByTab, setCardsByTab] = useState(
-    Object.fromEntries(GROUP_ORDER.map((key) => [key, []]))
-  );
+  const [cardsByTab, setCardsByTab] = useState(EMPTY_GROUPS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState(null); // { tone: 'success' | 'info', text }
+  const [busyCardId, setBusyCardId] = useState(null); // card with an action in flight
+  const [negotiating, setNegotiating] = useState(null); // request shown in the Negotiate modal
+  const loadSeq = useRef(0);
 
-  // GET /api/service-requests/tracking — one call fills every group.
+  // GET /api/service-requests/tracking — one call fills every group. Resolves the regrouped
+  // cards (or null on failure) so callers can look at the fresh data.
   const load = useCallback(async () => {
-    setError('');
+    const seq = ++loadSeq.current;
     try {
       const groups = await getTrackingCards();
       const mapped = {};
       GROUP_ORDER.forEach((key) => {
         mapped[key] = (groups?.[key] ?? []).map(mapCard(key));
       });
-      // An unpaid completed job belongs in On-going; a paid one in Completed (mapCard sets `status`).
-      const regrouped = Object.fromEntries(GROUP_ORDER.map((key) => [key, []]));
+      // mapCard() sets the final `status` of every card: quotations -> approved (Quotations tab),
+      // a paid completed job -> done, an unpaid completed job -> ongoing.
+      const regrouped = EMPTY_GROUPS();
       Object.values(mapped)
         .flat()
         .forEach((card) => regrouped[card.status in regrouped ? card.status : 'sent'].push(card));
-      setCardsByTab(regrouped);
+      if (seq === loadSeq.current) {
+        setCardsByTab(regrouped);
+        setError('');
+      }
+      return regrouped;
     } catch (err) {
-      setError(err.message || 'Could not load your requests. Please try again.');
+      if (seq === loadSeq.current) {
+        setError(err.message || 'Could not load your requests. Please try again.');
+      }
+      return null;
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, []);
 
@@ -723,59 +919,173 @@ export default function TrackRequest() {
     load();
   }, [load]);
 
+  // Coming back to this tab (e.g. from the payment page) refreshes the cards.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') load();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [load]);
+
+  // Back from the PayMongo checkout: /customer/requests?payment=success|cancelled&tab=...
+  // The server confirms the payment with PayMongo while building the cards; if a card still
+  // awaits payment, retry a few times in case the confirmation is slow.
+  useEffect(() => {
+    if (!paymentParam) return undefined;
+    let stop = false;
+    const clearParam = () => {
+      const next = new URLSearchParams(window.location.search);
+      next.delete('payment');
+      setSearchParams(next, { replace: true });
+    };
+    if (paymentParam !== 'success') {
+      setNotice({ tone: 'info', text: 'Payment cancelled. No charge was made.' });
+      clearParam();
+      return undefined;
+    }
+    (async () => {
+      setNotice({ tone: 'info', text: 'Confirming your payment…' });
+      let settled = false;
+      for (let attempt = 0; attempt < 4 && !stop; attempt += 1) {
+        const groups = await load();
+        if (groups && !Object.values(groups).flat().some((c) => c.awaitingPayment)) {
+          settled = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+      }
+      if (stop) return;
+      setNotice(
+        settled
+          ? { tone: 'success', text: 'Payment received. Your requests have been updated.' }
+          : { tone: 'info', text: 'Payment submitted. It can take a moment to show up. Please check again shortly.' }
+      );
+      clearParam();
+    })();
+    return () => {
+      stop = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentParam]);
+
   const statusKey = status ?? 'all';
   const showSubTabs = statusKey === 'active';
-  const filtersActive = statusKey !== 'all' || (category && category !== 'all') || search.trim();
+  const categoryKey = category ?? 'all';
+  const filtersActive = statusKey !== 'all' || categoryKey !== 'all' || search.trim() !== '';
+
+  // The Category dropdown and the search box apply to every status; the status picks the groups.
+  const passesFilters = useCallback(
+    (r) => {
+      if (categoryKey !== 'all' && categoryKeyOf(r.category) !== categoryKey) return false;
+      const q = search.trim().toLowerCase();
+      return !q || searchText(r).includes(q);
+    },
+    [categoryKey, search]
+  );
 
   const visibleRequests = useMemo(() => {
     const groups = showSubTabs ? [activeSub] : STATUS_GROUPS[statusKey] ?? GROUP_ORDER;
-    const q = search.trim().toLowerCase();
-    return groups
-      .flatMap((key) => cardsByTab[key] ?? [])
-      .filter((r) => !category || category === 'all' || categoryKeyOf(r.category) === category)
-      .filter((r) => !q || searchText(r).includes(q));
-  }, [cardsByTab, statusKey, showSubTabs, activeSub, category, search]);
+    return groups.flatMap((key) => cardsByTab[key] ?? []).filter(passesFilters);
+  }, [cardsByTab, statusKey, showSubTabs, activeSub, passesFilters]);
 
-  const goToPayment = (request, amount, paymentType) => {
-    navigate(`/customer/requests/${request.id}/payment`, {
-      state: { requestId: request.id, amount, paymentType },
-    });
+  const subCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        ACTIVE_SUBTABS.map((tab) => [tab.key, (cardsByTab[tab.key] ?? []).filter(passesFilters).length])
+      ),
+    [cardsByTab, passesFilters]
+  );
+
+  // Payment screen. The amount is re-read from the server first: if nothing is due any more
+  // (the payment already went through) the card is refreshed instead of opening a second payment.
+  const goToPayment = async (request, paymentType) => {
+    setError('');
+    setBusyCardId(request.cardId);
+    try {
+      const due = await getPaymentDue(request.id);
+      const amount = Number(due?.due?.[paymentType] ?? 0);
+      if (!(amount > 0)) {
+        setNotice({ tone: 'success', text: `Request #${request.id} has no balance left to pay.` });
+        await load();
+        return;
+      }
+      navigate(`/customer/requests/${request.id}/payment`, {
+        state: { requestId: request.id, amount, paymentType },
+      });
+    } catch (err) {
+      setError(err.message || 'Could not open the payment. Please try again.');
+    } finally {
+      setBusyCardId(null);
+    }
   };
 
   /* ----- handlers: answer the provider, then reload the cards from the server ----- */
 
-  const handleScheduleResponse = async (request, accepted) => {
+  // Runs one card action once at a time and dims the card while it is in flight.
+  const runCardAction = async (request, action, failMessage) => {
+    if (busyCardId) return;
     setError('');
+    setBusyCardId(request.cardId);
     try {
-      await answerScheduleProposal(request.id, request.schedule.proposalId, accepted ? 'accept' : 'reject');
-      await load();
+      await action();
     } catch (err) {
-      setError(err.message || 'Could not send your answer. Please try again.');
+      setError(err.message || failMessage);
+    } finally {
+      setBusyCardId(null);
     }
   };
 
-  const handleAdditionalPayment = async (request, approved) => {
-    setError('');
-    try {
-      await answerPaymentRequest(
-        request.id,
-        request.additionalPayment.paymentRequestId,
-        approved ? 'approve' : 'reject'
-      );
-      if (approved) {
-        // The Payment screen re-computes the exact amount due from the backend.
-        goToPayment(request, request.additionalPayment.amount, 'additional');
-      } else {
+  const handleScheduleResponse = (request, accepted) =>
+    runCardAction(
+      request,
+      async () => {
+        await answerScheduleProposal(request.id, request.schedule.proposalId, accepted ? 'accept' : 'reject');
         await load();
-      }
-    } catch (err) {
-      setError(err.message || 'Could not send your answer. Please try again.');
-    }
-  };
+      },
+      'Could not send your answer. Please try again.'
+    );
+
+  const handleAdditionalPayment = (request, approved) =>
+    runCardAction(
+      request,
+      async () => {
+        await answerPaymentRequest(
+          request.id,
+          request.additionalPayment.paymentRequestId,
+          approved ? 'approve' : 'reject'
+        );
+        if (approved) {
+          // The Payment screen re-computes the exact amount due from the backend.
+          const due = await getPaymentDue(request.id);
+          const amount = Number(due?.due?.additional ?? request.additionalPayment.amount ?? 0);
+          navigate(`/customer/requests/${request.id}/payment`, {
+            state: { requestId: request.id, amount, paymentType: 'additional' },
+          });
+        } else {
+          await load();
+        }
+      },
+      'Could not send your answer. Please try again.'
+    );
 
   const handleMessage = (request) => {
     // Opens the chat popup (bottom-right) on this request's conversation.
     openChat({ id: request.providerId, name: request.providerName, requestId: request.id });
+  };
+
+  // Negotiate modal -> POST .../payment-requests/:pid/negotiate
+  const sendNegotiation = async ({ proposedAmount, message }) => {
+    const request = negotiating;
+    await negotiatePaymentRequest(request.id, request.additionalPayment.paymentRequestId, {
+      proposedAmount,
+      message,
+    });
+    setNegotiating(null);
+    setNotice({
+      tone: 'success',
+      text: `Your offer was sent to ${request.providerName}. You can still approve or decline the payment.`,
+    });
   };
 
   const renderCard = (request) => {
@@ -798,7 +1108,7 @@ export default function TrackRequest() {
         <AdditionalPaymentCard
           request={request}
           onApprove={() => handleAdditionalPayment(request, true)}
-          onNegotiate={() => handleMessage(request)}
+          onNegotiate={() => setNegotiating(request)}
           onDecline={() => handleAdditionalPayment(request, false)}
           onMessage={() => handleMessage(request)}
         />
@@ -808,7 +1118,7 @@ export default function TrackRequest() {
       return (
         <ProgressCard
           request={request}
-          onPayFinal={() => goToPayment(request, request.finalPayment, 'final')}
+          onPayFinal={() => goToPayment(request, 'final')}
           onMessage={() => handleMessage(request)}
         />
       );
@@ -881,6 +1191,7 @@ export default function TrackRequest() {
                         }`}
                       >
                         {tab.label}
+                        {subCounts[tab.key] > 0 ? ` (${subCounts[tab.key]})` : ''}
                       </span>
                       <span
                         className={`mt-[10px] block h-[3px] rounded-[10px] ${
@@ -890,6 +1201,27 @@ export default function TrackRequest() {
                     </button>
                   );
                 })}
+              </div>
+            )}
+
+            {notice && (
+              <div
+                role="status"
+                className={`mt-4 flex items-start justify-between gap-3 rounded-[10px] border px-4 py-3 font-[Inter] text-[13px] ${
+                  notice.tone === 'success'
+                    ? 'border-[#167713]/40 bg-[#EEF8EE] text-[#126010]'
+                    : 'border-[#577FBB]/40 bg-[#EEF3FB] text-[#18315B]'
+                }`}
+              >
+                <span>{notice.text}</span>
+                <button
+                  type="button"
+                  aria-label="Dismiss"
+                  onClick={() => setNotice(null)}
+                  className="flex-none cursor-pointer border-none bg-transparent p-0 text-inherit"
+                >
+                  <X size={16} />
+                </button>
               </div>
             )}
 
@@ -905,18 +1237,34 @@ export default function TrackRequest() {
               ) : visibleRequests.length === 0 ? (
                 <p className="m-0 font-[Inter] text-[14px] text-[#7C7979]">
                   {filtersActive
-                    ? 'No requests match your search or filters.'
-                    : 'No requests to show here yet.'}
+                    ? categoryKey !== 'all' || search.trim()
+                      ? 'No requests match your search or filters.'
+                      : EMPTY_TEXT[statusKey]
+                    : EMPTY_TEXT.all}
                 </p>
               ) : (
                 visibleRequests.map((request) => (
-                  <div key={request.cardId}>{renderCard(request)}</div>
+                  <div
+                    key={request.cardId}
+                    aria-busy={busyCardId === request.cardId}
+                    className={busyCardId === request.cardId ? 'pointer-events-none opacity-60' : ''}
+                  >
+                    {renderCard(request)}
+                  </div>
                 ))
               )}
             </div>
           </div>
         </div>
       </div>
+
+      {negotiating && (
+        <NegotiateModal
+          request={negotiating}
+          onClose={() => setNegotiating(null)}
+          onSubmit={sendNegotiation}
+        />
+      )}
     </CustomerSidebar>
   );
 }

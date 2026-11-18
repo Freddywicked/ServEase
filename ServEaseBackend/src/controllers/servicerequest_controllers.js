@@ -19,11 +19,18 @@ const { diagnose } = require('../utils/ai_diagnosis');
 const { toQuoteDto, serviceFeeFor } = require('../utils/pricing');
 const { getProviderFileUrl } = require('../utils/storage');
 const {
+  APPOINTMENT_HOURS,
+  APPOINTMENT_SLOTS_24,
+  formatAppointmentSlot,
+  isWholeDayBlocked,
+} = require('../utils/appointment_slots');
+const {
   MIN_RADIUS_KM,
   MAX_RADIUS_KM,
   DEFAULT_PROVIDER_RADIUS_KM,
   DEFAULT_CUSTOMER_RADIUS_KM,
   clampRadiusKm,
+  parseRadiusKm,
 } = require('../utils/radius');
 
 // Same labels as CATEGORIES in CreateServiceRequest.jsx.
@@ -127,17 +134,24 @@ const aiOf = (row) =>
       }
     : null;
 
+// Typed attachments are the primary media contract. Legacy image-only URL arrays remain available
+// for older clients, but videos are never mislabeled as photos.
+const imageUrls = (attachments = []) =>
+  attachments.filter((attachment) => attachment.type === 'image').map((attachment) => attachment.url);
+
 // `recipients` = rows of service_request_providers, `users` = { [user_id]: { name } },
-// `quotes` = { [provider_id]: quotations row }, `photoUrls` = signed attachment URLs.
-const toCustomerDto = (row, recipients = [], users = {}, photoUrls = [], quotes = {}) => ({
+// `quotes` = { [provider_id]: quotations row }, `attachments` = typed, signed media objects.
+const toCustomerDto = (row, recipients = [], users = {}, attachments = [], quotes = {}) => ({
   id: Request.formatRequestId(row.request_number),
   status: row.request_status,
   category: row.category,
   description: row.description,
-  photoUrls,
+  photoUrls: imageUrls(attachments),
+  attachments,
   appointmentDate: row.date,
   appointmentTime: row.time,
   serviceLocationType: row.service_location_type ?? null, // 'home' | 'shop'
+  searchRadiusKm: row.search_radius_km ?? null,
   latitude: row.latitude,
   longitude: row.longitude,
   aiStatus: aiStatusOf(row),
@@ -162,28 +176,39 @@ const toCustomerDto = (row, recipients = [], users = {}, photoUrls = [], quotes 
 // Shape expected by IncomingServiceRequest.jsx (one entry per request sent to this provider)
 const toIncomingDto = (row, recipient, customer, quote, distanceKm = null) => {
   const ai = aiOf(row);
+  const reference = Request.formatRequestId(row.request_number);
+  const isQuoted = recipient.status === 'quoted';
+  const labor = isQuoted && quote ? Number(quote.labor_cost) || 0 : 0;
+  const parts = isQuoted && quote ? Number(quote.parts_cost) || 0 : 0;
   return {
-    id: Request.formatRequestId(row.request_number),
+    id: reference,
+    requestNumber: reference, // mobile list: "Request #SR-0001" (same value as id)
     customerName: customer?.name || 'Customer',
     createdAt: String(recipient.sent_at || row.created_at || '').slice(0, 10), // "2026-06-27"
     aiDiagnosis: ai?.probableCause ?? null,
     aiConfidence: ai?.confidencePercent ?? null,
     distanceKm, // provider's geocoded company_address -> the request's pin (null if either is unknown)
     serviceLocationType: row.service_location_type ?? null, // 'home' | 'shop'
-    status: recipient.status === 'quoted' ? 'quoted' : 'new',
+    status: isQuoted ? 'quoted' : 'new',
+    statusLabel: isQuoted ? 'Quoted' : 'New', // mobile status pill
+    canApprove: recipient.status === 'sent', // mobile: Accept is offered while still waiting on this provider
     quote:
       recipient.status === 'quoted' && quote
         ? { labor: Number(quote.labor_cost) || 0, parts: Number(quote.parts_cost) || 0 }
         : null,
+    // Mobile "Pending" card: Quote sent: <labor> (Labor), <parts> (Parts) / TOTAL
+    quotation: isQuoted && quote ? { laborCost: labor, partsCost: parts, total: labor + parts } : null,
   };
 };
 
 // Shape expected by ServiceRequestDetails.jsx
-const toDetailsDto = (row, recipient, customer, photoUrls = [], distanceKm = null) => {
+const toDetailsDto = (row, recipient, customer, attachments = [], distanceKm = null) => {
   const ai = aiOf(row);
   return {
     id: Request.formatRequestId(row.request_number),
+    requestNumber: Request.formatRequestId(row.request_number), // mobile
     status: recipient.status === 'quoted' ? 'quoted' : 'new',
+    canApprove: recipient.status === 'sent', // mobile: Decline / Accept only while waiting on this provider
     customer: {
       name: customer?.name || 'Customer',
       address:
@@ -197,7 +222,8 @@ const toDetailsDto = (row, recipient, customer, photoUrls = [], distanceKm = nul
     },
     serviceLocationType: row.service_location_type ?? null,
     concern: row.description,
-    photos: photoUrls,
+    photos: imageUrls(attachments),
+    attachments,
     appointment: { date: row.date, time: row.time },
     ai: ai ? { diagnosis: ai.probableCause, confidence: ai.confidencePercent, possibleCauses: ai.relatedChecks } : null,
   };
@@ -225,15 +251,15 @@ const requireDraft = (row) => {
 const groupByProvider = (quotations) =>
   Object.fromEntries((quotations || []).map((q) => [q.provider_id, q]));
 
-// The full customer view of a request: recipients + their names, photos, quotes.
+// The full customer view of a request: recipients + their names, typed media attachments, quotes.
 const customerView = async (row) => {
-  const [recipients, photoMap, quotations] = await Promise.all([
+  const [recipients, attachmentMap, quotations] = await Promise.all([
     Request.listRecipients(row.request_id),
-    Request.photoUrlsFor([row.request_id]),
+    Request.attachmentsFor([row.request_id]),
     Request.listQuotations(row.request_id),
   ]);
   const users = await Request.findUsersByIds(recipients.map((r) => r.provider_id));
-  return toCustomerDto(row, recipients, users, photoMap[row.request_id] || [], groupByProvider(quotations));
+  return toCustomerDto(row, recipients, users, attachmentMap[row.request_id] || [], groupByProvider(quotations));
 };
 
 // ================= CUSTOMER =================
@@ -291,6 +317,10 @@ const create = asyncHandler(async (req, res) => {
     latitude: toNumberOrNull(req.body.latitude),
     longitude: toNumberOrNull(req.body.longitude),
     service_location_type: toLocationTypeOrNull(req.body.serviceLocationType),
+    search_radius_km:
+      req.body.searchRadiusKm !== undefined && req.body.searchRadiusKm !== null && req.body.searchRadiusKm !== ''
+        ? parseRadiusKm(req.body.searchRadiusKm)
+        : null,
     // The mobile app reverse-geocodes the pin and sends the readable address too
     // (migration 002 adds the column); the provider sees it on ViewServiceRequest.
     address: req.body.address ? String(req.body.address).trim() : null,
@@ -302,7 +332,7 @@ const create = asyncHandler(async (req, res) => {
   // supported for older mobile builds; the set prevents it duplicating the first item in attachmentPaths.
   const files = req.files ? Object.values(req.files).flat() : req.file ? [req.file] : [];
   const storedPaths = new Set();
-  const addStoredAttachment = async (path, filename) => {
+  const addStoredAttachment = async (path, filename, mediaTypeOrMime = 'image') => {
     const normalizedPath = String(path || '').trim();
     if (!normalizedPath || storedPaths.has(normalizedPath)) return;
     storedPaths.add(normalizedPath);
@@ -310,19 +340,21 @@ const create = asyncHandler(async (req, res) => {
       request_id: row.request_id,
       file_url: normalizedPath,
       filename: filename || normalizedPath.split('/').pop() || 'attachment',
+      media_type:
+        mediaTypeOrMime === 'video' || String(mediaTypeOrMime).toLowerCase().startsWith('video/') ? 'video' : 'image',
     });
   };
 
   for (const file of files) {
     const path = await Request.uploadPhoto(req.user.user_id, file);
-    await addStoredAttachment(path, file.originalname);
+    await addStoredAttachment(path, file.originalname, file.mimetype);
   }
 
   const attachmentPaths = Array.isArray(req.body.attachmentPaths) ? [...req.body.attachmentPaths] : [];
   if (req.body.photoPath) attachmentPaths.push({ path: req.body.photoPath, type: 'photo' });
   for (const attachment of attachmentPaths) {
     const path = typeof attachment === 'string' ? attachment : attachment?.path;
-    await addStoredAttachment(path);
+    await addStoredAttachment(path, attachment?.filename, attachment?.type || 'image');
   }
 
   // Picked a provider: the request lands in their Incoming Service Requests list,
@@ -341,15 +373,15 @@ const create = asyncHandler(async (req, res) => {
 // GET /api/service-requests — the customer's submitted requests (for Track Requests / History)
 const listMine = asyncHandler(async (req, res) => {
   const rows = await Request.listForCustomer(req.user.user_id);
-  const [recipientLists, photoMap, quotationLists] = await Promise.all([
+  const [recipientLists, attachmentMap, quotationLists] = await Promise.all([
     Promise.all(rows.map((r) => Request.listRecipients(r.request_id))),
-    Request.photoUrlsFor(rows.map((r) => r.request_id)),
+    Request.attachmentsFor(rows.map((r) => r.request_id)),
     Promise.all(rows.map((r) => Request.listQuotations(r.request_id))),
   ]);
   const users = await Request.findUsersByIds(recipientLists.flat().map((r) => r.provider_id));
   res.json({
     requests: rows.map((row, i) =>
-      toCustomerDto(row, recipientLists[i], users, photoMap[row.request_id] || [], groupByProvider(quotationLists[i]))
+      toCustomerDto(row, recipientLists[i], users, attachmentMap[row.request_id] || [], groupByProvider(quotationLists[i]))
     ),
   });
 });
@@ -380,6 +412,14 @@ const skipAi = asyncHandler(async (req, res) => {
   res.json({ request: await customerView(updated) });
 });
 
+// DELETE /api/service-requests/:requestId/draft — discard an unsubmitted request and its attachment rows.
+const cancelDraft = asyncHandler(async (req, res) => {
+  const row = await getOwnedRequest(req);
+  requireDraft(row);
+  await Request.deleteDraft(row.request_id, req.user.user_id);
+  res.json({ ok: true });
+});
+
 // POST /api/service-requests/:requestId/resolve — the customer fixed it with the AI's help
 const resolve = asyncHandler(async (req, res) => {
   const row = await getOwnedRequest(req);
@@ -401,8 +441,13 @@ const recommendedProviders = asyncHandler(async (req, res) => {
   const wanted = SPECIALIZATION_FOR_CATEGORY[row.category];
   const latitude = toNumberOrNull(row.latitude);
   const longitude = toNumberOrNull(row.longitude);
+  const hasPin = latitude !== null && longitude !== null;
   const scheduledDate = toIsoDateOrNull(row.date);
   const scheduledSlot = to24hSlot(row.time);
+  const locationType = toLocationTypeOrNull(row.service_location_type); // 'home' | 'shop' | null
+  // The radius the customer set on the map in step 1. If it was never saved on the draft the
+  // default is used and `radiusSaved` is false, so the problem is visible in the response.
+  const radiusKm = clampRadiusKm(row.search_radius_km, DEFAULT_CUSTOMER_RADIUS_KM);
 
   const providers = await Request.listVerifiedProviders();
   const candidates = providers.filter((p) => p.user_id !== req.user.user_id);
@@ -419,7 +464,7 @@ const recommendedProviders = asyncHandler(async (req, res) => {
       // distance to the request's pin. Without a pin or an address the distance stays null.
       const address = p.company_address || users[p.user_id]?.address || '';
       let distanceKm = null;
-      if (latitude !== null && longitude !== null && address) {
+      if (hasPin && address) {
         const point = await geocodeAddress(address);
         if (point) distanceKm = Math.round(haversineKm(latitude, longitude, point.lat, point.lng) * 10) / 10;
       }
@@ -431,6 +476,8 @@ const recommendedProviders = asyncHandler(async (req, res) => {
         experience: p.years_of_experience,
         specializations: p.specializations,
         offersHomeServices: Boolean(p.offers_home_service),
+        // How far this provider travels for home service; null when they don't offer it.
+        homeServiceRadiusKm: p.offers_home_service ? p.home_service_radius_km ?? DEFAULT_PROVIDER_RADIUS_KM : null,
         availabilitySchedule: p.availability || null,
         // profile_photo is a private storage path; sign it so the browser can render it.
         photoUrl: await getProviderFileUrl(p.profile_photo),
@@ -446,20 +493,46 @@ const recommendedProviders = asyncHandler(async (req, res) => {
     })
   );
 
-  list.sort(
+  // A provider is only returned when ALL of these hold; `hidden` counts why the rest were left out
+  // (each provider is counted once, under the first rule it fails).
+  //   1. specialized in the request's category
+  //   2. free on the requested date/time (explicit calendar blocks and existing jobs)
+  //   3. HOME request: offers home service
+  //   4. within the customer's search radius and, for a HOME request, within the provider's own
+  //      home-service range. With a pin on the request, a provider whose distance cannot be
+  //      measured is NOT shown (we cannot prove they are in reach).
+  const hidden = { category: 0, unavailable: 0, noHomeService: 0, outOfRange: 0, unknownDistance: 0 };
+  const visible = list.filter((p) => {
+    if (wanted && !p.matchesCategory) return hidden.category++, false;
+    if (!p.available) return hidden.unavailable++, false;
+    if (locationType === 'home' && !p.offersHomeServices) return hidden.noHomeService++, false;
+    if (hasPin) {
+      if (p.distanceKm === null) return hidden.unknownDistance++, false;
+      if (p.distanceKm > radiusKm) return hidden.outOfRange++, false;
+      if (locationType === 'home' && p.distanceKm > (p.homeServiceRadiusKm ?? DEFAULT_PROVIDER_RADIUS_KM)) {
+        return hidden.outOfRange++, false;
+      }
+    }
+    return true;
+  });
+
+  visible.sort(
     (a, b) =>
-      Number(b.matchesCategory) - Number(a.matchesCategory) ||
       (b.rating ?? -1) - (a.rating ?? -1) ||
       (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity)
   );
-  list
-    .filter((p) => p.matchesCategory && p.available)
-    .slice(0, RECOMMENDED_COUNT)
-    .forEach((p) => {
-      p.recommended = true;
-    });
+  visible.slice(0, RECOMMENDED_COUNT).forEach((p) => {
+    p.recommended = true;
+  });
 
-  res.json({ providers: list });
+  res.json({
+    providers: visible,
+    radiusKm,
+    radiusSaved: row.search_radius_km !== null && row.search_radius_km !== undefined,
+    serviceLocationType: locationType,
+    schedule: { date: scheduledDate, time: row.time || null },
+    hidden,
+  });
 });
 
 // ================= AVAILABILITY FOR THE DRAFT'S SCHEDULE =================
@@ -479,18 +552,10 @@ const to24hSlot = (value) => {
   return `${String(h).padStart(2, '0')}:00`;
 };
 
-// The bookable slots of one calendar day on each provider dashboard (same lists as
-// workflow_controllers.js): blocking every slot of either list is how a provider
-// marks the whole day unavailable on their Manage Calendar.
-const WEB_DAY_SLOTS = ['08:00', '09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00'];
-const MOBILE_DAY_SLOTS = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00'];
-const isWholeDayBlocked = (slots) =>
-  WEB_DAY_SLOTS.every((s) => slots.has(s)) || MOBILE_DAY_SLOTS.every((s) => slots.has(s));
-
 // Ids of the providers who can't take the given schedule (date + optional 24-hour
-// slot): they blocked it on their Manage Calendar (that slot, or the whole day),
-// or they already have a request on that date — sent to them, quoted, or booked —
-// at the same slot (an unknown time on either side counts as a clash).
+// slot): they explicitly blocked it on Manage Calendar (that slot or the whole universal
+// appointment grid), or they already have a request at a conflicting slot. Profile working
+// days/hours are informational and never block an appointment automatically.
 const unavailableForSchedule = async (providerIds, date, slot) => {
   const unavailable = new Set();
   if (!date) return unavailable;
@@ -498,8 +563,10 @@ const unavailableForSchedule = async (providerIds, date, slot) => {
   const calendarRows = await Workflow.listUnavailableSlotsFor(providerIds, date);
   const slotsByProvider = new Map();
   calendarRows.forEach((r) => {
+    // Normalize 'HH:mm:ss' / '9:00 AM' style values to 'HH:00' before comparing.
+    const normalized = to24hSlot(String(r.slot).slice(0, 5)) || to24hSlot(r.slot) || String(r.slot).slice(0, 5);
     if (!slotsByProvider.has(r.provider_id)) slotsByProvider.set(r.provider_id, new Set());
-    slotsByProvider.get(r.provider_id).add(r.slot);
+    slotsByProvider.get(r.provider_id).add(normalized);
   });
   slotsByProvider.forEach((slots, providerId) => {
     if (isWholeDayBlocked(slots) || (slot && slots.has(slot))) unavailable.add(providerId);
@@ -519,6 +586,77 @@ const toIsoDateOrNull = (value) => {
   const text = String(value || '').slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
 };
+
+// GET /api/service-requests/time-slots?date=YYYY-MM-DD&category&latitude&longitude&radiusKm
+// A universal slot is available when at least one eligible verified provider has neither an explicit
+// calendar block nor a conflicting engagement. Profile working hours intentionally play no part.
+const getAppointmentSlots = asyncHandler(async (req, res) => {
+  const date = toIsoDateOrNull(req.query.date);
+  if (!date) throw new ApiError(400, 'date must be YYYY-MM-DD');
+
+  const category = req.query.category ? normalizeCategory(req.query.category) : null;
+  if (req.query.category && !category) throw new ApiError(400, 'Choose a valid category');
+  const wanted = SPECIALIZATION_FOR_CATEGORY[category] || '';
+  const latitude = toNumberOrNull(req.query.latitude);
+  const longitude = toNumberOrNull(req.query.longitude);
+  const hasPin = latitude !== null && longitude !== null;
+  const radiusKm = clampRadiusKm(req.query.radiusKm, DEFAULT_CUSTOMER_RADIUS_KM);
+
+  const providers = await Request.listVerifiedProviders();
+  const candidates = providers.filter(
+    (p) => p.user_id !== req.user.user_id && (!wanted || p.specializations.includes(wanted))
+  );
+  const users = await Request.findUsersByIds(candidates.map((p) => p.user_id));
+
+  // Match the existing mobile recommendation rule: unknown distances remain eligible.
+  let eligible = candidates;
+  if (hasPin) {
+    const measured = await Promise.all(
+      candidates.map(async (p) => {
+        const address = p.company_address || users[p.user_id]?.address || '';
+        const point = address ? await geocodeAddress(address) : null;
+        const distanceKm = point
+          ? haversineKm(latitude, longitude, point.lat, point.lng)
+          : null;
+        return { provider: p, distanceKm };
+      })
+    );
+    eligible = measured
+      .filter((entry) => entry.distanceKm === null || entry.distanceKm <= radiusKm)
+      .map((entry) => entry.provider);
+  }
+
+  const ids = eligible.map((p) => p.user_id);
+  const [calendarRows, engagements] = await Promise.all([
+    Workflow.listUnavailableSlotsFor(ids, date),
+    Request.listActiveEngagementsOnDate(ids, date),
+  ]);
+  const blockedByProvider = new Map();
+  calendarRows.forEach((row) => {
+    const slot = to24hSlot(String(row.slot).slice(0, 5)) || to24hSlot(row.slot);
+    if (!slot) return;
+    if (!blockedByProvider.has(row.provider_id)) blockedByProvider.set(row.provider_id, new Set());
+    blockedByProvider.get(row.provider_id).add(slot);
+  });
+
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const slots = APPOINTMENT_SLOTS_24.map((slot) => {
+    const past = date < today || (date === today && Number(slot.slice(0, 2)) <= now.getHours());
+    const available = !past && eligible.some((provider) => {
+      const blocked = blockedByProvider.get(provider.user_id) || new Set();
+      if (isWholeDayBlocked(blocked) || blocked.has(slot)) return false;
+      return !engagements.some((engagement) => {
+        if (engagement.provider_id !== provider.user_id) return false;
+        const bookedSlot = to24hSlot(engagement.time);
+        return !bookedSlot || bookedSlot === slot;
+      });
+    });
+    return { time: formatAppointmentSlot(slot), value: slot, available };
+  });
+
+  res.json({ date, appointmentHours: APPOINTMENT_HOURS, slots });
+});
 
 // GET /api/service-providers/recommended?category&latitude&longitude&preferredDate&preferredTime&exclude
 // Mobile step 3 (RecommendServiceProvider.js): unlike recommendedProviders above, the
@@ -705,9 +843,21 @@ const providerDistanceTo = async (providerUserId) => {
       : null;
 };
 
-// GET /api/providers/requests -> { requests: [...] } (shape of IncomingServiceRequest.jsx)
+// Optional ?filter= used by the mobile Incoming Requests tabs: 'new' = waiting on this provider,
+// 'pending' = quotation sent (waiting on the customer), 'all' = both. The web sends no filter,
+// which is 'all' - exactly the old behaviour.
+// If workflow_controllers.js moves a request to another recipient status after "accept", add it here.
+const INCOMING_FILTER_STATUSES = {
+  all: ['sent', 'quoted'],
+  new: ['sent'],
+  pending: ['quoted'],
+};
+
+// GET /api/providers/requests[?filter=all|new|pending] -> { requests: [...] } (shape of IncomingServiceRequest.jsx)
 const listIncoming = asyncHandler(async (req, res) => {
-  const recipients = await Request.listRecipientsForProvider(req.user.user_id, ['sent', 'quoted']);
+  const filter = String(req.query.filter || 'all').toLowerCase();
+  const statuses = INCOMING_FILTER_STATUSES[filter] || INCOMING_FILTER_STATUSES.all;
+  const recipients = await Request.listRecipientsForProvider(req.user.user_id, statuses);
   const rows = await Request.findByIds(recipients.map((r) => r.request_id));
   const byId = Object.fromEntries(rows.map((r) => [r.request_id, r]));
   const customers = await Request.findUsersByIds(rows.map((r) => r.customer_id));
@@ -731,13 +881,13 @@ const listIncoming = asyncHandler(async (req, res) => {
 // GET /api/providers/requests/:requestId -> { request: {...} } (shape of ServiceRequestDetails.jsx)
 const getIncoming = asyncHandler(async (req, res) => {
   const { row, recipient } = await getIncomingPair(req);
-  const [customers, photoMap, distanceTo] = await Promise.all([
+  const [customers, attachmentMap, distanceTo] = await Promise.all([
     Request.findUsersByIds([row.customer_id]),
-    Request.photoUrlsFor([row.request_id]),
+    Request.attachmentsFor([row.request_id]),
     providerDistanceTo(req.user.user_id),
   ]);
   res.json({
-    request: toDetailsDto(row, recipient, customers[row.customer_id], photoMap[row.request_id] || [], distanceTo(row)),
+    request: toDetailsDto(row, recipient, customers[row.customer_id], attachmentMap[row.request_id] || [], distanceTo(row)),
   });
 });
 
@@ -803,7 +953,7 @@ const listCategories = (req, res) => {
 
 // GET /api/appointment-time-slots -> { timeSlots: [{ value, label }] }
 // The customer's PREFERRED slots (no provider chosen yet), same list as the web app.
-const TIME_SLOTS = ['10:00 AM', '11:00 AM', '01:00 PM', '02:00 PM'];
+const TIME_SLOTS = APPOINTMENT_SLOTS_24.map(formatAppointmentSlot);
 
 const listTimeSlots = (req, res) => {
   res.json({ timeSlots: TIME_SLOTS.map((label) => ({ value: label, label })) });
@@ -828,6 +978,7 @@ const listCreateOptions = (req, res) => {
     categories: CATEGORIES.map((label) => ({ value: label, label })),
     locationTypes: LOCATION_TYPES,
     timeSlots: TIME_SLOTS,
+    appointmentHours: APPOINTMENT_HOURS,
     searchRadius: {
       minKm: MIN_RADIUS_KM,
       maxKm: MAX_RADIUS_KM,
@@ -1002,9 +1153,11 @@ module.exports = {
   getOne,
   aiDiagnosis,
   skipAi,
+  cancelDraft,
   resolve,
   recommendedProviders,
   recommendedForDraft,
+  getAppointmentSlots,
   submit,
   listIncoming,
   getIncoming,
