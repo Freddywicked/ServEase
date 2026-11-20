@@ -167,10 +167,12 @@ const computePaymentDue = async (row) => {
 const PROVIDER_NOTIFICATION_TYPES = [
   'schedule_accepted', 'schedule_rejected', 'payment_approved', 'payment_rejected',
   'quotation_accepted', 'quotation_declined', 'payment_received', 'rating_received',
+  'payment_negotiation',
 ];
 const CUSTOMER_NOTIFICATION_TYPES = [
   'request_accepted', 'request_declined', 'quotation_received', 'schedule_proposal',
   'payment_request', 'progress_update', 'job_completed',
+  'negotiation_accepted', 'negotiation_rejected',
 ];
 
 const audienceOf = (req) => (['customer', 'provider'].includes(req.query.audience) ? req.query.audience : null);
@@ -625,6 +627,8 @@ const answerPaymentRequest = (answer) =>
     await Workflow.updatePaymentRequest(pr.payment_request_id, {
       status: answer,
       responded_at: new Date().toISOString(),
+      // Answering the original request settles any price negotiation that was still open.
+      ...(pr.negotiation_status === 'requested' ? { negotiation_status: null } : {}),
     });
     const customerName = await customerNameOf(row);
     await Workflow.notify({
@@ -659,6 +663,20 @@ const negotiatePaymentRequest = asyncHandler(async (req, res) => {
   const note = String(req.body.message || '').trim();
   if (!hasAmount && !note) throw new ApiError(400, 'Enter an amount or a message for the service provider');
   if (note.length > 500) throw new ApiError(400, 'Messages are limited to 500 characters');
+
+  // Keep the counter-offer so the provider sees it under Active Jobs > Quotation and can
+  // accept or decline it (a message-only negotiation stays in the chat).
+  if (hasAmount) {
+    await Workflow.updatePaymentRequest(pr.payment_request_id, {
+      original_amount: pr.original_amount ?? pr.amount,
+      proposed_amount: proposedAmount,
+      negotiation_message: note || null,
+      negotiation_status: 'requested',
+      negotiated_at: new Date().toISOString(),
+      negotiation_response: null,
+      negotiation_responded_at: null,
+    });
+  }
 
   const text =
     `Negotiation for the additional ${peso(pr.amount)} on ${refOf(row)}` +
@@ -1287,11 +1305,14 @@ const toJobDto = (row, customer, updates, payments) => {
     requestNumber: refOf(row),
     customerName: customer?.name || 'Customer',
     createdAt: row.created_at,
+    category: row.category ?? null, // Categories dropdown on Active Jobs
     status,
     statusLabel: status,
     aiSuggestion: row.ai_diagnosis?.status === 'done' ? row.ai_diagnosis.probableCause : null,
     aiConfidence: row.ai_diagnosis?.status === 'done' ? row.ai_diagnosis.confidencePercent ?? null : null,
     stages,
+    // Stored value + the label the UI shows (Home-based "On the way" -> "Service Provider is on the way").
+    stageOptions: stages.map((step) => ({ value: step, label: STEP_LABELS[step] || step })),
     serviceLocationType: locationTypeOf(row),
     currentStepIndex: Math.max(lastIndex, 0),
     currentStepLabel: lastIndex >= 0 ? stages[lastIndex] : 'Not started',
@@ -1435,6 +1456,109 @@ const notifyAdditionalParts = asyncHandler(async (req, res) => {
   });
   res.status(201).json({ paymentRequest: { id: pr.payment_request_id, amount, status: 'pending' } });
 });
+
+// GET /api/provider/jobs/quotations
+// Price negotiations: the customer answered an additional-parts request with a counter-offer.
+const listJobQuotations = asyncHandler(async (req, res) => {
+  const providerId = req.user.user_id;
+  const negotiating = await Workflow.listNegotiatingPaymentRequests(providerId);
+  const requestIds = [...new Set(negotiating.map((p) => p.request_id))];
+  if (requestIds.length === 0) return res.json({ quotations: [] });
+
+  const rows = await Request.findByIds(requestIds);
+  const byId = Object.fromEntries(rows.map((r) => [r.request_id, r]));
+  const { providerDistanceTo } = require('./servicerequest_controllers'); // lazy: avoids a load-time cycle
+  const [customerMap, distanceTo] = await Promise.all([
+    Request.findUsersByIds(rows.map((r) => r.customer_id)),
+    providerDistanceTo(providerId),
+  ]);
+
+  return res.json({
+    quotations: negotiating
+      .filter((p) => byId[p.request_id])
+      .map((p) => {
+        const row = byId[p.request_id];
+        return {
+          paymentRequestId: p.payment_request_id,
+          jobId: refOf(row),
+          requestNumber: refOf(row),
+          customerName: customerMap[row.customer_id]?.name || 'Customer',
+          createdAt: p.negotiated_at || p.created_at,
+          category: row.category ?? null,
+          distanceKm: distanceTo(row),
+          originalAmount: Number(p.original_amount ?? p.amount),
+          proposedAmount: p.proposed_amount != null ? Number(p.proposed_amount) : null,
+          customerMessage: p.negotiation_message || '',
+          providerNotes: p.reason || '',
+        };
+      }),
+  });
+});
+
+// POST /api/provider/jobs/:jobId/payment-requests/:paymentRequestId/negotiation/accept
+// POST /api/provider/jobs/:jobId/payment-requests/:paymentRequestId/negotiation/reject   { reason }
+// accept: the additional payment becomes the customer's suggested amount and is approved (the customer
+//         pays that amount in the "additional" payment stage).
+// reject: the reason is sent to the customer; the original request stays pending so the customer can
+//         still approve it, decline it, or negotiate again.
+const answerJobNegotiation = (answer) =>
+  asyncHandler(async (req, res) => {
+    const { row } = await getProviderRequest(req);
+    const pr = await Workflow.findPaymentRequest(req.params.paymentRequestId);
+    if (!pr || pr.request_id !== row.request_id || pr.provider_id !== req.user.user_id) {
+      throw new ApiError(404, 'Payment request not found');
+    }
+    if (pr.status !== 'pending' || pr.negotiation_status !== 'requested') {
+      throw new ApiError(409, 'There is no open price negotiation on this request');
+    }
+
+    const users = await Request.findUsersByIds([req.user.user_id]);
+    const providerName = users[req.user.user_id]?.name || 'The service provider';
+    const now = new Date().toISOString();
+
+    if (answer === 'accepted') {
+      const agreed = Number(pr.proposed_amount);
+      if (!Number.isFinite(agreed) || agreed <= 0) throw new ApiError(409, 'The customer did not suggest an amount');
+      await Workflow.updatePaymentRequest(pr.payment_request_id, {
+        original_amount: pr.original_amount ?? pr.amount,
+        amount: agreed,
+        status: 'approved',
+        responded_at: now,
+        negotiation_status: 'accepted',
+        negotiation_responded_at: now,
+      });
+      await Workflow.notify({
+        userId: row.customer_id,
+        type: 'negotiation_accepted',
+        message: `${providerName} accepted your suggested ${peso(agreed)} for ${refOf(row)}. The additional payment was updated.`,
+        requestId: row.request_id,
+      });
+      return res.json({ ok: true, status: 'accepted', amount: agreed });
+    }
+
+    const reason = String(req.body.reason || '').trim();
+    if (!reason) throw new ApiError(400, 'State a reason for rejection');
+    if (reason.length > 500) throw new ApiError(400, 'Reasons are limited to 500 characters');
+    await Workflow.updatePaymentRequest(pr.payment_request_id, {
+      negotiation_status: 'rejected',
+      negotiation_response: reason,
+      negotiation_responded_at: now,
+    });
+    await Workflow.addMessage({
+      request_id: row.request_id,
+      sender_id: req.user.user_id,
+      body: `I can't accept ${peso(pr.proposed_amount)} for the additional parts on ${refOf(row)}: ${reason}`,
+      seen_by_customer: false,
+      seen_by_provider: true,
+    });
+    await Workflow.notify({
+      userId: row.customer_id,
+      type: 'negotiation_rejected',
+      message: `${providerName} declined your suggested ${peso(pr.proposed_amount)} for ${refOf(row)}: ${reason}. The original ${peso(pr.amount)} is still waiting for your answer.`,
+      requestId: row.request_id,
+    });
+    return res.json({ ok: true, status: 'rejected' });
+  });
 
 // GET /api/provider/earnings
 const getEarnings = asyncHandler(async (req, res) => {
@@ -1938,6 +2062,8 @@ module.exports = {
   getJob,
   updateJobStatus,
   notifyAdditionalParts,
+  listJobQuotations,
+  answerJobNegotiation,
   getEarnings,
   listConversations,
   listMessages,

@@ -11,8 +11,10 @@ import {
     // [SCHEDULE PROPOSAL - DISABLED] rejectScheduleProposal,
     approveAdditionalPayment,
     rejectAdditionalPayment,
+    negotiateAdditionalPayment,
 } from '../api/servicerequest_api';
 import { formatDateTime } from '../utils/formatters';
+import LinearGradient from 'react-native-linear-gradient';
 // Shared "new" indicator state (also drives the Track icon on CustomerNavBar).
 import { useTrackBadges, TAB_SOURCES, ACTION_CARD_TYPES } from '../utils/trackBadges';
 
@@ -438,13 +440,30 @@ const Track = ({ navigation, route }) => {
         setNegotiateAmount('');
     };
 
-    // NOT WIRED YET: the provider side of price negotiation is not finished, so there is no route.
-    // Confirm intentionally does nothing; only the X closes the modal. When the provider side is
-    // ready, send { message: negotiateMessage, suggestedAmount: Number(negotiateAmount) } for
-    // negotiateTarget.requestId / negotiateTarget.paymentRequestId (e.g. POST
-    // /service-requests/:id/payment-requests/:paymentRequestId/negotiate) through runAction(),
-    // which reloads the tracking data afterwards.
-    const handleConfirmNegotiation = () => {};
+    // Sends the counter-offer (POST /service-requests/:id/payment-requests/:pid/negotiate). The
+    // provider answers it from Jobs > Active > Quotations: accepting replaces the payment's amount
+    // with the suggestion, declining sends back a reason. The card shows the outcome after the reload.
+    const handleConfirmNegotiation = () => {
+        const target = negotiateTarget;
+        if (!target) return;
+        const message = negotiateMessage.trim();
+        const hasAmount = negotiateAmount.trim() !== '';
+        const proposedAmount = hasAmount ? Number(negotiateAmount) : undefined;
+        if (hasAmount && (!Number.isFinite(proposedAmount) || proposedAmount <= 0)) {
+            Alert.alert('Enter a valid amount', 'The suggested amount must be greater than zero.');
+            return;
+        }
+        if (!hasAmount && !message) {
+            Alert.alert('Add a suggestion', 'Enter a suggested amount or a message for the service provider.');
+            return;
+        }
+        runAction(
+            target.id,
+            () => negotiateAdditionalPayment(target.requestId, target.paymentRequestId, { proposedAmount, message }),
+            'Could not send your negotiation',
+            handleCloseNegotiateModal,
+        );
+    };
 
     // Opens the conversation that belongs to THIS service request (its own request id), so each
     // request (SR-0000, SR-0001, ...) has its own thread with the provider.
@@ -655,6 +674,7 @@ const Track = ({ navigation, route }) => {
                         <Text style={styles.paymentNoticeCaption}>due for approval</Text>
                     </View>
                 </View>
+                {renderNegotiationNote(request)}
 
                 <View style={styles.paymentActionRow}>
                     <TouchableOpacity
@@ -690,6 +710,43 @@ const Track = ({ navigation, route }) => {
         );
     };
 
+    // "View" opens RepairDetails (the expanded tracking with the provider's notes and media).
+    const handleViewRepairDetails = (request) =>
+        navigation.navigate(ROUTES.REPAIR_DETAILS, {
+            requestId: request.requestId ?? request.requestNumber,
+            requestNumber: request.requestNumber,
+        });
+
+    const renderViewMessageButtons = (request) => (
+        <View style={styles.footerButtonRow}>
+            <TouchableOpacity style={styles.viewButton} onPress={() => handleViewRepairDetails(request)} activeOpacity={0.85} accessibilityRole="button">
+                <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+                <Text style={styles.viewButtonText}>View</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.footerButton} onPress={() => handleMessageProvider(request)}>
+                <Text style={styles.footerButtonText}>Message</Text>
+            </TouchableOpacity>
+        </View>
+    );
+
+    // Outcome of the customer's price negotiation on an additional payment.
+    const renderNegotiationNote = (request) => {
+        if (!request.negotiationStatus) return null;
+        let text = null;
+        if (request.negotiationStatus === 'requested') {
+            text = request.proposedAmount !== null && request.proposedAmount !== undefined
+                ? `You suggested ${formatPesoSpaced(request.proposedAmount)}. Waiting for the service provider to answer.`
+                : 'Your negotiation was sent. Waiting for the service provider to answer.';
+        } else if (request.negotiationStatus === 'accepted') {
+            text = request.originalAmount
+                ? `The service provider accepted your suggested amount (was ${formatPesoSpaced(request.originalAmount)}).`
+                : 'The service provider accepted your suggested amount.';
+        } else if (request.negotiationStatus === 'rejected') {
+            text = `The service provider declined your suggestion${request.negotiationReason ? `: ${request.negotiationReason}` : '.'}`;
+        }
+        return text ? <Text style={styles.negotiationNote}>{text}</Text> : null;
+    };
+
     const renderTimelineCard = (request) => (
         <View key={request.id} style={styles.requestCard}>
             {renderCardHeader(request)}
@@ -697,9 +754,7 @@ const Track = ({ navigation, route }) => {
             {renderTimeline(getTimeline(request), isRequestPaid(request))}
 
             <View style={styles.cardDivider} />
-            <TouchableOpacity onPress={() => handleMessageProvider(request)} style={styles.messageButton}>
-                <Text style={styles.messageButtonText}>Message</Text>
-            </TouchableOpacity>
+            {renderViewMessageButtons(request)}
         </View>
     );
 
@@ -736,11 +791,13 @@ const Track = ({ navigation, route }) => {
 
                 <View style={styles.cardDivider} />
                 {isPaid ? (
-                    <TouchableOpacity onPress={() => handleMessageProvider(request)} style={styles.messageButton}>
-                        <Text style={styles.messageButtonText}>Message</Text>
-                    </TouchableOpacity>
+                    renderViewMessageButtons(request)
                 ) : (
                     <View style={styles.footerButtonRow}>
+                        <TouchableOpacity style={styles.viewButton} onPress={() => handleViewRepairDetails(request)} activeOpacity={0.85} accessibilityRole="button">
+                <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+                <Text style={styles.viewButtonText}>View</Text>
+            </TouchableOpacity>
                         <TouchableOpacity style={styles.footerButton} onPress={() => handleProceedToPayment(request)}>
                             <Text style={styles.footerButtonText}>Proceed to Payment</Text>
                         </TouchableOpacity>
@@ -911,7 +968,7 @@ const Track = ({ navigation, route }) => {
                 </KeyboardAvoidingView>
             </Modal>
 
-            {/* Price negotiation (additional payment). UI only for now: Confirm is not wired to the backend. */}
+            {/* Price negotiation (additional payment). Confirm sends the counter-offer to the service provider. */}
             <Modal visible={!!negotiateTarget} transparent animationType="fade" onRequestClose={handleCloseNegotiateModal}>
                 <KeyboardAvoidingView
                     style={styles.modalOverlay}
@@ -1367,6 +1424,31 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    // Figma gradient button: the LinearGradient fills it, the label sits on top.
+    viewButton: {
+        minWidth: 90,
+        height: 28,
+        marginLeft: 8,
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
+        borderRadius: 10,
+        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 16,
+    },
+    viewButtonText: {
+        fontSize: 10,
+        fontWeight: '700',
+        lineHeight: 17,
+        color: '#FFFFFF',
+    },
+    negotiationNote: {
+        fontSize: 9,
+        lineHeight: 15,
+        color: '#5B5959',
+        marginTop: 8,
     },
     footerButtonText: {
         fontSize: 10,

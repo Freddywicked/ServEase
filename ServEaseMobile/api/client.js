@@ -74,7 +74,7 @@ const toFormErrors = (details) => {
 
 // Exported so sibling API modules (providerWork_api.js) share the same base URL,
 // auth token and error handling instead of re-implementing fetch.
-async function request(path, { method = 'GET', body, auth = true } = {}) {
+async function request(path, { method = 'GET', body, auth = true, timeoutMs = TIMEOUT_MS } = {}) {
   const url = `${BASE_URL}${path}`;
   // FormData (file uploads) must NOT get a manual Content-Type — fetch needs
   // to generate its own multipart boundary, which a hardcoded header breaks.
@@ -90,7 +90,7 @@ async function request(path, { method = 'GET', body, auth = true } = {}) {
 
   // Without a timeout, a wrong IP can leave "Sending code..." spinning for minutes.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   let res;
   try {

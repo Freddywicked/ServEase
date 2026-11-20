@@ -16,7 +16,7 @@ const Provider = require('../models/provider_model');
 const Request = require('../models/servicerequest_model');
 const Workflow = require('../models/workflow_model');
 const { diagnose } = require('../utils/ai_diagnosis');
-const { toQuoteDto, serviceFeeFor } = require('../utils/pricing');
+const { toQuoteDto, serviceFeeFor, CUSTOMER_DECLINED_QUOTATION_REASON } = require('../utils/pricing');
 const { getProviderFileUrl } = require('../utils/storage');
 const {
   APPOINTMENT_HOURS,
@@ -174,41 +174,62 @@ const toCustomerDto = (row, recipients = [], users = {}, attachments = [], quote
 });
 
 // Shape expected by IncomingServiceRequest.jsx (one entry per request sent to this provider)
+//   status: 'new'    = waiting on this provider (no quotation yet)
+//           'quoted' = Pending: quotation sent, the customer has not answered
+//           'closed' = declined by this provider OR the customer declined the quotation
+const closedInfoOf = (recipient) => {
+  if (recipient.status !== 'declined') return { closedBy: null, declinedReason: null };
+  const byCustomer = recipient.declined_reason === CUSTOMER_DECLINED_QUOTATION_REASON;
+  return {
+    closedBy: byCustomer ? 'customer' : 'provider',
+    declinedReason: byCustomer ? null : recipient.declined_reason || null,
+  };
+};
+
 const toIncomingDto = (row, recipient, customer, quote, distanceKm = null) => {
   const ai = aiOf(row);
   const reference = Request.formatRequestId(row.request_number);
   const isQuoted = recipient.status === 'quoted';
-  const labor = isQuoted && quote ? Number(quote.labor_cost) || 0 : 0;
-  const parts = isQuoted && quote ? Number(quote.parts_cost) || 0 : 0;
+  const isClosed = recipient.status === 'declined';
+  const hasQuote = (isQuoted || isClosed) && quote;
+  const labor = hasQuote ? Number(quote.labor_cost) || 0 : 0;
+  const parts = hasQuote ? Number(quote.parts_cost) || 0 : 0;
   return {
     id: reference,
     requestNumber: reference, // mobile list: "Request #SR-0001" (same value as id)
     customerName: customer?.name || 'Customer',
     createdAt: String(recipient.sent_at || row.created_at || '').slice(0, 10), // "2026-06-27"
+    category: row.category ?? null, // Categories dropdown on the web list
     aiDiagnosis: ai?.probableCause ?? null,
     aiConfidence: ai?.confidencePercent ?? null,
     distanceKm, // provider's geocoded company_address -> the request's pin (null if either is unknown)
     serviceLocationType: row.service_location_type ?? null, // 'home' | 'shop'
-    status: isQuoted ? 'quoted' : 'new',
-    statusLabel: isQuoted ? 'Quoted' : 'New', // mobile status pill
+    status: isClosed ? 'closed' : isQuoted ? 'quoted' : 'new',
+    statusLabel: isClosed ? 'Declined' : isQuoted ? 'Quoted' : 'New', // mobile status pill
     canApprove: recipient.status === 'sent', // mobile: Accept is offered while still waiting on this provider
-    quote:
-      recipient.status === 'quoted' && quote
-        ? { labor: Number(quote.labor_cost) || 0, parts: Number(quote.parts_cost) || 0 }
-        : null,
+    ...closedInfoOf(recipient),
+    quote: hasQuote ? { labor, parts } : null,
     // Mobile "Pending" card: Quote sent: <labor> (Labor), <parts> (Parts) / TOTAL
     quotation: isQuoted && quote ? { laborCost: labor, partsCost: parts, total: labor + parts } : null,
   };
 };
 
 // Shape expected by ServiceRequestDetails.jsx
-const toDetailsDto = (row, recipient, customer, attachments = [], distanceKm = null) => {
+const toDetailsDto = (row, recipient, customer, attachments = [], distanceKm = null, quote = null) => {
   const ai = aiOf(row);
+  const isQuoted = recipient.status === 'quoted';
+  const isClosed = recipient.status === 'declined';
   return {
     id: Request.formatRequestId(row.request_number),
     requestNumber: Request.formatRequestId(row.request_number), // mobile
-    status: recipient.status === 'quoted' ? 'quoted' : 'new',
+    status: isClosed ? 'closed' : isQuoted ? 'quoted' : 'new',
     canApprove: recipient.status === 'sent', // mobile: Decline / Accept only while waiting on this provider
+    ...closedInfoOf(recipient),
+    quote:
+      (isQuoted || isClosed) && quote
+        ? { labor: Number(quote.labor_cost) || 0, parts: Number(quote.parts_cost) || 0 }
+        : null,
+    category: row.category ?? null,
     customer: {
       name: customer?.name || 'Customer',
       address:
@@ -223,7 +244,7 @@ const toDetailsDto = (row, recipient, customer, attachments = [], distanceKm = n
     serviceLocationType: row.service_location_type ?? null,
     concern: row.description,
     photos: imageUrls(attachments),
-    attachments,
+    attachments, // typed + signed: [{ url, type: 'image' | 'video', filename }]
     appointment: { date: row.date, time: row.time },
     ai: ai ? { diagnosis: ai.probableCause, confidence: ai.confidencePercent, possibleCauses: ai.relatedChecks } : null,
   };
@@ -847,10 +868,14 @@ const providerDistanceTo = async (providerUserId) => {
 // 'pending' = quotation sent (waiting on the customer), 'all' = both. The web sends no filter,
 // which is 'all' - exactly the old behaviour.
 // If workflow_controllers.js moves a request to another recipient status after "accept", add it here.
+// 'closed' = declined by this provider or the customer declined the quotation.
+// 'everything' is what the web list asks for (the mobile app keeps using new / pending / all).
 const INCOMING_FILTER_STATUSES = {
   all: ['sent', 'quoted'],
+  everything: ['sent', 'quoted', 'declined'],
   new: ['sent'],
   pending: ['quoted'],
+  closed: ['declined'],
 };
 
 // GET /api/providers/requests[?filter=all|new|pending] -> { requests: [...] } (shape of IncomingServiceRequest.jsx)
@@ -881,13 +906,21 @@ const listIncoming = asyncHandler(async (req, res) => {
 // GET /api/providers/requests/:requestId -> { request: {...} } (shape of ServiceRequestDetails.jsx)
 const getIncoming = asyncHandler(async (req, res) => {
   const { row, recipient } = await getIncomingPair(req);
-  const [customers, attachmentMap, distanceTo] = await Promise.all([
+  const [customers, attachmentMap, distanceTo, quoteRows] = await Promise.all([
     Request.findUsersByIds([row.customer_id]),
     Request.attachmentsFor([row.request_id]),
     providerDistanceTo(req.user.user_id),
+    Request.listQuotationsForProvider(req.user.user_id, [row.request_id]),
   ]);
   res.json({
-    request: toDetailsDto(row, recipient, customers[row.customer_id], attachmentMap[row.request_id] || [], distanceTo(row)),
+    request: toDetailsDto(
+      row,
+      recipient,
+      customers[row.customer_id],
+      attachmentMap[row.request_id] || [],
+      distanceTo(row),
+      quoteRows[0] || null
+    ),
   });
 });
 
@@ -913,7 +946,12 @@ const sendQuote = asyncHandler(async (req, res) => {
     status: 'quoted',
     responded_at: new Date().toISOString(),
   });
-  // TODO: create a "quotation_received" notification for the customer (see Notifications.jsx).
+  await Workflow.notify({
+    userId: row.customer_id,
+    type: 'quotation_received',
+    message: `You received a quotation for ${Request.formatRequestId(row.request_number)}: PHP ${(labor + parts).toFixed(2)}.`,
+    requestId: row.request_id,
+  });
   const customers = await Request.findUsersByIds([row.customer_id]);
   res.json({ request: toIncomingDto(row, updated, customers[row.customer_id], quote) });
 });
@@ -930,6 +968,12 @@ const rejectRequest = asyncHandler(async (req, res) => {
     status: 'declined',
     declined_reason: reason,
     responded_at: new Date().toISOString(),
+  });
+  await Workflow.notify({
+    userId: row.customer_id,
+    type: 'request_declined',
+    message: `A service provider declined ${Request.formatRequestId(row.request_number)}: ${reason}`,
+    requestId: row.request_id,
   });
   res.json({ ok: true });
 });
@@ -1171,4 +1215,5 @@ module.exports = {
   diagnoseDraft,
   reverseGeocode,
   radiusMap,
+  providerDistanceTo, // used by workflow_controllers.js (Active Jobs > Quotation distance)
 };

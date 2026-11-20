@@ -366,6 +366,22 @@ export const rejectAdditionalPayment = (requestId, paymentRequestId) =>
 export const respondToQuotation = (requestId, { approve }) =>
     request(`/service-requests/${requestId}/quotation/respond`, { method: 'POST', body: { approve } });
 
+// Customer's counter-offer on an additional payment (the Negotiate modal on Track). The provider
+// answers it from Jobs > Active > Quotations; an accepted offer replaces the payment's amount.
+export const negotiateAdditionalPayment = (requestId, paymentRequestId, { proposedAmount, message }) =>
+    request(`/service-requests/${requestId}/payment-requests/${paymentRequestId}/negotiate`, {
+        method: 'POST',
+        body: { proposedAmount, message },
+    });
+
+// Expanded tracking for one request (RepairDetails screen):
+//   { requestId, requestNumber, providerName, serviceLocationType, statusLabel,
+//     steps: [{ key, label, done, timestamp|null,
+//               updates: [{ id, note, createdAt, media: [{ type: 'image'|'video', url }] }] }] }
+// Steps come from the request's own step list (shop-based or home-based); updates are what the
+// service provider pushed from JobUpdateStatus.
+export const getRepairDetails = (requestId) => request(`/service-requests/${requestId}/repair-details`);
+
 // The customer's submitted requests, newest first (History screen). Same endpoint the
 // web app uses; each entry is the toCustomerDto shape (id, status, category, providers...).
 export const getMyServiceRequests = () => request('/service-requests').then(pick('requests'));

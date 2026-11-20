@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
-import { X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import ServiceProviderSidebar from '../components/ServiceProviderSidebar.jsx';
+import { QuotationModal, ReasonModal, SF_PRO } from '../components/ProviderRequestUI.jsx';
 import { useAuth } from '../context/auth_context';
 import { getProviderServiceRequest, rejectServiceRequest, sendQuote } from '../api/client';
 import lightningIcon from '../assets/icon_lightning.png';
@@ -9,157 +10,182 @@ import pinIcon from '../assets/icon_pinloc.png';
 import ellipseIcon from '../assets/icon_ellipse.png';
 import photoIcon from '../assets/icon_photo.png';
 
-const SF_PRO = 'font-[SF_Pro,system-ui,sans-serif]';
-const SECTION_LABEL = `m-0 ${SF_PRO} text-[12px] font-bold leading-[16px] text-[#292727]`;
+const SECTION_LABEL = `m-0 ${SF_PRO} text-[12px] font-bold leading-[20px] text-[#5B5959]`;
+const SECTION_LABEL_SMALL = `m-0 ${SF_PRO} text-[11px] font-bold leading-[19px] text-[#5B5959]`;
 
 // The request comes from the backend: GET /api/providers/requests/:requestId -> { request: {...} }
 //
 // Shape of the request:
 // {
 //   id: 'SR-0000',
-//   status: 'new' | 'quoted',
+//   status: 'new' | 'quoted' | 'closed',
+//   canApprove: true,                   // false once this provider already answered
 //   customer: {
 //     name: 'Dominic Alcantara',
 //     address: '123 Maple St QC Manila',
-//     distanceKm: 1.2 | null,          // null until the backend can compute it
-//     avatarUrl: null,                 // optional profile picture URL
+//     distanceKm: 1.2 | null,           // null until the backend can compute it
+//     avatarUrl: null,                  // optional profile picture URL
 //   },
 //   concern: 'Customer narration of the device problem...',
-//   photos: [],                        // image URLs uploaded by the customer
+//   attachments: [{ url, type: 'image' | 'video', filename }],  // the customer's uploads
+//   photos: [],                         // legacy image-only URLs (older servers)
 //   ai: { diagnosis, confidence, possibleCauses: [] } | null,   // null when the customer skipped the AI step
+//   quote: { labor, parts } | null,     // once a quotation was sent
+//   closedBy: 'provider' | 'customer' | null,
+//   declinedReason: 'text' | null,
 // }
 
-function ModalShell({ onClose, children }) {
+const formatPesos = (n) => Number(n || 0).toLocaleString('en-US');
+
+function PlayGlyph({ size = 49 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
+      <circle cx="24" cy="24" r="23" fill="rgba(0,0,0,0.45)" />
+      <path d="M19 14.5v19l16-9.5-16-9.5z" fill="#fff" />
+    </svg>
+  );
+}
+
+// Full-size viewer for the customer's photos / video (opens when a thumbnail is clicked).
+function AttachmentViewer({ attachments, startIndex, onClose }) {
+  const [index, setIndex] = useState(startIndex);
+  const count = attachments.length;
+  const current = attachments[index];
+
+  const prev = useCallback(() => setIndex((i) => (i - 1 + count) % count), [count]);
+  const next = useCallback(() => setIndex((i) => (i + 1) % count), [count]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose();
+      if (e.key === 'ArrowLeft') prev();
+      if (e.key === 'ArrowRight') next();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose, prev, next]);
+
+  if (!current) return null;
+
+  const navButton =
+    'absolute top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border-0 bg-white/90 p-0 text-black';
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-5"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
       onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Customer attachment"
     >
-      <div
-        className={`relative box-border w-full max-w-[337px] rounded-[10px] bg-white px-[24px] pb-[22px] pt-[20px] ${SF_PRO}`}
-        onClick={(e) => e.stopPropagation()}
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close"
+        className="absolute right-5 top-5 z-10 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border-0 bg-white/90 p-0 text-black"
       >
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="absolute right-[18px] top-[16px] flex cursor-pointer border-none bg-transparent p-0"
-        >
-          <X size={16} color="#000000" />
-        </button>
-        {children}
+        <X size={20} />
+      </button>
+
+      {count > 1 && (
+        <>
+          <button
+            type="button"
+            aria-label="Previous attachment"
+            onClick={(e) => {
+              e.stopPropagation();
+              prev();
+            }}
+            className={`${navButton} left-4`}
+          >
+            <ChevronLeft size={22} />
+          </button>
+          <button
+            type="button"
+            aria-label="Next attachment"
+            onClick={(e) => {
+              e.stopPropagation();
+              next();
+            }}
+            className={`${navButton} right-4`}
+          >
+            <ChevronRight size={22} />
+          </button>
+        </>
+      )}
+
+      <div className="flex max-h-full max-w-[min(92vw,1000px)] flex-col items-center" onClick={(e) => e.stopPropagation()}>
+        {current.type === 'video' ? (
+          <video
+            key={current.url}
+            src={current.url}
+            controls
+            autoPlay
+            playsInline
+            className="max-h-[80vh] max-w-full rounded-[6px] bg-black"
+          />
+        ) : (
+          <img
+            key={current.url}
+            src={current.url}
+            alt={current.filename || `Customer upload ${index + 1}`}
+            className="max-h-[80vh] max-w-full rounded-[6px] object-contain"
+          />
+        )}
+        <p className={`m-0 mt-3 ${SF_PRO} text-[12px] text-white`}>
+          {index + 1} / {count}
+          {current.filename ? ` · ${current.filename}` : ''}
+        </p>
       </div>
     </div>
   );
 }
 
-const FIELD_BASE =
-  'box-border rounded-[6px] border border-[#DAD2D2] bg-[#FFFDFD] px-2 text-[9px] text-[#292727] outline-none placeholder:text-[#B5B0B0]';
-const MODAL_BUTTON =
-  'box-border mt-3 flex h-[32px] w-full items-center justify-center rounded-[8px] border border-[#DAD2D2] bg-[#FFFDFD] text-[9px] font-bold text-[#292727]';
-
-// "Approve" popup: the provider sends a pre-repair quotation to the customer.
-function ApproveQuoteModal({ onClose, onSubmit, isSaving }) {
-  const [laborPrice, setLaborPrice] = useState('');
-  const [itemPrice, setItemPrice] = useState('');
-  const [notes, setNotes] = useState('');
-
-  const canSend = (laborPrice.trim() !== '' || itemPrice.trim() !== '') && !isSaving;
+// One 137 x 176 thumbnail in the Figma attachment row (first tile is the video when there is one).
+function AttachmentTile({ attachment, index, onOpen }) {
+  const [broken, setBroken] = useState(false);
+  const isVideo = attachment.type === 'video';
+  const label = attachment.filename || (isVideo ? `Customer video ${index + 1}` : `Customer photo ${index + 1}`);
 
   return (
-    <ModalShell onClose={onClose}>
-      <p className="m-0 text-[12px] font-bold leading-[16px] text-[#292727]">
-        Service Request Approved
-      </p>
-      <p className="m-0 mt-3 text-[10px] leading-[14px] text-[#5B5959]">
-        Send a pre-repair quotation to the customer.
-      </p>
-
-      <div className="mt-2 flex gap-3">
-        <label className="flex flex-col gap-[3px]">
-          <span className="text-[8px] leading-[10px] text-[#5B5959]">Labor Price</span>
-          <input
-            type="number"
-            min="0"
-            inputMode="decimal"
-            value={laborPrice}
-            onChange={(e) => setLaborPrice(e.target.value)}
-            placeholder="0.00"
-            className={`${FIELD_BASE} h-[26px] w-[78px]`}
+    <button
+      type="button"
+      onClick={() => onOpen(index)}
+      aria-label={`View ${label}`}
+      className="relative box-border flex h-[176px] w-[137px] cursor-pointer items-center justify-center overflow-hidden border-0 bg-[#D9D9D9] p-0"
+    >
+      {broken ? (
+        <img src={photoIcon} alt="" className="h-[36px] w-[37px]" />
+      ) : isVideo ? (
+        <>
+          <video
+            src={attachment.url}
+            preload="metadata"
+            muted
+            playsInline
+            onError={() => setBroken(true)}
+            className="pointer-events-none h-full w-full bg-[#3F3F3F] object-cover"
           />
-        </label>
-        <label className="flex flex-col gap-[3px]">
-          <span className="text-[8px] leading-[10px] text-[#5B5959]">Item Price</span>
-          <input
-            type="number"
-            min="0"
-            inputMode="decimal"
-            value={itemPrice}
-            onChange={(e) => setItemPrice(e.target.value)}
-            placeholder="0.00"
-            className={`${FIELD_BASE} h-[26px] w-[78px]`}
-          />
-        </label>
-      </div>
-
-      <label className="mt-2 flex flex-col gap-[3px]">
-        <span className="text-[8px] leading-[10px] text-[#5B5959]">Notes</span>
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="Parts needed, timeline ..."
-          className={`${FIELD_BASE} h-[48px] w-full resize-none py-[6px]`}
+          <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <PlayGlyph />
+          </span>
+        </>
+      ) : (
+        <img
+          src={attachment.url}
+          alt={label}
+          loading="lazy"
+          onError={() => setBroken(true)}
+          className="h-full w-full object-cover"
         />
-      </label>
-
-      <button
-        type="button"
-        disabled={!canSend}
-        onClick={() =>
-          onSubmit({
-            laborPrice: Number(laborPrice) || 0,
-            itemPrice: Number(itemPrice) || 0,
-            notes: notes.trim(),
-          })
-        }
-        className={`${MODAL_BUTTON} ${canSend ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
-      >
-        {isSaving ? 'Sending…' : 'Send Quote'}
-      </button>
-    </ModalShell>
+      )}
+    </button>
   );
 }
 
-// "Decline" popup: the provider states why the request is being rejected.
-function RejectModal({ onClose, onSubmit, isSaving }) {
-  const [reason, setReason] = useState('');
-  const canSend = reason.trim() !== '' && !isSaving;
-
-  return (
-    <ModalShell onClose={onClose}>
-      <p className="m-0 text-[12px] font-bold leading-[16px] text-[#292727]">Reason for Rejection</p>
-      <p className="m-0 mt-1 text-[10px] leading-[14px] text-[#5B5959]">
-        State a proper reason for rejection.
-      </p>
-
-      <textarea
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-        placeholder="Enter your reasons here."
-        className={`${FIELD_BASE} mt-3 h-[96px] w-full resize-none py-[6px]`}
-      />
-
-      <button
-        type="button"
-        disabled={!canSend}
-        onClick={() => onSubmit({ reason: reason.trim() })}
-        className={`${MODAL_BUTTON} ${canSend ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
-      >
-        {isSaving ? 'Sending…' : 'Send'}
-      </button>
-    </ModalShell>
-  );
-}
+// Decline / Approve buttons (Figma without modal: 190 x 40, red #CF2626 / green #167713, 27px apart).
+const ACTION_BUTTON =
+  'box-border h-[40px] w-[190px] max-w-[48%] cursor-pointer rounded-[10px] border border-[#B1A8A8] text-[10px] font-bold leading-[17px] text-white';
 
 export default function ServiceRequestDetails() {
   const { user, loading } = useAuth();
@@ -172,11 +198,13 @@ export default function ServiceRequestDetails() {
   const [modal, setModal] = useState(null); // null | 'approve' | 'reject'
   const [isSaving, setIsSaving] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [viewerIndex, setViewerIndex] = useState(null);
 
   useEffect(() => {
     if (!user) return undefined;
     let cancelled = false;
     setIsLoading(true);
+    setLoadError('');
     getProviderServiceRequest(requestId)
       .then((data) => {
         if (!cancelled) setRequest(data.request);
@@ -194,6 +222,12 @@ export default function ServiceRequestDetails() {
 
   const goBackToList = () => navigate('/serviceprovider/requests', { replace: true });
 
+  const closeModal = () => {
+    if (isSaving) return;
+    setModal(null);
+    setActionError('');
+  };
+
   // Approve = send the pre-repair quotation: POST /api/providers/requests/:requestId/quote
   const handleSendQuote = async ({ laborPrice, itemPrice, notes }) => {
     setIsSaving(true);
@@ -203,7 +237,6 @@ export default function ServiceRequestDetails() {
       setModal(null);
       goBackToList();
     } catch (err) {
-      setModal(null);
       setActionError(err.message || "Couldn't send the quotation. Please try again.");
     } finally {
       setIsSaving(false);
@@ -219,7 +252,6 @@ export default function ServiceRequestDetails() {
       setModal(null);
       goBackToList();
     } catch (err) {
-      setModal(null);
       setActionError(err.message || "Couldn't send your response. Please try again.");
     } finally {
       setIsSaving(false);
@@ -247,107 +279,116 @@ export default function ServiceRequestDetails() {
     );
   }
 
-  const { customer, ai } = request;
-  const canRespond = request.status === 'new'; // quoted requests were already answered
-  // New backend responses include typed attachments. Fall back to the legacy image-only `photos`
-  // field while an older server is still deployed.
-  const attachments = Array.isArray(request.attachments)
-    ? request.attachments
-    : (request.photos || []).map((url) => ({ url, type: 'image', filename: null }));
+  const customer = request.customer || {};
+  const ai = request.ai;
+  const possibleCauses = Array.isArray(ai?.possibleCauses) ? ai.possibleCauses : [];
+  // Only a request still waiting on this provider can be approved or declined.
+  const canRespond = request.canApprove ?? request.status === 'new';
+
+  // Typed attachments from the backend; fall back to the legacy image-only `photos` field
+  // while an older server is deployed.
+  const attachments = (
+    Array.isArray(request.attachments)
+      ? request.attachments
+      : (request.photos || []).map((url) => ({ url, type: 'image', filename: null }))
+  )
+    .filter((a) => a?.url)
+    // The video goes first, like in the Figma frame.
+    .sort((a, b) => Number(b.type === 'video') - Number(a.type === 'video'));
+
+  const statusNote =
+    request.status === 'quoted'
+      ? `You already sent a quotation${
+          request.quote ? ` (${formatPesos(request.quote.labor)} labor, ${formatPesos(request.quote.parts)} parts)` : ''
+        }. Waiting for the customer to answer.`
+      : request.status === 'closed'
+        ? request.closedBy === 'customer'
+          ? 'The customer declined your quotation.'
+          : `You declined this request${request.declinedReason ? `: ${request.declinedReason}` : '.'}`
+        : '';
 
   return (
     <ServiceProviderSidebar>
       <div className="box-border px-4 pb-10 pt-[25px] sm:px-[54px]">
-        {/* Column is 675px wide in the Figma frame; the buttons sit on its right edge */}
-        <div className={`w-full max-w-[675px] ${SF_PRO}`}>
+        <div className={`w-full max-w-[1070px] ${SF_PRO}`}>
           <h1 className="m-0 flex h-[68px] items-center font-[Quicksand] text-[32px] font-bold leading-[32px] text-[#005FCA] sm:text-[40px] lg:text-[48px]">
             Service Request
           </h1>
 
-          <h2 className="m-0 mt-[30px] text-[20px] font-bold leading-[24px] text-[#292727]">
+          <h2 className="m-0 mt-[30px] text-[20px] font-bold leading-[34px] text-[#292727]">
             Request #{request.id}
           </h2>
 
+          {statusNote && (
+            <p className="m-0 mt-2 max-w-[700px] text-[12px] leading-[18px] text-[#5B5959]">{statusNote}</p>
+          )}
+
           {/* Customer information */}
-          <p className={`${SECTION_LABEL} mt-[22px]`}>Customer Information</p>
-          <div className="mt-1 flex flex-wrap items-center">
+          <p className={`${SECTION_LABEL} mt-[14px]`}>Customer Information</p>
+          <div className="mt-[6px] flex flex-wrap items-center">
             <img
               src={customer.avatarUrl || ellipseIcon}
               alt=""
-              className="h-[70px] w-[70px] flex-none rounded-full object-cover"
+              className="h-[70px] w-[69px] flex-none rounded-full object-cover"
             />
-            <div className="ml-4 w-[274px] max-w-full sm:ml-[42px]">
-              <p className="m-0 text-[11px] font-bold leading-[19px] text-[#292727]">
-                {customer.name}
-              </p>
-              <p className="m-0 pl-[6px] text-[11px] font-normal leading-[19px] text-[#5B5959]">
-                {customer.address}
-              </p>
-            </div>
-            {customer.distanceKm != null && (
-              <div className="flex items-center gap-[6px]">
+            <div className="ml-4 sm:ml-[34px]">
+              <p className="m-0 text-[11px] font-bold leading-[19px] text-[#5B5959]">{customer.name}</p>
+              <div className="flex flex-wrap items-center gap-x-[6px]">
                 <img src={pinIcon} alt="" className="h-[15px] w-[12px] flex-none object-contain" />
-                <span className="text-[10px] font-normal leading-[17px] text-[#5B5959] underline">
-                  {customer.distanceKm} km away
+                <span className="text-[11px] font-normal leading-[19px] text-[#5B5959]">
+                  {customer.address || 'No address provided'}
                 </span>
+                {customer.distanceKm != null && (
+                  <span className="ml-2 text-[9px] font-normal leading-[15px] text-[#5B5959]">
+                    {customer.distanceKm} km away
+                  </span>
+                )}
               </div>
-            )}
+            </div>
           </div>
 
           {/* Customer concern */}
-          <p className={`${SECTION_LABEL} mt-[9px]`}>Customer Concern</p>
-          <p className="m-0 ml-1 mt-[6px] max-w-[620px] text-[12px] font-normal leading-[20px] text-[#292727]">
+          <p className={`${SECTION_LABEL} mt-[14px]`}>Customer Concern</p>
+          <p className="m-0 mt-[4px] max-w-[760px] whitespace-pre-line text-[14px] font-normal leading-[24px] text-[#292727]">
             {request.concern}
           </p>
 
-          {attachments.length > 0 ? (
-            <div className="ml-1 mt-[14px] grid max-w-[617px] grid-cols-2 gap-2 sm:grid-cols-3">
-              {attachments.map((attachment, index) =>
-                attachment.type === 'video' ? (
-                  <video
-                    key={`${attachment.url}-${index}`}
-                    src={attachment.url}
-                    controls
-                    playsInline
-                    preload="metadata"
-                    aria-label={attachment.filename || `Customer video ${index + 1}`}
-                    className="h-[136px] w-full rounded-[4px] bg-black object-contain"
-                  />
-                ) : (
-                  <img
-                    key={`${attachment.url}-${index}`}
-                    src={attachment.url}
-                    alt={attachment.filename || `Customer upload ${index + 1}`}
-                    className="h-[136px] w-full rounded-[4px] object-cover"
-                  />
-                )
-              )}
-            </div>
-          ) : (
-            <div className="ml-1 mt-[14px] flex h-[136px] w-full max-w-[617px] items-center justify-center bg-[#D9D9D9]">
-              <img src={photoIcon} alt="No photo uploaded" className="h-[36px] w-[37px]" />
+          {/* Attachments uploaded by the customer (Figma "with attachments"; hidden when there are none) */}
+          {attachments.length > 0 && (
+            <div className="mt-[18px] flex flex-wrap gap-x-[47px] gap-y-4 pl-[2px]" aria-label="Customer attachments">
+              {attachments.map((attachment, index) => (
+                <AttachmentTile
+                  key={`${attachment.url}-${index}`}
+                  attachment={attachment}
+                  index={index}
+                  onOpen={setViewerIndex}
+                />
+              ))}
             </div>
           )}
 
           {/* AI diagnosis */}
-          <p className={`${SECTION_LABEL} mt-6`}>AI Diagnosis (Preliminary)</p>
+          <p className={`${SECTION_LABEL_SMALL} mt-[26px]`}>AI Diagnosis (Preliminary)</p>
           {ai ? (
             <>
-              <div className="mt-[7px] box-border flex h-[34px] w-full max-w-[641px] items-center rounded-[10px] bg-[#262728] pl-[30px]">
-                <img src={lightningIcon} alt="" className="h-[13px] w-[10px] flex-none object-contain" />
-                <span className="ml-[10px] text-[9px] font-normal leading-[15px] text-white">
-                  AI suggests {ai.diagnosis} ({ai.confidence}% confidence)
+              <div className="mt-[5px] box-border flex h-[34px] w-full max-w-[649px] items-center rounded-[10px] bg-[#262728] pl-[22px]">
+                <img src={lightningIcon} alt="" className="h-[15px] w-[11px] flex-none object-contain" />
+                <span className="ml-[12px] text-[9px] font-normal leading-[15px] text-white">
+                  AI suggests {ai.diagnosis}
+                  {ai.confidence != null ? ` (${ai.confidence}% confidence)` : ''}
                 </span>
               </div>
 
-              <div className="mt-[19px] text-[9px] leading-[15px] text-[#292727]">
-                <p className="m-0 font-normal">Possible causes:</p>
-                {ai.possibleCauses.map((cause) => (
-                  <p key={cause} className="m-0 font-bold">
-                    {cause}
-                  </p>
-                ))}
-              </div>
+              {possibleCauses.length > 0 && (
+                <div className="mt-[14px] text-[9px] leading-[15px] text-[#292727]">
+                  <p className="m-0 font-normal">Possible causes:</p>
+                  {possibleCauses.map((cause) => (
+                    <p key={cause} className="m-0 font-bold">
+                      {cause}
+                    </p>
+                  ))}
+                </div>
+              )}
             </>
           ) : (
             <p className="m-0 mt-[7px] text-[10px] leading-[15px] text-[#5B5959]">
@@ -355,26 +396,26 @@ export default function ServiceRequestDetails() {
             </p>
           )}
 
-          {actionError && (
-            <p role="alert" className="m-0 mt-4 text-[11px] text-[#B91C1C]">
-              {actionError}
-            </p>
-          )}
-
           {/* Decline / Approve */}
           {canRespond && (
-            <div className="mt-[77px] flex justify-end gap-[18px]">
+            <div className="mt-[56px] flex justify-end gap-[27px]">
               <button
                 type="button"
-                onClick={() => setModal('reject')}
-                className="box-border h-[32px] w-[191px] max-w-[48%] cursor-pointer rounded-[10px] border border-[#B1A8A8] bg-[#FFFDFD] text-[9px] font-bold text-[#292727]"
+                onClick={() => {
+                  setActionError('');
+                  setModal('reject');
+                }}
+                className={`${ACTION_BUTTON} bg-[#CF2626]`}
               >
                 Decline
               </button>
               <button
                 type="button"
-                onClick={() => setModal('approve')}
-                className="box-border h-[32px] w-[191px] max-w-[48%] cursor-pointer rounded-[10px] border border-[#B1A8A8] bg-[#577FBB] text-[9px] font-bold text-white"
+                onClick={() => {
+                  setActionError('');
+                  setModal('approve');
+                }}
+                className={`${ACTION_BUTTON} bg-[#167713]`}
               >
                 Approve
               </button>
@@ -383,15 +424,15 @@ export default function ServiceRequestDetails() {
         </div>
       </div>
 
+      {viewerIndex !== null && (
+        <AttachmentViewer attachments={attachments} startIndex={viewerIndex} onClose={() => setViewerIndex(null)} />
+      )}
+
       {modal === 'approve' && (
-        <ApproveQuoteModal
-          onClose={() => setModal(null)}
-          onSubmit={handleSendQuote}
-          isSaving={isSaving}
-        />
+        <QuotationModal onClose={closeModal} onSubmit={handleSendQuote} isSaving={isSaving} error={actionError} />
       )}
       {modal === 'reject' && (
-        <RejectModal onClose={() => setModal(null)} onSubmit={handleReject} isSaving={isSaving} />
+        <ReasonModal onClose={closeModal} onSubmit={handleReject} isSaving={isSaving} error={actionError} />
       )}
     </ServiceProviderSidebar>
   );

@@ -311,7 +311,13 @@ export const clearDraftRequestId = () => sessionStorage.removeItem(DRAFT_REQUEST
 // --- Service requests: provider side (backend: /api/providers/requests) ---
 
 // Incoming Service Requests list -> { requests: [...] } (shape of IncomingServiceRequest.jsx).
-export const getProviderServiceRequests = () => request('/providers/requests');
+// `filter=everything` also returns the closed ones (declined by this provider / quotation declined by the
+// customer); the web list filters New / Pending / Closed on its own.
+export const getProviderServiceRequests = () => request('/providers/requests?filter=everything');
+
+// Service categories (public) -> { categories: [{ key, label, specializationNames }] }.
+// Feeds the Categories dropdowns on Incoming Service Requests and Active Jobs.
+export const getServiceCategories = () => request('/categories', { auth: false });
 
 // Request details -> { request: {...} } (shape of ServiceRequestDetails.jsx).
 export const getProviderServiceRequest = (requestId) =>
@@ -494,6 +500,25 @@ export const notifyAdditionalParts = (jobId, { additionalCost, notes } = {}) =>
     method: 'POST',
     body: { additionalCost, notes },
   });
+
+// Price negotiations from customers (Active Jobs > Quotation) -> { quotations: [{ paymentRequestId, jobId,
+//   requestNumber, customerName, createdAt, category, distanceKm, originalAmount, proposedAmount,
+//   customerMessage, providerNotes }] }.
+export const getProviderJobQuotations = () => request('/provider/jobs/quotations');
+
+// Accept the customer's suggested amount: the additional payment becomes that amount -> { ok, status, amount }.
+export const acceptJobNegotiation = (jobId, paymentRequestId) =>
+  request(
+    `/provider/jobs/${encodeURIComponent(jobId)}/payment-requests/${encodeURIComponent(paymentRequestId)}/negotiation/accept`,
+    { method: 'POST' }
+  );
+
+// Decline the customer's suggested amount (reason required) -> { ok, status }.
+export const rejectJobNegotiation = (jobId, paymentRequestId, { reason } = {}) =>
+  request(
+    `/provider/jobs/${encodeURIComponent(jobId)}/payment-requests/${encodeURIComponent(paymentRequestId)}/negotiation/reject`,
+    { method: 'POST', body: { reason } }
+  );
 
 // Earnings screen -> { summary: { thisWeek, pendingPayment }, transactions: [{ id,
 //   requestNumber, customerName, date, amount }] }.

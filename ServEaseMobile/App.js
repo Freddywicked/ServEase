@@ -29,6 +29,7 @@ import Track from './customer/Track';
 import Payment from './customer/Payment';
 import Ratings from './customer/Ratings';
 import RequestDetails from './customer/RequestDetails';
+import RepairDetails from './customer/RepairDetails';
 import MessageCustomer from './customer/MessageCustomer';
 import ConversationCustomer from './customer/ConversationCustomer';
 import History from './customer/History';
@@ -99,6 +100,7 @@ const App = () => {
         <Stack.Screen name="Payment" component={Payment}/>
         <Stack.Screen name="Ratings" component={Ratings}/>
         <Stack.Screen name="RequestDetails" component={RequestDetails}/>
+        <Stack.Screen name="RepairDetails" component={RepairDetails}/>
         <Stack.Screen name="SubmitServiceRequest" component={SubmitServiceRequest}/>
         <Stack.Screen name="RecommendServiceProvider" component={RecommendServiceProvider}/>
         <Stack.Screen name="MessageCustomer" component={MessageCustomer}/>

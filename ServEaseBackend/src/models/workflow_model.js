@@ -86,6 +86,19 @@ const listPaymentRequests = async (requestIds) => {
   return unwrap(await supabase.from('payment_requests').select('*').in('request_id', requestIds));
 };
 
+// Price negotiations still waiting on this provider: the customer answered an additional
+// payment with a counter-offer (columns from migrations/007_payment_request_negotiation.sql).
+const listNegotiatingPaymentRequests = async (providerId) =>
+  unwrap(
+    await supabase
+      .from('payment_requests')
+      .select('*')
+      .eq('provider_id', providerId)
+      .eq('status', 'pending')
+      .eq('negotiation_status', 'requested')
+      .order('negotiated_at', { ascending: false })
+  );
+
 // ---------- progress_updates ----------
 const addProgressUpdate = async (row) =>
   unwrap(await supabase.from('progress_updates').insert(row).select().single());
@@ -238,6 +251,7 @@ module.exports = {
   findPaymentRequest,
   updatePaymentRequest,
   listPaymentRequests,
+  listNegotiatingPaymentRequests,
   addProgressUpdate,
   listProgressUpdates,
   addPayment,

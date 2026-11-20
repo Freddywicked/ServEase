@@ -14,13 +14,16 @@ import LinearGradient from 'react-native-linear-gradient';
  * ----------------------------------------------------------------------------
  * The provider's side of the customer's Create Service Request flow.
  *
- *   List     GET  /provider/service-requests?filter=all|new|pending
+ *   List     GET  /provider/service-requests?filter=all|new|pending|closed
  *   Accept   opens ViewServiceRequest with the quotation modal already open
  *            ("Service Request Approved - send a pre-repair quotation"). The request
  *            is accepted AND quoted in one step by submitQuotation, and from then on
  *            the backend returns it under the Pending tab with its quotation.
  *   View     opens ViewServiceRequest (details, attachments, Decline / Accept).
  *   Message  (Pending tab) opens the provider's conversation for that request.
+ *   Closed   requests that ended in a decline: the provider declined the request, or the customer
+ *            declined this provider's quotation. The backend puts both under ?filter=closed. A closed
+ *            card is read-only (no Message button): once declined there is nothing left to do.
  *
  * Opening the Requests tab always starts on "All". Coming BACK from a request's
  * details keeps the tab and search the provider was on.
@@ -37,6 +40,7 @@ const FILTER_OPTIONS = [
     { key: 'all', label: 'All' },
     { key: 'new', label: 'New' },
     { key: 'pending', label: 'Pending' },
+    { key: 'closed', label: 'Closed' },
 ];
 
 const DEFAULT_FILTER = 'all';
@@ -218,6 +222,54 @@ const IncomingServiceRequest = ({ navigation }) => {
         );
     }, [requests, searchText]);
 
+    // Probable cause + "82% AI Confidence ..." for the Closed card, from the same AI data the other cards use.
+    const getAiParts = (item) => {
+        const ai = item?.aiDiagnosis ?? item?.ai;
+        let diagnosis = null;
+        let confidence = item?.aiConfidence ?? null;
+        if (typeof ai === 'string') diagnosis = ai;
+        else if (ai && typeof ai === 'object') {
+            diagnosis = ai.probableCause ?? ai.diagnosis ?? null;
+            confidence = ai.confidencePercent ?? ai.confidence ?? confidence;
+        }
+        const percent = Number(confidence);
+        return {
+            diagnosis,
+            confidence: confidence !== null && confidence !== undefined && Number.isFinite(percent) ? Math.round(percent) : null,
+        };
+    };
+
+    // Closed card (Figma "Incoming Service Requests - Closed tab"): no Message button, no actions.
+    const renderClosedCard = (item) => {
+        const { diagnosis, confidence } = getAiParts(item);
+        return (
+            <View key={item.id} style={styles.requestCard}>
+                <View style={styles.cardHeader}>
+                    <View style={styles.cardHeaderText}>
+                        <Text style={styles.requestNumber}>Request #{getRequestNumber(item)}</Text>
+                        <Text style={styles.closedSentTo}>
+                            sent to <Text style={styles.closedSentToName}>{item.customerName || 'Customer'}</Text>
+                        </Text>
+                    </View>
+                    <View style={styles.declinedPill}>
+                        <Text style={styles.statusPillText}>{item.statusLabel || 'Declined'}</Text>
+                    </View>
+                </View>
+
+                {diagnosis ? (
+                    <>
+                        <View style={styles.divider} />
+                        <Text style={styles.closedCauseLabel}>Probable Cause</Text>
+                        <Text style={styles.closedCause}>{diagnosis}</Text>
+                        {confidence !== null ? (
+                            <Text style={styles.closedConfidence}>{confidence}% AI Confidence based on similar reported cases</Text>
+                        ) : null}
+                    </>
+                ) : null}
+            </View>
+        );
+    };
+
     const renderRequestCard = (item) => {
         const aiSuggestion = getAiSuggestion(item) || formatAiSuggestion(item.aiDiagnosis);
         const distance = formatDistance(item.distanceKm);
@@ -225,6 +277,9 @@ const IncomingServiceRequest = ({ navigation }) => {
         const locationTypeLabel =
             item.serviceLocationType === 'home' ? 'Home-based' : item.serviceLocationType === 'shop' ? 'Shop-based' : null;
         const locationLine = [locationTypeLabel, distance !== null ? `${distance} km away` : null].filter(Boolean).join(' ');
+
+        // Closed tab: declined by this provider, or this provider's quotation declined by the customer.
+        if (item.status === 'closed') return renderClosedCard(item);
 
         const quote = getQuote(item);
         const isQuoted = !!quote || item.status === 'quoted';
@@ -589,6 +644,49 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: '700',
         color: '#FFFFFF',
+    },
+
+    // Closed tab: Declined pill (#DA5555) + probable cause
+    declinedPill: {
+        minWidth: 61,
+        height: 21,
+        paddingHorizontal: 8,
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
+        borderRadius: 20,
+        backgroundColor: '#DA5555',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 2,
+    },
+    closedSentTo: {
+        fontSize: 11,
+        lineHeight: 13,
+        color: '#484040',
+        marginTop: 3,
+    },
+    closedSentToName: {
+        fontWeight: '700',
+    },
+    closedCauseLabel: {
+        fontSize: 10,
+        lineHeight: 12,
+        color: '#484040',
+        marginTop: 4,
+    },
+    closedCause: {
+        fontSize: 13,
+        lineHeight: 16,
+        fontWeight: '700',
+        color: '#484040',
+        marginTop: 4,
+    },
+    closedConfidence: {
+        fontSize: 9,
+        lineHeight: 11,
+        fontWeight: '500',
+        color: '#484040',
+        marginTop: 5,
     },
 
     // Pending tab: quotation summary + Message Customer

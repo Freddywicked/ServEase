@@ -45,9 +45,20 @@ router.use(authenticate, requireProvider);
 
 router.get('/dashboard', workflow.getProviderDashboard);
 router.get('/jobs', workflow.listJobs);
+// Static path BEFORE '/jobs/:jobId', otherwise "quotations" is read as a job id.
+router.get('/jobs/quotations', workflow.listJobQuotations);
 router.get('/jobs/:jobId', workflow.getJob);
 router.patch('/jobs/:jobId/status', uploadPhoto, workflow.updateJobStatus);
 router.post('/jobs/:jobId/additional-parts', workflow.notifyAdditionalParts);
+// Price negotiation from the customer (Active Jobs > Quotation).
+router.post(
+  '/jobs/:jobId/payment-requests/:paymentRequestId/negotiation/accept',
+  workflow.answerJobNegotiation('accepted')
+);
+router.post(
+  '/jobs/:jobId/payment-requests/:paymentRequestId/negotiation/reject',
+  workflow.answerJobNegotiation('rejected')
+);
 router.get('/earnings', workflow.getEarnings);
 // Nav bar badges on the mobile Requests and Jobs tabs.
 router.get('/badge-counts', workflow.getProviderBadgeCounts);

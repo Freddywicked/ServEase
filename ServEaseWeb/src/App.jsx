@@ -21,6 +21,7 @@ import RecommendServiceProvider from './customer/RecommendServiceProvider'
 import SubmitServiceRequest from './customer/SubmitServiceRequest'
 import TrackRequest from './customer/TrackRequest'
 import MyRequestDetails from './customer/MyRequestDetails'
+import ViewRepairDetails from './customer/ViewRepairDetails'
 import Payment from './customer/Payment'
 import Rating from './customer/Rating'
 import History from './customer/History'
@@ -72,6 +73,8 @@ function App() {
         <Route path="/customer/request-submitted" element={<SubmitServiceRequest />} />
         <Route path="/customer/requests" element={<TrackRequest />} />
         <Route path="/customer/requests/:requestId" element={<MyRequestDetails />} />
+        {/* Opened from the "View" button of an On-going card in Track Requests */}
+        <Route path="/customer/requests/:requestId/repair-details" element={<ViewRepairDetails />} />
         <Route path="/customer/requests/:requestId/payment" element={<Payment />} />
         <Route path="/customer/requests/:requestId/review" element={<Rating />} />
         <Route path="/customer/history" element={<History />} />

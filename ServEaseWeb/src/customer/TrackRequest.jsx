@@ -42,7 +42,14 @@ import {
                               the payment request stays pending)
      quotation review      -> MyRequestDetails.jsx (/customer/requests/:requestId)
      final payment         -> Payment.jsx (/customer/requests/:requestId/payment)
+     view repair details   -> ViewRepairDetails.jsx (/customer/requests/:requestId/repair-details):
+                              every update the service provider pushes from Active Jobs (stage,
+                              notes, images / videos). The cards refresh every 15 seconds.
    ===================================================================================== */
+
+// How often the cards refresh by themselves, so provider updates (status, notes, photos)
+// show up without a page reload.
+const POLL_INTERVAL_MS = 15000;
 
 // Backend groups (keys of the getTrackingCards() response).
 const GROUP_ORDER = ['sent', 'approved', 'ongoing', 'done', 'declined'];
@@ -322,6 +329,20 @@ function OutlineButton({ children, onClick, className = '' }) {
   );
 }
 
+// Gradient "View" button (Figma Rectangle 3521: 110x30, #04A5A5 -> #0255AF, white bold 12px).
+function GradientButton({ children, onClick, className = '' }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{ background: 'linear-gradient(270deg, #04A5A5 0%, #0255AF 100%)' }}
+      className={`box-border h-[30px] w-[110px] cursor-pointer rounded-[10px] border border-[#B1A8A8] p-0 font-[Inter] text-[12px] font-bold leading-[20px] text-white hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#0255AF] ${className}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 // Filled 100x30 action buttons (Figma: Approve #167713, Negotiate #DEBF6A, Decline #C62828).
 const ACTION_COLORS = {
   approve: 'bg-[#167713] hover:bg-[#126010]',
@@ -375,34 +396,36 @@ function Divider({ className = '' }) {
   return <div className={`border-t border-black/40 ${className}`} />;
 }
 
-// done = blue + check; pending = grey; completed = darker grey (until the balance is paid).
+// Figma: updated by the provider = #577FBB + check; every other step = #414141. The last step
+// ("completed" state) stays dark until the customer has paid the balance.
 function StepDot({ state }) {
-  const base = 'flex h-[22px] w-[22px] flex-none items-center justify-center rounded-full';
+  const base = 'flex h-[26px] w-[26px] flex-none items-center justify-center rounded-full';
   if (state === 'done') {
     return (
-      <span className={`${base} bg-[#4B78BD]`}>
-        <Check size={13} strokeWidth={3} color="#fff" />
+      <span className={`${base} bg-[#577FBB]`}>
+        <Check size={13} strokeWidth={3} color="#FFEFEF" />
       </span>
     );
   }
-  if (state === 'completed') return <span className={`${base} bg-[#3F3F3F]`} />;
-  return <span className={`${base} bg-[#6B6B6B]`} />;
+  return <span className={`${base} bg-[#414141]`} />;
 }
 
 function Timeline({ steps }) {
   return (
     <ol className="m-0 mt-3 list-none p-0">
       {steps.map((step) => (
-        <li key={step.label} className="mb-3 flex items-start gap-3">
+        <li key={step.label} className="mb-[17px] flex items-start gap-3">
           <StepDot state={step.state} />
           <div>
-            <p className="m-0 font-[Inter] text-[12px] font-bold leading-[14px] text-[#292727]">
+            <p
+              className={`m-0 font-[Inter] text-[12px] font-bold leading-[20px] ${
+                step.state === 'pending' ? 'text-[#191818]' : step.state === 'completed' ? 'text-[#7C7A79]' : 'text-[#191818]'
+              }`}
+            >
               {step.label}
             </p>
             {step.time ? (
-              <p className="m-0 font-[Inter] text-[10px] leading-[12px] text-[#7C7979]">
-                {step.time}
-              </p>
+              <p className="m-0 font-[Inter] text-[11px] leading-[19px] text-[#5B5959]">{step.time}</p>
             ) : null}
           </div>
         </li>
@@ -663,8 +686,8 @@ function AdditionalPaymentCard({ request, onApprove, onNegotiate, onDecline, onM
   );
 }
 
-// "Active > On-going" and "Completed" — progress timeline
-function ProgressCard({ request, onPayFinal, onMessage }) {
+// "Active > On-going" and "Completed" — progress timeline (View opens the repair details)
+function ProgressCard({ request, onPayFinal, onView, onMessage }) {
   return (
     <CardShell padding="px-[22px] pb-3 pt-[10px]">
       <div className="flex items-start justify-between gap-3">
@@ -684,7 +707,10 @@ function ProgressCard({ request, onPayFinal, onMessage }) {
         {request.awaitingPayment && (
           <OutlineButton onClick={onPayFinal}>Proceed to Payment</OutlineButton>
         )}
-        <OutlineButton onClick={onMessage}>Message</OutlineButton>
+        <GradientButton onClick={onView}>View</GradientButton>
+        <OutlineButton onClick={onMessage} className="!h-[30px] !w-[110px]">
+          Message
+        </OutlineButton>
       </div>
     </CardShell>
   );
@@ -928,6 +954,16 @@ export default function TrackRequest() {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [load]);
 
+  // Keep the cards live: a provider's Update Status (new step, notes, photos) shows up here
+  // without a reload. Paused while the tab is hidden, a modal is open or an action is running.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'visible' || negotiating || busyCardId) return;
+      load();
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [load, negotiating, busyCardId]);
+
   // Back from the PayMongo checkout: /customer/requests?payment=success|cancelled&tab=...
   // The server confirms the payment with PayMongo while building the cards; if a card still
   // awaits payment, retry a few times in case the confirmation is slow.
@@ -1119,6 +1155,7 @@ export default function TrackRequest() {
         <ProgressCard
           request={request}
           onPayFinal={() => goToPayment(request, 'final')}
+          onView={() => navigate(`/customer/requests/${request.id}/repair-details`)}
           onMessage={() => handleMessage(request)}
         />
       );

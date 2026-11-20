@@ -11,6 +11,8 @@ export const ROUTES = {
     NOTIFICATIONS: 'Notifications',
     TRACK: 'Track',
     REQUEST_DETAILS: 'RequestDetails',
+    // Customer: expanded tracking of one request (provider notes + photos/video per step).
+    REPAIR_DETAILS: 'RepairDetails',
     CONVERSATION: 'Conversation',
     PAYMENT: 'Payment',
     CREATE_SERVICE_REQUEST: 'CreateServiceRequest',

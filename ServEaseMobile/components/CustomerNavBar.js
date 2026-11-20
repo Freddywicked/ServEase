@@ -38,6 +38,7 @@ const ACTIVE_TAB_BY_ROUTE = {
 
     // Track flow (My Requests -> Request Details -> Payment -> Ratings): Track stays highlighted.
     RequestDetails: 'Track',
+    RepairDetails: 'Track', // expanded tracking opened from the View button on a Track card
     Payment: 'Track',
     Ratings: 'Track',
 };
