@@ -339,6 +339,10 @@ const listActiveEngagementsOnDate = async (providerIds, date) => {
 };
 
 // ---------- storage ----------
+// Signed URL for any path stored in the private request-photos bucket (photos AND videos).
+// Used by the customer's repair details to show what the provider attached to a status update.
+const mediaUrlFor = (path) => getServiceRequestPhotoUrl(path);
+
 // Uploads the customer's photo to the private request-photos bucket and returns
 // its PATH. Store the path in service_request_attachments.file_url; sign a URL
 // only when something needs to display the photo (see photoUrlsFor).
@@ -371,4 +375,5 @@ module.exports = {
   listReviewsForProvider,
   listActiveEngagementsOnDate,
   uploadPhoto,
+  mediaUrlFor,
 };

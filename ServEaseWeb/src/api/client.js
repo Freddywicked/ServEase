@@ -354,6 +354,13 @@ export const getActiveRepair = () => request('/service-requests/active');
 //   cardType 'declined'  : reason
 export const getTrackingCards = () => request('/service-requests/tracking');
 
+// View Repair Details: every step with the provider's updates (time, notes, photos / videos).
+// -> { requestNumber, providerName, serviceLocationType, statusLabel, isPaid,
+//      steps: [{ key, label, done, updatedAt, updates: [{ id, updatedAt, notes,
+//               attachments: [{ id, url, type: 'image' | 'video', name }] }] }] }
+export const getRepairDetails = (requestId) =>
+  request(`/service-requests/${encodeURIComponent(requestId)}/repair-details`);
+
 // Answer a provider's proposed schedule. answer: 'accept' | 'reject' -> { ok, status }.
 export const answerScheduleProposal = (requestId, proposalId, answer) =>
   request(
@@ -481,13 +488,14 @@ export const sendConversationMessage = (conversationId, text) =>
 //   progressPaymentPaid, paidTotal }] }.
 export const getProviderJobs = () => request('/provider/jobs');
 
-// Push a status update (multipart when a photo is attached). stage must be one of the
-// job's `stages` (backend JOB_STAGES: Assessing / Repairing / Quality Check / Completed).
-export const updateProviderJobStatus = (jobId, { stage, notes, photo } = {}) => {
+// Push a status update (multipart when files are attached). stage must be one of the job's
+// `stages`. files = up to 5 photos / videos (File[]); the backend saves them with the update and
+// the customer sees them in Track Requests > View (getRepairDetails).
+export const updateProviderJobStatus = (jobId, { stage, notes, files = [] } = {}) => {
   const body = new FormData();
   body.append('stage', stage);
   if (notes) body.append('notes', notes);
-  if (photo) body.append('photo', photo);
+  files.forEach((file) => body.append('attachments', file));
   return request(`/provider/jobs/${encodeURIComponent(jobId)}/status`, {
     method: 'PATCH',
     body,

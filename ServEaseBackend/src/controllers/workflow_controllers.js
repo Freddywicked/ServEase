@@ -908,6 +908,64 @@ const getPaymentStatus = asyncHandler(async (req, res) => {
   });
 });
 
+// GET /api/service-requests/:requestId/repair-details
+// The web "View Repair Details" screen: every step of the request's own step list (Shop or Home), each
+// with the updates the provider pushed from Active Jobs > Update Status — time, notes and the attached
+// photos / videos (signed URLs). Only the customer who owns the request can read it.
+//   -> { requestNumber, providerName, serviceLocationType, statusLabel, isPaid,
+//        steps: [{ key, label, done, updatedAt, updates: [{ id, updatedAt, notes,
+//                 attachments: [{ id, url, type: 'image' | 'video', name }] }] }] }
+const progressKey = (u) => u.update_id ?? u.progress_update_id ?? u.progress_id ?? u.id ?? u.created_at;
+
+const getRepairDetails = asyncHandler(async (req, res) => {
+  const row = await getOwnedRequest(req);
+  const [recipients, updates, due] = await Promise.all([
+    Request.listRecipients(row.request_id),
+    Workflow.listProgressUpdates([row.request_id]),
+    computePaymentDue(row),
+  ]);
+  const providerId = pickProviderId(row, recipients);
+  const users = await Request.findUsersByIds([providerId]);
+  const timeline = buildTimeline(row, updates);
+  const isPaid = row.request_status === 'Completed' && Number(due.due.final) <= 0;
+
+  const toUpdateDto = async (u) => {
+    const stored = Array.isArray(u.attachments) ? u.attachments : [];
+    // Updates saved before attachments existed only have photo_path.
+    const items = stored.length ? stored : u.photo_path ? [{ path: u.photo_path, type: 'image', name: null }] : [];
+    const attachments = (
+      await Promise.all(
+        items.map(async (item, i) => {
+          const url = await Request.mediaUrlFor(item.path);
+          return url
+            ? { id: `${progressKey(u)}-${i}`, url, type: item.type === 'video' ? 'video' : 'image', name: item.name || null }
+            : null;
+        })
+      )
+    ).filter(Boolean);
+    return { id: progressKey(u), updatedAt: u.created_at, notes: u.notes || '', attachments };
+  };
+
+  const steps = await Promise.all(
+    stagesFor(row).map(async (stage, i) => ({
+      key: stage,
+      label: timeline[i].label,
+      done: timeline[i].done,
+      updatedAt: timeline[i].timestamp,
+      updates: await Promise.all(updates.filter((u) => u.step === stage).map(toUpdateDto)),
+    }))
+  );
+
+  res.json({
+    requestNumber: refOf(row),
+    providerName: users[providerId]?.name || 'Service provider',
+    serviceLocationType: locationTypeOf(row),
+    statusLabel: isPaid ? 'Completed' : 'In progress',
+    isPaid,
+    steps,
+  });
+});
+
 // GET /api/service-requests/:requestId/payment-due
 // -> { total, paid, due: { initial, additional, final } }
 // The web Payment screen reads the amount from here instead of trusting router
@@ -1403,22 +1461,35 @@ const getJob = asyncHandler(async (req, res) => {
   });
 });
 
-// PATCH /api/provider/jobs/:jobId/status  { stage, notes, photo? } (multipart when a photo is attached)
+// PATCH /api/provider/jobs/:jobId/status  { stage, notes, attachments[]? } (multipart when files are attached)
+// attachments = up to 5 photos / videos (the old single `photo` field still works). They are stored in the
+// private request-photos bucket; progress_updates.attachments keeps [{ path, type, name }] and the
+// customer sees them signed in GET /api/service-requests/:id/repair-details.
 const updateJobStatus = asyncHandler(async (req, res) => {
   const { row } = await getProviderRequest(req);
   const stage = String(req.body.stage || '').trim();
   const allowedStages = stagesFor(row);
   if (!allowedStages.includes(stage)) throw new ApiError(400, `Stage must be one of: ${allowedStages.join(', ')}`);
 
-  let photoPath = null;
-  if (req.file) photoPath = await Request.uploadPhoto(req.user.user_id, req.file);
+  const files = [...(req.files?.attachments || []), ...(req.files?.photo || [])];
+  const attachments = [];
+  for (const file of files) {
+    const path = await Request.uploadPhoto(req.user.user_id, file);
+    attachments.push({
+      path,
+      type: file.mimetype.startsWith('video/') ? 'video' : 'image',
+      name: file.originalname || null,
+    });
+  }
 
   await Workflow.addProgressUpdate({
     request_id: row.request_id,
     provider_id: req.user.user_id,
     step: stage,
     notes: String(req.body.notes || '').trim() || null,
-    photo_path: photoPath,
+    // Older readers still look at photo_path: keep the first photo there.
+    photo_path: attachments.find((a) => a.type === 'image')?.path || null,
+    attachments,
   });
   if (row.request_status === 'Approved') {
     await Request.update(row.request_number, { request_status: 'In Progress' });
@@ -1432,7 +1503,7 @@ const updateJobStatus = asyncHandler(async (req, res) => {
     message: `${refOf(row)} update: ${STEP_LABELS[stage] || stage}.`,
     requestId: row.request_id,
   });
-  res.json({ ok: true, stage });
+  res.json({ ok: true, stage, attachments: attachments.length });
 });
 
 // POST /api/provider/jobs/:jobId/additional-parts  { additionalCost, notes }
@@ -2041,6 +2112,7 @@ module.exports = {
   getCustomerHistory,
   getPaymentDue,
   getTracking,
+  getRepairDetails,
   answerScheduleProposal,
   answerPaymentRequest,
   negotiatePaymentRequest,

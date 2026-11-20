@@ -120,6 +120,8 @@ customer.get('/:requestId/payment-status', authenticate, workflow.getPaymentStat
 // instead of trusting values passed through router state.
 customer.get('/:requestId/payment-due', authenticate, workflow.getPaymentDue);
 customer.post('/:requestId/rating', authenticate, workflow.rateRequest);
+// Web "View Repair Details": every step the provider updated, with its notes and photos / videos.
+customer.get('/:requestId/repair-details', authenticate, workflow.getRepairDetails);
 
 // ----- service provider: mounted at /api/providers/requests AND /api/provider/service-requests -----
 const provider = express.Router();

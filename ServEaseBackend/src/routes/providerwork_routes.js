@@ -11,13 +11,16 @@ const asyncHandler = require('../utils/async_handler');
 const ApiError = require('../utils/api_error');
 const { authenticate } = require('../middleware/auth');
 
-// The status update can carry one photo (same 5 MB image rules as request photos).
+// The status update can carry up to 5 photos and / or videos (field "attachments"); the old
+// single "photo" field is still accepted. Photos are limited to 5 MB, videos to 50 MB.
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 50 * 1024 * 1024, files: 6 },
   fileFilter: (req, file, cb) => {
-    if (!file.mimetype.startsWith('image/')) {
-      const error = new Error('Only image files are allowed.');
+    const isMedia = file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/');
+    if (!['attachments', 'photo'].includes(file.fieldname) || !isMedia) {
+      const error = new Error('Attach photos or videos only.');
       error.status = 400;
       return cb(error);
     }
@@ -25,12 +28,22 @@ const upload = multer({
   },
 });
 
-const uploadPhoto = (req, res, next) =>
-  upload.single('photo')(req, res, (err) => {
-    if (!err) return next();
-    err.status = err.status || 400;
-    if (err.code === 'LIMIT_FILE_SIZE') err.message = 'The photo must be 5 MB or smaller.';
-    return next(err);
+const uploadAttachments = (req, res, next) =>
+  upload.fields([
+    { name: 'attachments', maxCount: 5 },
+    { name: 'photo', maxCount: 1 },
+  ])(req, res, (err) => {
+    if (err) {
+      err.status = err.status || 400;
+      if (err.code === 'LIMIT_FILE_SIZE') err.message = 'Videos must be 50 MB or smaller.';
+      if (err.code === 'LIMIT_UNEXPECTED_FILE') err.message = 'You can attach up to 5 photos or videos.';
+      return next(err);
+    }
+    const files = Object.values(req.files || {}).flat();
+    if (files.some((f) => f.mimetype.startsWith('image/') && f.size > MAX_IMAGE_BYTES)) {
+      return next(new ApiError(400, 'Each photo must be 5 MB or smaller.'));
+    }
+    return next();
   });
 
 // These routes are only for users who have a service provider profile.
@@ -48,7 +61,7 @@ router.get('/jobs', workflow.listJobs);
 // Static path BEFORE '/jobs/:jobId', otherwise "quotations" is read as a job id.
 router.get('/jobs/quotations', workflow.listJobQuotations);
 router.get('/jobs/:jobId', workflow.getJob);
-router.patch('/jobs/:jobId/status', uploadPhoto, workflow.updateJobStatus);
+router.patch('/jobs/:jobId/status', uploadAttachments, workflow.updateJobStatus);
 router.post('/jobs/:jobId/additional-parts', workflow.notifyAdditionalParts);
 // Price negotiation from the customer (Active Jobs > Quotation).
 router.post(
