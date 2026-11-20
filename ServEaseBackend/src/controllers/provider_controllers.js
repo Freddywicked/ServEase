@@ -1,6 +1,7 @@
 const ApiError = require('../utils/api_error');
 const asyncHandler = require('../utils/async_handler');
 const Provider = require('../models/provider_model');
+const Request = require('../models/servicerequest_model');
 const User = require('../models/user_model');
 const { uploadProviderFile, getProviderFileUrl } = require('../utils/storage');
 const { EMAIL_RE } = require('../utils/validators');
@@ -161,22 +162,49 @@ const formatAvailability = (days, hours) => {
   return parts.length ? parts.join(AVAILABILITY_SEP) : null;
 };
 
+// Reviewer names stay masked on the provider's own profile too.
+const maskNamePart = (part) => {
+  if (part.length <= 1) return part;
+  if (part.length <= 4) return part[0] + '*'.repeat(part.length - 1);
+  return part[0] + '*'.repeat(part.length - 3) + part.slice(-2);
+};
+const maskReviewerName = (name) =>
+  String(name || 'Customer').trim().split(/\s+/).map(maskNamePart).join(' ');
+
 // The payload both GET and PATCH /api/providers/me/profile return — exactly what the
 // mobile Profile screen (ServiceProviderProfile.js) renders. The verification documents
 // (valid ID, selfie, supporting docs) are never included.
-// TODO: reviews, rating and aiSummary stay empty until the reviews data is wired in.
 const profilePayload = async (user, profile) => {
   const { days, hours } = parseAvailability(profile.availability);
+  const [photoUrl, reviews] = await Promise.all([
+    getProviderFileUrl(profile.profile_photo),
+    Request.listReviewsForProvider(user.user_id),
+  ]);
+  const values = reviews.map((review) => Number(review.rating)).filter(Number.isFinite);
+  const reviewCount = values.length;
+  const rating = reviewCount
+    ? Math.round((values.reduce((sum, value) => sum + value, 0) / reviewCount) * 10) / 10
+    : null;
+  const positiveFeedbackPercent = reviewCount
+    ? Math.round((values.filter((value) => value >= 4).length / reviewCount) * 100)
+    : null;
+
   return {
     fullName: user.name || null,
     specialty: profile.specializations?.length ? profile.specializations.join(', ') : null,
     yearsExperience: profile.years_of_experience ?? null,
     // profile_photo is a private storage path; sign it so the app can render it.
-    photoUrl: await getProviderFileUrl(profile.profile_photo),
-    rating: null,
-    reviewCount: 0,
-    aiSummary: { positiveFeedbackPercent: null, tags: [] },
-    reviews: [],
+    photoUrl,
+    rating,
+    reviewCount,
+    aiSummary: { positiveFeedbackPercent, tags: [] },
+    reviews: reviews.map((review) => ({
+      id: review.id,
+      reviewer: maskReviewerName(review.reviewerName),
+      rating: review.rating,
+      service: review.serviceAvailed,
+      comment: review.comment,
+    })),
     account: {
       email: user.email || null,
       address: user.address || null,

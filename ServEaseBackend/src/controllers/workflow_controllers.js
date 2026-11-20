@@ -1903,9 +1903,8 @@ const setAvailability = asyncHandler(async (req, res) => {
 
 // ===================== BROWSE PROVIDERS (customer Find screen) =====================
 
-// "Right now" in the provider's Manage Calendar grid: today's date and the
-// current hour slot ('HH:00'), in server-local time (the same clock the
-// provider app uses when it marks slots).
+// Fallback "right now" for older clients: today's date and current hour slot in
+// server-local time. Current mobile clients send their device-local date/slot instead.
 const currentCalendarSlot = () => {
   const now = new Date();
   const pad = (n) => String(n).padStart(2, '0');
@@ -1918,13 +1917,19 @@ const currentCalendarSlot = () => {
 // Blocking every universal appointment slot marks the whole day unavailable.
 // Profile working hours are independent and never alter this calendar grid.
 
-// Ids of the providers unavailable right now: they marked the current date/hour
-// slot unavailable, OR they blocked the whole of today on the calendar (the
-// dashboards' "Unavailable (all day)" state) — which keeps them out of the
-// customer Find screen's Available tab for the entire day, not just the hour
-// that happens to be current.
-const unavailableProviderIds = async (providerIds) => {
-  const { date, slot } = currentCalendarSlot();
+// Ids of the providers unavailable in the customer's current calendar context: they
+// marked the current date/hour slot unavailable, OR they blocked the whole of that day
+// on the calendar (the dashboards' "Unavailable (all day)" state).
+const calendarSlotFromQuery = (query = {}) => {
+  const date = String(query.date || '').slice(0, 10);
+  const slot = to24h(query.slot);
+  // Older clients do not send a calendar context. Keep their existing behavior,
+  // but use the customer's local calendar whenever a valid date/slot pair arrives.
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) && slot ? { date, slot } : currentCalendarSlot();
+};
+
+const unavailableProviderIds = async (providerIds, calendar = currentCalendarSlot()) => {
+  const { date, slot } = calendar;
   const rows = await Workflow.listUnavailableSlotsFor(providerIds, date);
   const blockedByProvider = new Map();
   rows.forEach((r) => {
@@ -1987,7 +1992,7 @@ const browseProviders = asyncHandler(async (req, res) => {
   const [users, ratings, unavailable] = await Promise.all([
     Request.findUsersByIds(providerIds),
     Request.listRatingsForProviders(providerIds),
-    unavailableProviderIds(providerIds),
+    unavailableProviderIds(providerIds, calendarSlotFromQuery(req.query)),
   ]);
 
   // Words shared between the picked category label and a specialization name,
@@ -2049,7 +2054,7 @@ const getProviderDetails = asyncHandler(async (req, res) => {
   const [users, reviews, unavailable] = await Promise.all([
     Request.findUsersByIds([p.user_id]),
     Request.listReviewsForProvider(p.user_id),
-    unavailableProviderIds([p.user_id]),
+    unavailableProviderIds([p.user_id], calendarSlotFromQuery(req.query)),
   ]);
 
   const values = reviews.map((r) => Number(r.rating)).filter(Number.isFinite);

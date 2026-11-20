@@ -416,18 +416,30 @@ export const getPaymentStatus = (requestId) =>
 export const rateServiceRequest = (requestId, { rating, review }) =>
     request(`/service-requests/${requestId}/rating`, { method: 'POST', body: { rating, review } });
 
+// Find/ProviderDetails: use the phone's calendar, not the server's timezone. Without this,
+// a provider blocked on the customer's "today" can look available near midnight when the
+// deployed server is already (or still) on another date.
+const currentCalendarQuery = () => {
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, '0');
+    return {
+        date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
+        slot: `${pad(now.getHours())}:00`,
+    };
+};
+
 // Find screen: browse verified providers. category is a label from GET /categories
 // ('All' = no filter); search matches name/company/specializations; available=true
 // keeps only providers free right now; sort 'rating' is the backend's default order.
 export const browseServiceProviders = ({ category, search, available, sort } = {}) =>
     request('/service-providers', {
-        query: { category, search, available: available ? true : undefined, sort },
+        query: { category, search, available: available ? true : undefined, sort, ...currentCalendarQuery() },
     }).then(pick('providers'));
 
 // ProviderDetails.js: one verified provider's full profile — stats, masked
 // reviews and AI summary tags (GET /service-providers/:id).
 export const getServiceProviderDetails = (providerId) =>
-    request(`/service-providers/${encodeURIComponent(providerId)}`).then(pick('provider'));
+    request(`/service-providers/${encodeURIComponent(providerId)}`, { query: currentCalendarQuery() }).then(pick('provider'));
 
 /* ------------------------- Provider side (Service Provider app) ------------------------- */
 // The provider sees exactly the SERVICE_REQUEST rows customers sent to them from
