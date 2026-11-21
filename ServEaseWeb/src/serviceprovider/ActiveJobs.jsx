@@ -654,7 +654,7 @@ export default function ActiveJobs() {
 
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('active');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [tab, setTab] = useState('ongoing');
 
   const [jobs, setJobs] = useState([]);
@@ -741,9 +741,10 @@ export default function ActiveJobs() {
     () =>
       jobs.filter((job) => {
         if (job.awaitingCustomer) return false; // not a repair yet: the customer has not accepted the quotation
+        if (category !== 'all' && !sameText(job.category, category)) return false;
         if (statusFilter === 'active' && job.done) return false;
         if (statusFilter === 'completed' && !job.done) return false;
-        if (category !== 'all' && !sameText(job.category, category)) return false;
+        
         return matchesSearch([
           job.requestNumber,
           job.customerName,
