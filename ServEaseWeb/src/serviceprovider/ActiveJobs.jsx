@@ -51,15 +51,16 @@ import pinIcon from '../assets/icon_pinloc.png';
 const POLL_INTERVAL_MS = 15000;
 
 const TABS = [
-  { key: 'ongoing', label: 'On-going' },
+  { key: 'ongoing', label: 'On-Going' },
   { key: 'quotation', label: 'Quotation' },
 ];
 
 // Status dropdown (the default view is "Active", like the Figma frame).
 const STATUS_OPTIONS = [
+  { value: 'all', label: 'All' },
   { value: 'active', label: 'Active' },
   { value: 'completed', label: 'Completed' },
-  { value: 'all', label: 'All' },
+  
 ];
 
 // Button colours of the job card (Figma "Request - Active Jobs").
