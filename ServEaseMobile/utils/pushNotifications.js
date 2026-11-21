@@ -10,14 +10,16 @@
 //      FIREBASE_SERVICE_ACCOUNT_PATH locally).
 // Without those, every function here quietly no-ops and the app works as before
 // (in-app notifications only).
-import { Platform, PermissionsAndroid, Alert } from 'react-native';
+import { Platform, PermissionsAndroid } from 'react-native';
 import { registerDeviceToken, unregisterDeviceToken } from '../api/client';
+import { useNotificationBannerStore } from './notificationBannerStore';
+import { normalizeRemoteMessage, openNotification } from './notificationActions';
+import { refreshProviderBadgeCounts } from './providerTabBadges';
 
 // Lazy + guarded: if google-services.json was missing at build time the native
 // Firebase app never initialized, and touching the module would crash on launch.
 let messaging = null;
 try {
-    // eslint-disable-next-line global-require
     messaging = require('@react-native-firebase/messaging').default;
 } catch (error) {
     messaging = null;
@@ -52,9 +54,9 @@ const getFcmToken = async () => {
 };
 
 // Call once the user is logged in (auth_context watches `user`). Registers the
-// device with the backend, keeps the token fresh, and shows incoming pushes as
-// an alert while the app is in the FOREGROUND (in the background/quit state the
-// system tray shows them automatically).
+// device with the backend, keeps the token fresh, and shows incoming pushes in
+// the app-level banner while the app is in the FOREGROUND (in the background/quit
+// state the system tray shows them automatically).
 export const setupPushNotifications = async () => {
     if (!isAvailable()) return undefined;
 
@@ -71,12 +73,14 @@ export const setupPushNotifications = async () => {
         });
 
         // Foreground messages arrive here (the tray only shows them when the app
-        // is in the background). Alert makes testing obvious; swap for a custom
-        // banner later if it gets noisy.
+        // is in the background). They go to the shared banner store, which shows the
+        // custom <NotificationBanner /> and tells the badge hooks to refresh.
         const unsubscribeMessages = messaging().onMessage((remoteMessage) => {
-            const title = remoteMessage.notification?.title || 'ServEase';
-            const body = remoteMessage.notification?.body || '';
-            if (body) Alert.alert(title, body);
+            const notification = normalizeRemoteMessage(remoteMessage);
+            useNotificationBannerStore.getState().showNotification(notification);
+            if (['new_request', 'quotation_accepted'].includes(notification.type)) {
+                refreshProviderBadgeCounts();
+            }
         });
 
         return () => {
@@ -87,6 +91,27 @@ export const setupPushNotifications = async () => {
         console.warn('[push] setup failed:', error.message);
         return undefined;
     }
+};
+
+// Taps on system-tray notifications. Call once from App.js with the navigationRef.
+//   - app in background -> onNotificationOpenedApp
+//   - app was quit      -> getInitialNotification
+// Returns an unsubscribe function (or undefined when Firebase isn't available).
+export const registerNotificationOpenHandlers = (navigationRef) => {
+    if (!isAvailable()) return undefined;
+
+    const unsubscribe = messaging().onNotificationOpenedApp((remoteMessage) => {
+        openNotification(navigationRef, normalizeRemoteMessage(remoteMessage));
+    });
+
+    messaging()
+        .getInitialNotification()
+        .then((remoteMessage) => {
+            if (remoteMessage) openNotification(navigationRef, normalizeRemoteMessage(remoteMessage));
+        })
+        .catch(() => {});
+
+    return unsubscribe;
 };
 
 // Call on logout, BEFORE the auth token is cleared (the unregister call needs it).

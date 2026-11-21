@@ -8,6 +8,8 @@ import { browseServiceProviders } from '../api/client';
 // the FILTERS — every provider shown on the screen (name, location, rating, badges) comes
 // from the backend.
 const STATUS_OPTIONS = [
+  // "All" = every provider: available, unavailable and top-rated, no status filtering.
+  { value: 'all', label: 'All', query: {} },
   { value: 'available', label: 'Available', query: { available: true } },
   { value: 'unavailable', label: 'Unavailable', query: { available: false } },
   // The list arrives sorted by rating; it is also sorted again below so "Top-rated" is reliable.
@@ -268,9 +270,14 @@ export default function FindServiceProvider() {
                     <span className="ml-[3px]">Verified</span>
                   </span>
                 )}
-                {provider.available && (
+                {/* Availability indicator, driven by the provider's `available` value from the backend */}
+                {provider.available ? (
                   <span className="flex h-[21px] w-[64px] items-center justify-center rounded-[10px] bg-[#2E7D32] text-[11px] leading-[13px] text-white">
                     Available
+                  </span>
+                ) : (
+                  <span className="flex h-[21px] w-[74px] items-center justify-center rounded-[10px] bg-[#C62828] text-[11px] leading-[13px] text-white">
+                    Unavailable
                   </span>
                 )}
               </div>

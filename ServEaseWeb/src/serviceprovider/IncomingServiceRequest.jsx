@@ -87,7 +87,7 @@ function AiBar({ request, compact }) {
   );
 }
 
-const CARD_BASE = `relative box-border w-full max-w-[1070px] rounded-[10px] border border-[#818080] bg-white ${SF_PRO}`;
+const CARD_BASE = `relative box-border w-full rounded-[10px] border border-[#818080] bg-white ${SF_PRO}`;
 
 // status: new — Figma "Service Requests" card (View + Accept)
 function NewRequestCard({ request, onAccept }) {
@@ -340,16 +340,18 @@ export default function IncomingServiceRequest() {
 
   return (
     <ServiceProviderSidebar>
-      {/* Content starts 54px from the sidebar edge and 25px below the header in the Figma frame */}
-      <div className="box-border px-4 pb-10 pt-[25px] sm:px-[54px]">
-        <h1 className="m-0 flex h-[68px] items-center font-[Quicksand] text-[32px] font-bold leading-[32px] text-[#005FCA] sm:text-[40px] lg:text-[48px]">
+      {/* Same page spacing as FindServiceProvider: px-4 / sm:px-[42px], py-6, full-width content */}
+      <div className="box-border px-4 py-6 sm:px-[42px]">
+        <h1 className="m-0 flex min-h-[68px] items-center font-[Quicksand] text-[32px] font-bold leading-[32px] text-[#005FCA] sm:text-[40px] lg:text-[48px]">
           Incoming Service Requests
         </h1>
 
         {/* Search + Categories + Status (Figma: 699px search, two 173px dropdowns) */}
-        <div className="relative z-30 mt-[17px] flex max-w-[1070px] flex-wrap items-start gap-x-[15px] gap-y-3">
-          <SearchField value={search} onChange={setSearch} placeholder="Search request" />
-          <div className="flex flex-wrap gap-2">
+        <div className="relative z-30 mt-[17px] flex flex-col gap-[10px] sm:flex-row sm:items-start sm:gap-[15px]">
+          <div className="min-w-0 flex-1 [&>*]:!w-full [&>*]:!max-w-full">
+            <SearchField value={search} onChange={setSearch} placeholder="Search request" />
+          </div>
+          <div className="flex flex-wrap gap-2 sm:flex-nowrap">
             <FilterDropdown
               ariaLabel="Filter by category"
               options={categoryOptions}
@@ -375,7 +377,7 @@ export default function IncomingServiceRequest() {
         )}
 
         {/* Request cards */}
-        <div className="relative z-0 mt-[19px] flex flex-col gap-4">
+        <div className="relative z-0 mt-[29px] flex flex-col gap-3">
           {loadError && (
             <p role="alert" className="m-0 font-[Roboto] text-[14px] font-medium text-[#B91C1C]">
               {loadError}

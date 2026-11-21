@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar, View } from 'react-native';
@@ -6,6 +6,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from './context/auth_context';
 import CustomerNavBar from './components/CustomerNavBar';
 import ServiceProviderNavBar from './components/ServiceProviderNavBar';
+import NotificationBanner from './components/NotificationBanner';
+import { flushPendingNotification } from './utils/notificationActions';
+import { registerNotificationOpenHandlers } from './utils/pushNotifications';
 import SplashScreen from './screens/SplashScreen';
 import SignupScreen from './screens/SignupScreen';
 import SendOTP from './screens/SendOTP';
@@ -66,7 +69,15 @@ const linking = {
 
 const App = () => {
   const [routeName, setRouteName] = useState();
-  const syncRoute = () => setRouteName(navigationRef.getCurrentRoute()?.name);
+  const syncRoute = () => {
+    setRouteName(navigationRef.getCurrentRoute()?.name);
+    // A notification tapped while the app was closed waits here until the user is past
+    // the splash/login screens, then opens its destination.
+    flushPendingNotification(navigationRef);
+  };
+
+  // Taps on system-tray notifications (app in background or opened from quit state).
+  useEffect(() => registerNotificationOpenHandlers(navigationRef), []);
 
   return (
     <SafeAreaProvider>
@@ -125,6 +136,8 @@ const App = () => {
     <CustomerNavBar navigationRef={navigationRef} routeName={routeName} />
     {/* Each bar only renders on its own screens (returns null elsewhere), so both can sit here. */}
     <ServiceProviderNavBar navigationRef={navigationRef} routeName={routeName} />
+    {/* In-app banner for pushes received while the app is open; floats above the stack and navbars */}
+    <NotificationBanner navigationRef={navigationRef} />
     </View>
     </NavigationContainer>
     </AuthProvider>

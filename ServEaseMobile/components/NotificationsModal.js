@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, Pressable, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
 import { getNotifications } from '../api/servicerequest_api';
 import { formatTimeAgo } from '../utils/formatters';
+import { useNotificationBannerStore } from '../utils/notificationBannerStore';
 
 const NOTIFICATION_LIMIT = 10;
 
@@ -35,6 +36,7 @@ const NotificationsModal = ({ visible, onClose, top = DEFAULT_TOP, audience }) =
     const [notifications, setNotifications] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
     const [loadFailed, setLoadFailed] = useState(false);
+    const receivedTick = useNotificationBannerStore((state) => state.receivedTick);
 
     const load = useCallback(async () => {
         setIsLoading(true);
@@ -50,7 +52,7 @@ const NotificationsModal = ({ visible, onClose, top = DEFAULT_TOP, audience }) =
 
     useEffect(() => {
         if (visible) load();
-    }, [visible, load]);
+    }, [visible, load, receivedTick]);
 
     if (!visible) return null;
 

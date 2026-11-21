@@ -16,17 +16,37 @@ const addNotification = async ({ userId, type = 'general', message, requestId = 
       .single()
   );
 
+// Mobile routes use the public SR-0007 reference, while notifications store the
+// request UUID. Keep requestId unchanged for compatibility and add requestRef to
+// the push payload, matching GET /notifications' requestId value.
+const requestRefForPush = async (requestId) => {
+  if (!requestId) return '';
+  if (/^SR-\d+$/i.test(String(requestId))) return String(requestId);
+  const Request = require('./servicerequest_model');
+  const rows = await Request.findByIds([requestId]);
+  return rows[0] ? Request.formatRequestId(rows[0].request_number) : '';
+};
+
 // Best-effort: a notification must never break the action that triggered it.
 // Also fires the FCM push (utils/push.js) — lazy require so the two modules can
 // reference each other without a load-time cycle.
 const notify = (args) =>
   addNotification(args)
-    .then((row) => {
+    .then(async (row) => {
+      const requestRef = await requestRefForPush(args.requestId).catch((err) => {
+        console.error('[notify] request reference lookup failed:', err.message);
+        return '';
+      });
       require('../utils/push')
         .sendPushToUser(args.userId, {
           title: 'ServEase',
           body: args.message,
-          data: { type: args.type || 'general', requestId: args.requestId || '', notificationId: row.notification_id },
+          data: {
+            type: args.type || 'general',
+            requestId: args.requestId || '',
+            requestRef,
+            notificationId: row.notification_id,
+          },
         })
         .catch((err) => console.error('[push]', err.message));
       return row;

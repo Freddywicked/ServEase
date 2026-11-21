@@ -1,7 +1,8 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { getUnreadNotificationCount, markNotificationsSeen } from '../api/servicerequest_api';
+import { useNotificationBannerStore } from '../utils/notificationBannerStore';
 
 // How often the badge re-checks the backend while the screen is focused and the app is open.
 const POLL_INTERVAL_MS = 10000;
@@ -42,6 +43,13 @@ const useNotificationBadge = ({ audience } = {}) => {
             refresh();
         }
     }, [audience, refresh]);
+
+    // A push arrived (or a notification was opened): refresh right away instead of waiting
+    // for the next poll. Polling below stays as the fallback.
+    const receivedTick = useNotificationBannerStore((state) => state.receivedTick);
+    useEffect(() => {
+        if (receivedTick > 0) refresh();
+    }, [receivedTick, refresh]);
 
     useFocusEffect(
         useCallback(() => {

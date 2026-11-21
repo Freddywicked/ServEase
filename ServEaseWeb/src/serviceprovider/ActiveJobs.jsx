@@ -488,7 +488,7 @@ function NotifyPartsModal({ job, onClose, onSent }) {
 // Cards
 // ----------------------------------------------------------------------------------------------
 
-const CARD_BASE = `relative box-border w-full max-w-[1070px] rounded-[10px] border border-[#818080] bg-white ${SF_PRO} text-[#5B5959]`;
+const CARD_BASE = `relative box-border w-full rounded-[10px] border border-[#818080] bg-white ${SF_PRO} text-[#5B5959]`;
 
 function JobCard({ job, onUpdate, onNotify }) {
   const stageIndex = job.done ? job.stages.length : job.currentStage ? job.stages.indexOf(job.currentStage) : -1;
@@ -815,15 +815,18 @@ export default function ActiveJobs() {
 
   return (
     <ServiceProviderSidebar>
-      <div className="box-border px-4 pb-10 pt-[25px] sm:px-[52px]">
-        <h1 className="m-0 flex h-[68px] items-center font-[Quicksand] text-[32px] font-bold leading-[32px] text-[#005FCA] sm:text-[40px] lg:text-[48px]">
+      {/* Same page spacing as FindServiceProvider: px-4 / sm:px-[42px], py-6, full-width content */}
+      <div className="box-border px-4 py-6 sm:px-[42px]">
+        <h1 className="m-0 flex min-h-[68px] items-center font-[Quicksand] text-[32px] font-bold leading-[32px] text-[#005FCA] sm:text-[40px] lg:text-[48px]">
           Active Jobs
         </h1>
 
         {/* Search + Categories + Status (Figma: 699px search, two 173px dropdowns) */}
-        <div className="relative z-30 mt-[17px] flex max-w-[1070px] flex-wrap items-start gap-x-[15px] gap-y-3">
-          <SearchField value={search} onChange={setSearch} placeholder="Search job details" />
-          <div className="flex flex-wrap gap-2">
+        <div className="relative z-30 mt-[17px] flex flex-col gap-[10px] sm:flex-row sm:items-start sm:gap-[15px]">
+          <div className="min-w-0 flex-1 [&>*]:!w-full [&>*]:!max-w-full">
+            <SearchField value={search} onChange={setSearch} placeholder="Search job details" />
+          </div>
+          <div className="flex flex-wrap gap-2 sm:flex-nowrap">
             <FilterDropdown
               ariaLabel="Filter by category"
               options={categoryOptions}
@@ -840,7 +843,7 @@ export default function ActiveJobs() {
         </div>
 
         {/* On-going | Quotation */}
-        <div className="mt-[18px] flex max-w-[1070px]" role="tablist">
+        <div className="mt-[18px] flex" role="tablist">
           {TABS.map((item) => {
             const isActive = tab === item.key;
             return (
@@ -883,7 +886,7 @@ export default function ActiveJobs() {
           </p>
         )}
 
-        <div className="relative z-0 mt-[27px] flex flex-col gap-4">
+        <div className="relative z-0 mt-[29px] flex flex-col gap-3">
           {loadState === 'loading' && (
             <p className="m-0 py-10 font-[Roboto] text-[14px] text-[#817C7C]">Loading your jobs…</p>
           )}
