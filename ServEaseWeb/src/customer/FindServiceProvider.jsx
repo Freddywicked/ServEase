@@ -220,7 +220,7 @@ export default function FindServiceProvider() {
         </h1>
 
         {/* Search bar (699px) + the two filter dropdowns (173px each), one row, 49px high */}
-        <div className="mt-[17px] flex max-w-[1068px] flex-col gap-[10px] sm:flex-row sm:items-start sm:gap-0">
+        <div className="mt-[17px] flex flex-col gap-[10px] sm:flex-row sm:items-start sm:gap-0">
           <div className="relative h-[49px] min-w-0 flex-1">
             <SearchIcon />
             <input
@@ -248,7 +248,7 @@ export default function FindServiceProvider() {
           />
         </div>
 
-        <div className="mt-[29px] flex max-w-[1068px] flex-col gap-3">
+        <div className="mt-[29px] flex flex-col gap-3">
           {providers.map((provider) => (
             <div
               key={provider.id}

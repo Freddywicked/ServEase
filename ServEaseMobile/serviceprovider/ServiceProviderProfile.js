@@ -75,6 +75,11 @@ const ServiceProviderProfile = ({ navigation }) => {
         navigation.navigate('ServiceProviderEditProfile');
     };
 
+    const goToReport = () => {
+        // ReportProblemServiceProvider -> ReportSystemErrorServiceProvider | ReportUserServiceProvider
+        navigation.navigate('ReportProblemServiceProvider');
+    };
+
     const handleSwitchToCustomer = () => {
         // ---------------------------------------------------------------------
         // BACKEND-READY: persist the user's active mode as "customer" so the
@@ -232,6 +237,11 @@ const ServiceProviderProfile = ({ navigation }) => {
                     <TouchableOpacity style={styles.menuItem} onPress={handleSwitchToCustomer}>
                         <Image source={require('../assets/icon_switch_account.png')} style={styles.menuIcon} />
                         <Text style={styles.menuLabel}>Switch to Customer</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={styles.menuItem} onPress={goToReport}>
+                        <Image source={require('../assets/icon_report.png')} style={styles.menuIcon} />
+                        <Text style={styles.menuLabel}>Report a problem</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity style={styles.menuItem} onPress={handleLogout}>

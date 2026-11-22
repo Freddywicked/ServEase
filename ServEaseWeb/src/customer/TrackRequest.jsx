@@ -1168,12 +1168,12 @@ export default function TrackRequest() {
   return (
     <CustomerSidebar>
       <div className="min-h-full bg-[#FAFAFA]">
-        <div className="box-border px-[42px] pb-10 pt-[25px]">
+        <div className="box-border px-4 py-6 sm:px-[42px]">
           <h1 className="m-0 flex h-[68px] items-center font-[Quicksand] text-[48px] font-bold leading-[32px] text-[#005FCA]">
             My Requests
           </h1>
 
-          <div className="max-w-[1068px]">
+          <div>
             {/* Search + Categories + Status */}
             <div className="mt-[17px] flex flex-wrap items-start gap-x-[15px] gap-y-3">
               <div className="relative h-[49px] min-w-[240px] flex-1">
@@ -1268,7 +1268,7 @@ export default function TrackRequest() {
               </p>
             )}
 
-            <div className={`flex flex-col gap-[18px] ${showSubTabs ? 'mt-[30px]' : 'mt-[37px]'}`}>
+            <div className="mt-[29px] flex flex-col gap-3">
               {loading ? (
                 <p className="m-0 font-[Inter] text-[14px] text-[#7C7979]">Loading your requests…</p>
               ) : visibleRequests.length === 0 ? (

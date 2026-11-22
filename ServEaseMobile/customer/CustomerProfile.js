@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, View, Image, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { Alert, View, Image, Text, TouchableOpacity, ScrollView, StyleSheet, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth, VERIFIED_STATUS } from '../context/auth_context';
 
@@ -10,6 +10,8 @@ const CustomerProfile = ({ navigation }) => {
     const { user, provider, signOut } = useAuth();
 
     const name = user?.name || '';
+    const email = user?.email || '';
+    const address = user?.address || '';
     const contactText = [user?.email, user?.phone_number].filter(Boolean).join(' | ');
 
     // Service provider application states (the only way to become a provider):
@@ -26,6 +28,11 @@ const CustomerProfile = ({ navigation }) => {
     const handleApplyAsServiceProvider = () => {
         // ServiceProviderServiceCategory -> ServiceProviderVerificationRequirements
         navigation.navigate('ServiceProviderServiceCategory');
+    };
+
+    const handleReportProblem = () => {
+        // ReportProblemCustomer -> ReportSystemErrorCustomer | ReportUserCustomer (both submit to POST /reports)
+        navigation.navigate('ReportProblemCustomer');
     };
 
     const handleSwitchAccount = () => {
@@ -58,7 +65,7 @@ const CustomerProfile = ({ navigation }) => {
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
                 <Text style={styles.headerTitle}>Profile</Text>
 
                 <View style={styles.profileHeader}>
@@ -68,6 +75,20 @@ const CustomerProfile = ({ navigation }) => {
                     />
                     <Text style={styles.name}>{name}</Text>
                     {contactText ? <Text style={styles.contactText}>{contactText}</Text> : null}
+                </View>
+
+                <View style={styles.detailsCard}>
+                    <Text style={styles.detailsTitle}>Account Details</Text>
+                    <View style={styles.detailsRow}>
+                        <View style={styles.detailsColLeft}>
+                            <Text style={styles.detailsLabel}>Email Address</Text>
+                            <Text style={styles.detailsValue} numberOfLines={1}>{email || '—'}</Text>
+                        </View>
+                        <View style={styles.detailsColRight}>
+                            <Text style={styles.detailsLabel}>Address Details</Text>
+                            <Text style={styles.detailsValue} numberOfLines={1}>{address || '—'}</Text>
+                        </View>
+                    </View>
                 </View>
 
                 <View style={styles.menuList}>
@@ -93,6 +114,11 @@ const CustomerProfile = ({ navigation }) => {
                         </TouchableOpacity>
                     )}
 
+                    <TouchableOpacity style={styles.menuItem} onPress={handleReportProblem}>
+                        <Image source={require('../assets/icon_report.png')} style={styles.menuIcon} />
+                        <Text style={styles.menuLabel}>Report a problem</Text>
+                    </TouchableOpacity>
+
                     <TouchableOpacity style={styles.menuItem} onPress={handleLogout}>
                         <Image source={require('../assets/icon_exit.png')} style={styles.menuIcon} />
                         <Text style={styles.menuLabel}>Log out</Text>
@@ -103,6 +129,8 @@ const CustomerProfile = ({ navigation }) => {
     );
 };
 
+const SF = Platform.OS === 'ios' ? undefined : 'SF Pro';
+
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
@@ -110,28 +138,30 @@ const styles = StyleSheet.create({
     },
     scrollContent: {
         paddingHorizontal: 24,
-        paddingTop: 40,
+        paddingTop: 46,
         paddingBottom: 120, // clears the static bottom navbar
     },
     headerTitle: {
+        fontFamily: 'Roboto',
         fontSize: 24,
         lineHeight: 28,
         fontWeight: '700',
         color: '#021E79',
-        marginBottom: 6,
     },
     profileHeader: {
         alignItems: 'center',
-        marginBottom: 38,
+        marginTop: 8,
+        marginBottom: 16,
     },
     avatar: {
-        width: 100,
-        height: 100,
-        borderRadius: 50,
+        width: 101,
+        height: 101,
+        borderRadius: 50.5,
         backgroundColor: '#D9D9D9',
-        marginBottom: 26,
+        marginBottom: 15,
     },
     name: {
+        fontFamily: SF,
         fontSize: 16,
         lineHeight: 19,
         fontWeight: '700',
@@ -139,30 +169,73 @@ const styles = StyleSheet.create({
         marginBottom: 2,
     },
     contactText: {
+        fontFamily: SF,
         fontSize: 12,
         lineHeight: 14,
         color: '#484040',
     },
+    detailsCard: {
+        minHeight: 81,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.46)',
+        borderRadius: 10,
+        backgroundColor: '#FDFFFF',
+        paddingHorizontal: 16,
+        paddingTop: 11,
+        paddingBottom: 10,
+    },
+    detailsTitle: {
+        fontFamily: 'Quicksand',
+        fontSize: 11,
+        lineHeight: 14,
+        fontWeight: '700',
+        color: '#292727',
+        marginBottom: 8,
+    },
+    detailsRow: {
+        flexDirection: 'row',
+    },
+    detailsColLeft: {
+        width: 142, // address column starts at x=184 in the Figma frame
+    },
+    detailsColRight: {
+        flex: 1,
+    },
+    detailsLabel: {
+        fontFamily: SF,
+        fontSize: 10,
+        lineHeight: 17,
+        color: '#484040',
+    },
+    detailsValue: {
+        fontFamily: SF,
+        fontSize: 10,
+        lineHeight: 17,
+        fontWeight: '700',
+        color: '#000000',
+    },
     menuList: {
-        paddingLeft: 4,
+        marginTop: 28,
+        paddingLeft: 7,
     },
     menuItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 10,
+        paddingVertical: 6,
     },
     menuItemPending: {
         opacity: 0.5,
     },
     menuIcon: {
-        width: 30,
-        height: 30,
+        width: 26,
+        height: 26,
         resizeMode: 'contain',
-        marginRight: 10,
+        marginRight: 17,
     },
     menuLabel: {
-        fontSize: 14,
-        lineHeight: 17,
+        fontFamily: SF,
+        fontSize: 13,
+        lineHeight: 16,
         color: '#484040',
     },
 });

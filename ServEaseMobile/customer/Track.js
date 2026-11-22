@@ -91,6 +91,12 @@ const FONTS = { quicksand: 'Quicksand', roboto: 'Roboto' };
 const TAB_GAP = 5;
 const MAX_BADGE_COUNT = 99;
 
+// Figma "My Requests - Active/On-going" card measurements (design values, not data).
+const TIMELINE_DOT_SIZE = 26; // status circles
+const TIMELINE_STEP_GAP = 11; // space between two circles (37px pitch)
+const TIMELINE_LINE_COLOR = '#D9D9D9'; // the thin line joining the circles
+const FOOTER_BUTTON_GAP = 15; // space between View and Proceed to Payment
+
 // Customer-facing tabs. `sources` are the properties of the tracking response whose cards belong
 // to the tab, so the backend contract (sent / approved / ongoing / declined / done) is unchanged.
 const STATUS_FILTERS = [
@@ -492,37 +498,46 @@ const Track = ({ navigation, route }) => {
     //  - every step stays GREY until the service provider updates it, then turns blue with a check;
     //  - the "Completed" step stays an uncolored (darker grey) dot until the customer has paid the
     //    remaining balance, even after the provider marked the job completed ("Payment Pending").
-    const renderTimeline = (timeline, isPaid = false) =>
-        (timeline || []).map((step, index) => {
-            const isCompleted = isCompletedStep(step);
-            const isDone = !!step.done && (!isCompleted || isPaid);
-            const providerCompleted = isCompleted && !!step.done && !isPaid;
-            // `subtext` is a note the backend wants shown instead of the date (e.g. the Home-based
-            // "Service provider is now heading to your door step" on the "on the way" step).
-            const subtext = providerCompleted
-                ? 'Payment Pending'
-                : isDone && step.subtext
-                  ? step.subtext
-                  : isDone && step.timestamp
-                    ? formatDateTime(step.timestamp)
-                    : step.description;
-            return (
-                <View key={step.id ?? `${step.label}-${index}`} style={styles.timelineRow}>
-                    <View
-                        style={[
-                            styles.timelineDot,
-                            isDone ? styles.timelineDotDone : isCompleted && styles.timelineDotCompletedPending,
-                        ]}
-                    >
-                        {isDone && <Image source={require('../assets/icon_check.png')} style={styles.timelineCheckIcon} />}
-                    </View>
-                    <View style={styles.timelineTextWrap}>
-                        <Text style={styles.timelineLabel}>{step.label}</Text>
-                        {!!subtext && <Text style={styles.timelineSubtext}>{subtext}</Text>}
-                    </View>
-                </View>
-            );
-        });
+    const renderTimeline = (timeline, isPaid = false) => {
+        const steps = timeline || [];
+        return (
+            <View style={styles.timelineWrap}>
+                {/* One continuous line behind the circles (Figma), from the first circle's centre to the last. */}
+                {steps.length > 1 && <View style={styles.timelineConnector} />}
+                {steps.map((step, index) => {
+                    const isCompleted = isCompletedStep(step);
+                    const isDone = !!step.done && (!isCompleted || isPaid);
+                    const providerCompleted = isCompleted && !!step.done && !isPaid;
+                    const isLast = index === steps.length - 1;
+                    // `subtext` is a note the backend wants shown instead of the date (e.g. the Home-based
+                    // "Service provider is now heading to your door step" on the "on the way" step).
+                    const subtext = providerCompleted
+                        ? 'Payment Pending'
+                        : isDone && step.subtext
+                          ? step.subtext
+                          : isDone && step.timestamp
+                            ? formatDateTime(step.timestamp)
+                            : step.description;
+                    return (
+                        <View key={step.id ?? `${step.label}-${index}`} style={[styles.timelineRow, !isLast && styles.timelineRowSpaced]}>
+                            <View
+                                style={[
+                                    styles.timelineDot,
+                                    isDone ? styles.timelineDotDone : isCompleted && styles.timelineDotCompletedPending,
+                                ]}
+                            >
+                                {isDone && <Image source={require('../assets/icon_check.png')} style={styles.timelineCheckIcon} />}
+                            </View>
+                            <View style={styles.timelineTextWrap}>
+                                <Text style={styles.timelineLabel}>{step.label}</Text>
+                                {!!subtext && <Text style={styles.timelineSubtext}>{subtext}</Text>}
+                            </View>
+                        </View>
+                    );
+                })}
+            </View>
+        );
+    };
 
     const renderDiagnosisCard = (request) => (
         <TouchableOpacity
@@ -717,15 +732,42 @@ const Track = ({ navigation, route }) => {
             requestNumber: request.requestNumber,
         });
 
+    const renderViewButton = (request) => (
+        <TouchableOpacity style={styles.viewButton} onPress={() => handleViewRepairDetails(request)} activeOpacity={0.85} accessibilityRole="button">
+            <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+            <Text style={styles.viewButtonText}>View</Text>
+        </TouchableOpacity>
+    );
+
+    const renderMessageButton = (request) => (
+        <TouchableOpacity style={styles.footerButton} onPress={() => handleMessageProvider(request)} accessibilityRole="button">
+            <Text style={styles.footerButtonText}>Message</Text>
+        </TouchableOpacity>
+    );
+
+    // View + Message share one row when there is no payment button.
     const renderViewMessageButtons = (request) => (
         <View style={styles.footerButtonRow}>
-            <TouchableOpacity style={styles.viewButton} onPress={() => handleViewRepairDetails(request)} activeOpacity={0.85} accessibilityRole="button">
-                <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
-                <Text style={styles.viewButtonText}>View</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.footerButton} onPress={() => handleMessageProvider(request)}>
-                <Text style={styles.footerButtonText}>Message</Text>
-            </TouchableOpacity>
+            {renderViewButton(request)}
+            {renderMessageButton(request)}
+        </View>
+    );
+
+    // Figma: View and Proceed to Payment on the first row, Message alone on the row below, all
+    // right-aligned. Three buttons on one row did not fit a phone's width and overlapped.
+    const renderViewPaymentMessageButtons = (request) => (
+        <View>
+            <View style={styles.footerButtonRow}>
+                {renderViewButton(request)}
+                <TouchableOpacity
+                    style={[styles.footerButton, styles.footerButtonWide]}
+                    onPress={() => handleProceedToPayment(request)}
+                    accessibilityRole="button"
+                >
+                    <Text style={styles.footerButtonText}>Proceed to Payment</Text>
+                </TouchableOpacity>
+            </View>
+            <View style={[styles.footerButtonRow, styles.footerSecondRow]}>{renderMessageButton(request)}</View>
         </View>
     );
 
@@ -748,12 +790,12 @@ const Track = ({ navigation, route }) => {
     };
 
     const renderTimelineCard = (request) => (
-        <View key={request.id} style={styles.requestCard}>
+        <View key={request.id} style={[styles.requestCard, styles.ongoingCard]}>
             {renderCardHeader(request)}
             {renderDeferredNote(request)}
             {renderTimeline(getTimeline(request), isRequestPaid(request))}
 
-            <View style={styles.cardDivider} />
+            <View style={styles.timelineDivider} />
             {renderViewMessageButtons(request)}
         </View>
     );
@@ -784,28 +826,13 @@ const Track = ({ navigation, route }) => {
     const renderCompletedCard = (request) => {
         const isPaid = isRequestPaid(request);
         return (
-            <View key={request.id} style={styles.requestCard}>
+            <View key={request.id} style={[styles.requestCard, styles.ongoingCard]}>
                 {renderCardHeader(request)}
                 {!isPaid && renderDeferredNote(request)}
                 {renderTimeline(getTimeline(request), isPaid)}
 
-                <View style={styles.cardDivider} />
-                {isPaid ? (
-                    renderViewMessageButtons(request)
-                ) : (
-                    <View style={styles.footerButtonRow}>
-                        <TouchableOpacity style={styles.viewButton} onPress={() => handleViewRepairDetails(request)} activeOpacity={0.85} accessibilityRole="button">
-                <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
-                <Text style={styles.viewButtonText}>View</Text>
-            </TouchableOpacity>
-                        <TouchableOpacity style={styles.footerButton} onPress={() => handleProceedToPayment(request)}>
-                            <Text style={styles.footerButtonText}>Proceed to Payment</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.footerButton} onPress={() => handleMessageProvider(request)}>
-                            <Text style={styles.footerButtonText}>Message</Text>
-                        </TouchableOpacity>
-                    </View>
-                )}
+                <View style={styles.timelineDivider} />
+                {isPaid ? renderViewMessageButtons(request) : renderViewPaymentMessageButtons(request)}
             </View>
         );
     };
@@ -1173,7 +1200,13 @@ const styles = StyleSheet.create({
         fontSize: 10,
         lineHeight: 17,
         color: '#5B5959',
-        marginBottom: 8,
+        marginTop: -4, // Figma: the name tucks under the request number's 22px line box
+        marginBottom: 2,
+    },
+    // Figma on-going card: 10px side padding (9 + the 1px border) and 15px below the last button.
+    ongoingCard: {
+        paddingHorizontal: 9,
+        paddingBottom: 14,
     },
     headerRule: {
         height: 1,
@@ -1226,12 +1259,17 @@ const styles = StyleSheet.create({
     },
     badgeBlue: {
         ...badgeShape,
-        backgroundColor: '#5C7CC9',
+        backgroundColor: '#577FBB',
+        minHeight: 18, // Figma: 18px tall
+        height: 18,
+        paddingHorizontal: 10,
         maxWidth: '100%',
         marginBottom: 4,
     },
     badgeBlueText: {
         ...badgeTextBase,
+        lineHeight: 15,
+        includeFontPadding: false,
         flexShrink: 1,
     },
     divider: {
@@ -1411,32 +1449,41 @@ const styles = StyleSheet.create({
     },
     footerButtonRow: {
         flexDirection: 'row',
+        flexWrap: 'wrap', // safety net: buttons drop to the next line instead of overlapping
         justifyContent: 'flex-end',
+        alignItems: 'center',
+    },
+    footerSecondRow: {
+        marginTop: 12, // Figma: Message sits 12px under the View / Proceed row
     },
     footerButton: {
         minWidth: 90,
         height: 28,
-        marginLeft: 8,
+        marginLeft: FOOTER_BUTTON_GAP,
         borderWidth: 1,
         borderColor: '#B1A8A8',
         backgroundColor: '#FFFDFD',
         borderRadius: 10,
-        paddingHorizontal: 16,
+        paddingHorizontal: 12,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    // Figma gradient button: the LinearGradient fills it, the label sits on top.
+    footerButtonWide: {
+        minWidth: 120, // Figma: Proceed to Payment is 120 x 30
+        height: 30,
+    },
+    // Figma gradient button (90 x 30): the LinearGradient fills it, the label sits on top.
     viewButton: {
         minWidth: 90,
-        height: 28,
-        marginLeft: 8,
+        height: 30,
+        marginLeft: FOOTER_BUTTON_GAP,
         borderWidth: 1,
         borderColor: '#B1A8A8',
         borderRadius: 10,
         overflow: 'hidden',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingHorizontal: 16,
+        paddingHorizontal: 12,
     },
     viewButtonText: {
         fontSize: 10,
@@ -1488,43 +1535,67 @@ const styles = StyleSheet.create({
     sectionTabBarSelected: {
         backgroundColor: '#18315B',
     },
+    timelineWrap: {
+        position: 'relative',
+    },
+    // Figma: 1px #D9D9D9 line running behind the circles, centre of the first to centre of the last.
+    timelineConnector: {
+        position: 'absolute',
+        left: TIMELINE_DOT_SIZE / 2 - 0.5,
+        top: TIMELINE_DOT_SIZE / 2,
+        bottom: TIMELINE_DOT_SIZE / 2,
+        width: 1,
+        backgroundColor: TIMELINE_LINE_COLOR,
+    },
     timelineRow: {
         flexDirection: 'row',
-        marginBottom: 12,
+        minHeight: TIMELINE_DOT_SIZE,
+    },
+    timelineRowSpaced: {
+        marginBottom: TIMELINE_STEP_GAP,
     },
     timelineDot: {
-        width: 24,
-        height: 24,
-        borderRadius: 12,
+        width: TIMELINE_DOT_SIZE,
+        height: TIMELINE_DOT_SIZE,
+        borderRadius: TIMELINE_DOT_SIZE / 2,
         backgroundColor: '#6B6B6B', // grey until the provider updates the status
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: 12,
+        marginRight: 8,
     },
     timelineDotDone: {
-        backgroundColor: '#5C7CC9',
+        backgroundColor: '#577FBB',
     },
     timelineDotCompletedPending: {
-        backgroundColor: '#3F3F3F', // "Completed" dot is darker grey until fully paid
+        backgroundColor: '#414141', // "Completed" dot is darker grey until fully paid
     },
     timelineCheckIcon: {
-        width: 12,
-        height: 12,
+        width: 10,
+        height: 9,
         resizeMode: 'contain',
-        tintColor: '#FFFFFF',
+        tintColor: '#FFEFEF',
     },
     timelineTextWrap: {
         flex: 1,
     },
     timelineLabel: {
-        fontSize: 11,
+        fontSize: 10,
         fontWeight: '700',
-        color: '#111111',
+        lineHeight: 17,
+        color: '#191818',
     },
     timelineSubtext: {
         fontSize: 8,
-        color: '#999999',
-        marginTop: 1,
+        lineHeight: 14,
+        color: '#5B5959',
+        marginTop: -5, // Figma: the date sits right under the label
+    },
+    // Figma: 1px rgba(0,0,0,0.4) rule, 12px above and below.
+    timelineDivider: {
+        height: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+        marginTop: 12,
+        marginBottom: 11,
     },
     emptyState: {
         borderWidth: 1,

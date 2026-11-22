@@ -38,6 +38,9 @@ import ConversationCustomer from './customer/ConversationCustomer';
 import History from './customer/History';
 import CustomerProfile from './customer/CustomerProfile';
 import CustomerEditProfile from './customer/CustomerEditProfile';
+import ReportProblemCustomer from './customer/ReportProblemCustomer';
+import ReportSystemErrorCustomer from './customer/ReportSystemErrorCustomer';
+import ReportUserCustomer from './customer/ReportUserCustomer';
 import ServiceProviderDashboard from './serviceprovider/ServiceProviderDashboard';
 import IncomingServiceRequest from './serviceprovider/IncomingServiceRequest';
 import Jobs from './serviceprovider/Jobs';
@@ -49,6 +52,9 @@ import ConversationServiceProvider from './serviceprovider/ConversationServicePr
 import Earnings from './serviceprovider/Earnings';
 import ServiceProviderProfile from './serviceprovider/ServiceProviderProfile';
 import ServiceProviderEditProfile from './serviceprovider/ServiceProviderEditProfile';
+import ReportProblemServiceProvider from './serviceprovider/ReportProblemServiceProvider';
+import ReportSystemErrorServiceProvider from './serviceprovider/ReportSystemErrorServiceProvider';
+import ReportUserServiceProvider from './serviceprovider/ReportUserServiceProvider';
 
 const Stack = createNativeStackNavigator();
 // Lets the navbar (rendered outside the stack) navigate and know the focused screen.
@@ -119,6 +125,9 @@ const App = () => {
         <Stack.Screen name="History" component={History}/>
         <Stack.Screen name="CustomerProfile" component={CustomerProfile}/>
         <Stack.Screen name="CustomerEditProfile" component={CustomerEditProfile}/>
+        <Stack.Screen name="ReportProblemCustomer" component={ReportProblemCustomer}/>
+        <Stack.Screen name="ReportSystemErrorCustomer" component={ReportSystemErrorCustomer}/>
+        <Stack.Screen name="ReportUserCustomer" component={ReportUserCustomer}/>
         <Stack.Screen name="ServiceProviderDashboard" component={ServiceProviderDashboard}/>
         <Stack.Screen name="IncomingServiceRequest" component={IncomingServiceRequest}/>
         <Stack.Screen name="Jobs" component={Jobs}/>
@@ -130,6 +139,9 @@ const App = () => {
         <Stack.Screen name="Earnings" component={Earnings}/>
         <Stack.Screen name="ServiceProviderProfile" component={ServiceProviderProfile}/>
         <Stack.Screen name="ServiceProviderEditProfile" component={ServiceProviderEditProfile}/>
+        <Stack.Screen name="ReportProblemServiceProvider" component={ReportProblemServiceProvider}/>
+        <Stack.Screen name="ReportSystemErrorServiceProvider" component={ReportSystemErrorServiceProvider}/>
+        <Stack.Screen name="ReportUserServiceProvider" component={ReportUserServiceProvider}/>
       </Stack.Navigator>
     </View>
     {/* Outside the stack, so it stays put while screens animate */}

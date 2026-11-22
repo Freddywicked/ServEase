@@ -129,7 +129,7 @@ const toQuotationCard = (q) => ({
 
 function BoltIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
       <path d="M13 2L5 13.5h5.5L9 22l9-12.5h-5.7L13 2z" fill="#577FBB" />
     </svg>
   );
@@ -495,66 +495,66 @@ function JobCard({ job, onUpdate, onNotify }) {
   const badge = job.done ? { label: 'Completed', bg: 'bg-[#0255AF]' } : { label: 'In Progress', bg: 'bg-[#62BB57]' };
 
   return (
-    <article className={`${CARD_BASE} pb-[30px] pt-[10px]`}>
+    <article className={`${CARD_BASE} pb-[26px] pt-[18px]`}>
       <span
-        className={`absolute right-[18px] top-[15px] box-border flex h-[22px] w-[96px] items-center justify-center rounded-full border border-[#B1A8A8] font-[Quicksand] text-[10px] font-medium leading-[17px] text-white ${badge.bg}`}
+        className={`absolute right-[26px] top-[20px] box-border flex h-[30px] w-[124px] items-center justify-center rounded-full border border-[#B1A8A8] font-[Quicksand] text-[14px] font-medium leading-[20px] text-white ${badge.bg}`}
       >
         {badge.label}
       </span>
 
-      <div className="px-[19px]">
-        <p className="m-0 text-[13px] font-bold leading-[22px] text-[#292727]">Request #{job.requestNumber}</p>
-        <p className="m-0 text-[9px] font-normal leading-[15px]">
+      <div className="px-[26px]">
+        <p className="m-0 text-[20px] font-bold leading-[28px] text-[#292727]">Request #{job.requestNumber}</p>
+        <p className="m-0 text-[14px] font-normal leading-[22px]">
           {job.customerName} | {job.dateLabel}
         </p>
       </div>
 
       {job.aiSuggestion && (
-        <div className="mx-[19px] mt-[12px] box-border flex h-[37px] items-center rounded-[10px] bg-[#262728] pl-[19px] text-[9px] font-normal leading-[15px] text-white">
+        <div className="mx-[26px] mt-[16px] box-border flex min-h-[52px] items-center rounded-[10px] bg-[#262728] py-2 pl-[22px] pr-4 text-[14px] font-normal leading-[22px] text-white">
           <BoltIcon />
-          <span className="ml-[8px]">
+          <span className="ml-[12px]">
             AI suggests {job.aiSuggestion.problem}
             {job.aiSuggestion.confidencePercent != null ? ` (${job.aiSuggestion.confidencePercent}% confidence)` : ''}
           </span>
         </div>
       )}
 
-      <hr className="mx-[18px] mb-0 mt-[12px] border-0 border-t border-black/40" />
+      <hr className="mx-[26px] mb-0 mt-[18px] border-0 border-t border-black/40" />
 
-      <div className="mt-[15px] flex gap-[17px] px-[21px]">
+      <div className="mt-[20px] flex gap-[20px] px-[26px]">
         {job.stageOptions.map((option, i) => (
           <div
             key={option.value}
             title={option.label}
-            className={`h-2 max-w-[119px] flex-1 rounded-[10px] ${
+            className={`h-[10px] flex-1 rounded-[10px] ${
               i < stageIndex ? 'bg-[#62BB57]' : i === stageIndex ? 'bg-[#577FBB]' : 'bg-[#D9D9D9]'
             }`}
           />
         ))}
       </div>
 
-      <p className="m-0 mt-[10px] px-[19px] text-[9px] font-bold leading-[15px]">
+      <p className="m-0 mt-[14px] px-[26px] text-[15px] font-bold leading-[24px]">
         Current Step: {job.currentStage ? labelOfStage(job, job.currentStage) : 'Not started'}
       </p>
       {job.paidTotal > 0 && (
-        <p className="m-0 mt-[3px] px-[19px] text-[9px] font-normal leading-[15px]">
+        <p className="m-0 mt-[4px] px-[26px] text-[14px] font-normal leading-[22px]">
           Progress Payment ₱{formatPesos(job.paidTotal)} already paid by customer
         </p>
       )}
 
       {!job.done && (
-        <div className="mt-[13px] flex flex-wrap justify-end gap-[37px] px-[34px]">
+        <div className="mt-[20px] flex flex-wrap justify-end gap-[20px] px-[26px]">
           <button
             type="button"
             onClick={() => onUpdate(job)}
-            className={`box-border h-[40px] w-[160px] cursor-pointer rounded-[10px] border border-[#B1A8A8] ${UPDATE_BUTTON_BG} p-0 text-[10px] font-bold leading-[17px] text-white`}
+            className={`box-border h-[48px] w-[200px] max-w-full cursor-pointer rounded-[10px] border border-[#B1A8A8] ${UPDATE_BUTTON_BG} p-0 text-[14px] font-bold leading-[20px] text-white`}
           >
             Update Status
           </button>
           <button
             type="button"
             onClick={() => onNotify(job)}
-            className={`box-border h-[40px] w-[160px] cursor-pointer rounded-[10px] border border-[#B1A8A8] ${NOTIFY_BUTTON_BG} p-0 text-[10px] font-bold leading-[17px] text-white`}
+            className={`box-border h-[48px] w-[200px] max-w-full cursor-pointer rounded-[10px] border border-[#B1A8A8] ${NOTIFY_BUTTON_BG} p-0 text-[14px] font-bold leading-[20px] text-white`}
           >
             Notify Additional Parts
           </button>
@@ -568,55 +568,55 @@ function JobCard({ job, onUpdate, onNotify }) {
 function NegotiationCard({ quotation, busy, onAccept, onDecline }) {
   const amount = quotation.proposedAmount ?? quotation.originalAmount;
   return (
-    <article className={`${CARD_BASE} pb-[20px] pt-[10px]`}>
-      <span className="absolute right-[25px] top-[11px] box-border flex h-[20px] w-[114px] items-center justify-center rounded-full border border-[#B1A8A8] bg-[#BB8157] font-[Quicksand] text-[10px] font-medium leading-[17px] text-white">
+    <article className={`${CARD_BASE} pb-[24px] pt-[18px]`}>
+      <span className="absolute right-[26px] top-[20px] box-border flex h-[30px] w-[150px] items-center justify-center rounded-full border border-[#B1A8A8] bg-[#BB8157] font-[Quicksand] text-[14px] font-medium leading-[20px] text-white">
         Price Negotiation
       </span>
 
-      <div className="px-[22px]">
-        <p className="m-0 text-[13px] font-bold leading-[22px] text-[#292727]">Request #{quotation.requestNumber}</p>
-        <p className="m-0 text-[9px] font-normal leading-[15px]">
+      <div className="px-[26px]">
+        <p className="m-0 text-[20px] font-bold leading-[28px] text-[#292727]">Request #{quotation.requestNumber}</p>
+        <p className="m-0 text-[14px] font-normal leading-[22px]">
           {quotation.customerName} | {quotation.dateLabel}
         </p>
         {quotation.distanceKm != null && (
-          <div className="mt-[5px] flex items-center gap-[6px]">
-            <img src={pinIcon} alt="" className="h-[13px] w-[10px] flex-none object-contain" />
-            <span className="text-[9px] font-normal leading-[15px]">{quotation.distanceKm} km away</span>
+          <div className="mt-[8px] flex items-center gap-2">
+            <img src={pinIcon} alt="" className="h-[18px] w-[14px] flex-none object-contain" />
+            <span className="text-[14px] font-normal leading-[22px]">{quotation.distanceKm} km away</span>
           </div>
         )}
       </div>
 
-      <div className="mt-[7px] flex items-end justify-between gap-3 px-[22px]">
-        <p className="m-0 text-[9px] font-bold leading-[15px]">
+      <div className="mt-[14px] flex flex-wrap items-end justify-between gap-3 px-[26px]">
+        <p className="m-0 text-[14px] font-bold leading-[22px]">
           The customer wants to revise the price with a suggested amount:
         </p>
         {quotation.originalAmount != null && (
-          <p className="m-0 mr-[13px] text-[9px] font-normal leading-[15px]">
+          <p className="m-0 text-[14px] font-normal leading-[22px]">
             Original request: ₱{formatPesos(quotation.originalAmount)}
           </p>
         )}
       </div>
 
-      <div className="mx-[19px] mt-[2px] box-border flex min-h-[58px] items-center justify-between gap-4 rounded-[10px] border border-[#B1A8A8] bg-[#FFFED3] px-[18px] py-2">
+      <div className="mx-[26px] mt-[8px] box-border flex min-h-[76px] items-center justify-between gap-4 rounded-[10px] border border-[#B1A8A8] bg-[#FFFED3] px-[20px] py-3">
         <div className="min-w-0">
-          <p className="m-0 text-[10px] font-bold leading-[17px] text-[#BB8157]">Customer Message</p>
-          <p className="m-0 break-words text-[9px] font-normal leading-[15px] text-[#5B5959]">
+          <p className="m-0 text-[15px] font-bold leading-[24px] text-[#BB8157]">Customer Message</p>
+          <p className="m-0 break-words text-[14px] font-normal leading-[22px] text-[#5B5959]">
             {quotation.customerMessage || 'The customer did not leave a message.'}
           </p>
         </div>
         <div className="flex-none text-right">
-          <p className="m-0 text-[13px] font-bold leading-[20px] text-[#292727]">₱ {formatPesos(amount)}</p>
-          <p className="m-0 text-[9px] font-normal leading-[15px]">due for approval</p>
+          <p className="m-0 text-[20px] font-bold leading-[28px] text-[#292727]">₱ {formatPesos(amount)}</p>
+          <p className="m-0 text-[13px] font-normal leading-[20px]">due for approval</p>
         </div>
       </div>
 
-      <hr className="mx-[23px] mb-0 mt-[19px] border-0 border-t border-black/40" />
+      <hr className="mx-[26px] mb-0 mt-[20px] border-0 border-t border-black/40" />
 
-      <div className="mt-[17px] flex flex-wrap justify-end gap-[22px] px-[23px]">
+      <div className="mt-[20px] flex flex-wrap justify-end gap-4 px-[26px]">
         <Link
           to="/serviceprovider/messages"
           state={{ requestId: quotation.requestNumber }}
-          className="box-border flex h-[40px] w-[110px] items-center justify-center rounded-[10px] border border-[#B1A8A8] bg-[#FFFDFD] text-[12px] font-bold leading-[20px] text-[#414141] no-underline"
+          className="box-border flex h-[48px] w-[140px] items-center justify-center rounded-[10px] border border-[#B1A8A8] bg-[#FFFDFD] text-[14px] font-bold leading-[20px] text-[#414141] no-underline"
         >
           Message
         </Link>
@@ -624,7 +624,7 @@ function NegotiationCard({ quotation, busy, onAccept, onDecline }) {
           type="button"
           disabled={busy}
           onClick={() => onDecline(quotation)}
-          className={`box-border h-[40px] w-[110px] rounded-[10px] border border-[#B1A8A8] bg-[#C62828] p-0 text-[12px] font-bold leading-[20px] text-white ${
+          className={`box-border h-[48px] w-[140px] rounded-[10px] border border-[#B1A8A8] bg-[#C62828] p-0 text-[14px] font-bold leading-[20px] text-white ${
             busy ? 'cursor-wait opacity-60' : 'cursor-pointer'
           }`}
         >
@@ -634,7 +634,7 @@ function NegotiationCard({ quotation, busy, onAccept, onDecline }) {
           type="button"
           disabled={busy || quotation.proposedAmount == null}
           onClick={() => onAccept(quotation)}
-          className={`box-border h-[40px] w-[110px] rounded-[10px] border border-[#B1A8A8] bg-[#167713] p-0 text-[12px] font-bold leading-[20px] text-white ${
+          className={`box-border h-[48px] w-[140px] rounded-[10px] border border-[#B1A8A8] bg-[#167713] p-0 text-[14px] font-bold leading-[20px] text-white ${
             busy ? 'cursor-wait opacity-60' : 'cursor-pointer'
           }`}
         >
@@ -856,13 +856,13 @@ export default function ActiveJobs() {
                 className="flex flex-1 cursor-pointer flex-col items-stretch border-0 bg-transparent p-0"
               >
                 <span
-                  className={`flex h-[29px] items-center justify-center gap-2 font-[Quicksand] text-[17px] leading-[29px] text-[#292727] ${
+                  className={`flex h-[32px] items-center justify-center gap-2 font-[Quicksand] text-[20px] leading-[32px] text-[#292727] ${
                     isActive ? 'font-bold' : 'font-medium'
                   }`}
                 >
                   {item.label}
                   {item.key === 'quotation' && quotations.length > 0 && (
-                    <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#BB8157] px-[5px] text-[10px] font-bold leading-none text-white">
+                    <span className="inline-flex h-[22px] min-w-[22px] items-center justify-center rounded-full bg-[#BB8157] px-[6px] text-[12px] font-bold leading-none text-white">
                       {quotations.length}
                     </span>
                   )}
@@ -886,7 +886,7 @@ export default function ActiveJobs() {
           </p>
         )}
 
-        <div className="relative z-0 mt-[29px] flex flex-col gap-3">
+        <div className="relative z-0 mt-[24px] flex flex-col gap-4">
           {loadState === 'loading' && (
             <p className="m-0 py-10 font-[Roboto] text-[14px] text-[#817C7C]">Loading your jobs…</p>
           )}
