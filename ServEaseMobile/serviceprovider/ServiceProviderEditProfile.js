@@ -457,7 +457,7 @@ const ServiceProviderEditProfile = ({ navigation }) => {
                             {saving ? (
                                 <ActivityIndicator color="#FFFFFF" />
                             ) : (
-                                <Text style={styles.doneText}>Done</Text>
+                                <Text style={styles.doneText}>Save</Text>
                             )}
                         </LinearGradient>
                     </TouchableOpacity>
