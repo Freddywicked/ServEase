@@ -23,7 +23,7 @@ import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 import { MEDIA_LIMITS, REPORTER_ROLES, submitReport } from '../api/report_api';
 
 // Point this at the same upload icon used in CreateServiceRequest.
-const UPLOAD_ICON = require('../assets/icon_upload_image.png');
+const UPLOAD_ICON = require('../assets/icon_image.png');
 const PLAY_ICON = require('../assets/icon_play_white.png');
 
 const ReportForm = ({
