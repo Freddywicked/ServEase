@@ -227,6 +227,19 @@ export const disableUser = (id) => request(`/admin/users/${id}/disable`, { metho
 export const enableUser = (id) => request(`/admin/users/${id}/enable`, { method: 'PATCH' });
 export const getProviderDocuments = (id, kind) => request(`/admin/users/${id}/documents/${kind}`);
 
+// --- Admin: reports and errors (admin/ReportsAndErrors.jsx) ---
+// tab: 'all' | 'user' | 'system' | 'resolved'. Resolves { reports, total }.
+export const getAdminReports = ({ tab = 'all', search = '', page = 1, pageSize = 5 } = {}) => {
+  const params = new URLSearchParams({ tab, page: String(page), pageSize: String(pageSize) });
+  if (search) params.set('search', search);
+  return request(`/admin/reports?${params.toString()}`);
+};
+// One report incl. fresh image URLs -> { report }
+export const getAdminReport = (id) => request(`/admin/reports/${id}`);
+// status: 'resolved' | 'dismissed'; admin_note is optional text saved with the report.
+export const updateAdminReportStatus = (id, { status, admin_note }) =>
+  request(`/admin/reports/${id}/status`, { method: 'PATCH', body: { status, admin_note } });
+
 // --- Service requests: customer side (backend: /api/service-requests, see servicerequest_routes.js) ---
 
 // What the "Creating Service Request" form offers, so none of it is hard-coded in the screen:
@@ -536,3 +549,19 @@ export const getProviderEarnings = () => request('/provider/earnings');
 // -> { stats: { activeJobs, jobsThisMonth, rating }, activeRepair: {...} | null,
 //      notifications: [{ id, message, createdAt }], pendingRequests: [{ id, requestNumber, customerName }] }.
 export const getProviderDashboard = () => request('/provider/dashboard');
+
+// --- Report a Problem (CustomerProfile / ServiceProviderProfile) ---
+// Sends the Report a Problem form to POST /api/reports (multipart).
+// type: 'system_error' | 'user'; reportedFrom: 'customer' | 'serviceprovider';
+// reportedUsername is only for type 'user' (the username of the one being reported).
+// The reporter is taken from the login token on the server. Resolves { message, report }.
+export const submitReport = ({ type, reportedFrom, subject, details, reportedUsername, images = [] }) => {
+  const body = new FormData();
+  body.append('type', type);
+  body.append('reportedFrom', reportedFrom);
+  body.append('subject', subject);
+  body.append('details', details);
+  if (reportedUsername) body.append('reportedUsername', reportedUsername);
+  images.forEach((file) => body.append('images', file));
+  return request('/reports', { method: 'POST', body });
+};

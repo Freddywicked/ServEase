@@ -10,12 +10,43 @@ import dashboardIconWhite from '../assets/icon_dashboard_white.png';
 import dashboardIconBlack from '../assets/icon_dashboard_black.png';
 import userIconWhite from '../assets/icon_users_white.png';
 import userIconBlack from '../assets/icon_users.png';
+import documentIconWhite from '../assets/icon_document_white.png';
+import documentIconBlack from '../assets/icon_document.png';
 import hamburgerIcon from '../assets/icon_hamburger.png';
 import dropdownIcon from '../assets/icon_dropdown.png';
 import Notifications from './Notifications';
 
 const EXPANDED_WIDTH = 229;
 const COLLAPSED_WIDTH = 84;
+
+// Sidebar tabs. To add another admin tab, add one entry here.
+// iconWidth keeps the labels aligned (the document icon is narrower than the others).
+const NAV_ITEMS = [
+  {
+    to: '/admin/dashboard',
+    label: 'Dashboard',
+    iconActive: dashboardIconWhite,
+    iconInactive: dashboardIconBlack,
+    iconWidth: 22,
+    isActive: (path) => path === '/admin/dashboard',
+  },
+  {
+    to: '/admin/users',
+    label: 'User Management',
+    iconActive: userIconWhite,
+    iconInactive: userIconBlack,
+    iconWidth: 22,
+    isActive: (path) => path.startsWith('/admin/users'),
+  },
+  {
+    to: '/admin/reports',
+    label: 'Reports and Errors',
+    iconActive: documentIconWhite,
+    iconInactive: documentIconBlack,
+    iconWidth: 16,
+    isActive: (path) => path.startsWith('/admin/reports'),
+  },
+];
 
 // "Mark Frederick Cerillo" -> "MC"
 const getInitials = (name = '') => {
@@ -139,9 +170,6 @@ export default function AdminSidebar({ children, initials }) {
     };
   }, [menuOpen]);
 
-  const dashboardActive = location.pathname === '/admin/dashboard';
-  const usersActive = location.pathname.startsWith('/admin/users');
-
   const handleLogout = () => {
     setMenuOpen(false);
     logout(); // removes the saved login token
@@ -219,37 +247,36 @@ export default function AdminSidebar({ children, initials }) {
 
       <div style={styles.body}>
         <nav style={{ ...styles.nav, width }}>
-          <Link
-            to="/admin/dashboard"
-            style={{
-              ...styles.navItem,
-              ...(dashboardActive ? styles.navItemActive : null),
-              justifyContent: collapsed ? 'center' : 'flex-start',
-            }}
-          >
-            <img src={dashboardActive ? dashboardIconWhite : dashboardIconBlack} alt="" width={22} height={22} />
-            {!collapsed && (
-              <span style={{ ...styles.navLabel, color: dashboardActive ? '#FFFFFF' : '#000000' }}>
-                Dashboard
-              </span>
-            )}
-          </Link>
-
-          <Link
-            to="/admin/users"
-            style={{
-              ...styles.navItem,
-              ...(usersActive ? styles.navItemActive : null),
-              justifyContent: collapsed ? 'center' : 'flex-start',
-            }}
-          >
-            <img src={usersActive ? userIconWhite : userIconBlack} alt="" width={22} height={22} />
-            {!collapsed && (
-              <span style={{ ...styles.navLabel, color: usersActive ? '#FFFFFF' : '#000000' }}>
-                User Management
-              </span>
-            )}
-          </Link>
+          {NAV_ITEMS.map((item) => {
+            const active = item.isActive(location.pathname);
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                title={collapsed ? item.label : undefined}
+                aria-label={item.label}
+                aria-current={active ? 'page' : undefined}
+                style={{
+                  ...styles.navItem,
+                  ...(active ? styles.navItemActive : null),
+                  justifyContent: collapsed ? 'center' : 'flex-start',
+                }}
+              >
+                <img
+                  src={active ? item.iconActive : item.iconInactive}
+                  alt=""
+                  width={item.iconWidth}
+                  height={22}
+                  style={{ flex: 'none' }}
+                />
+                {!collapsed && (
+                  <span style={{ ...styles.navLabel, color: active ? '#FFFFFF' : '#000000' }}>
+                    {item.label}
+                  </span>
+                )}
+              </Link>
+            );
+          })}
 
           <hr style={styles.divider} />
 

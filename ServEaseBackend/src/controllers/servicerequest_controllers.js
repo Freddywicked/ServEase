@@ -16,7 +16,12 @@ const Provider = require('../models/provider_model');
 const Request = require('../models/servicerequest_model');
 const Workflow = require('../models/workflow_model');
 const { diagnose } = require('../utils/ai_diagnosis');
-const { toQuoteDto, serviceFeeFor, CUSTOMER_DECLINED_QUOTATION_REASON } = require('../utils/pricing');
+const {
+  toQuoteDto,
+  serviceFeeFor,
+  isCustomerQuotationDecline,
+  decodeCustomerQuotationDecline,
+} = require('../utils/pricing');
 const { getProviderFileUrl } = require('../utils/storage');
 const {
   APPOINTMENT_HOURS,
@@ -179,10 +184,12 @@ const toCustomerDto = (row, recipients = [], users = {}, attachments = [], quote
 //           'closed' = declined by this provider OR the customer declined the quotation
 const closedInfoOf = (recipient) => {
   if (recipient.status !== 'declined') return { closedBy: null, declinedReason: null };
-  const byCustomer = recipient.declined_reason === CUSTOMER_DECLINED_QUOTATION_REASON;
+  const byCustomer = isCustomerQuotationDecline(recipient.declined_reason);
   return {
     closedBy: byCustomer ? 'customer' : 'provider',
-    declinedReason: byCustomer ? null : recipient.declined_reason || null,
+    declinedReason: byCustomer
+      ? decodeCustomerQuotationDecline(recipient.declined_reason)
+      : recipient.declined_reason || null,
   };
 };
 

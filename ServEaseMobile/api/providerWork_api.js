@@ -11,10 +11,7 @@ import { request } from './client';
 // GET /provider/jobs
 //   -> { jobs: [{ id, requestNumber, customerName, createdAt, status ('Active'|'Pending'|'Done'),
 //                 statusLabel, aiSuggestion, stages: ['Assessing', ...], stageLabels, serviceLocationType,
-//                 started, currentStepIndex, currentStepLabel }],
-//        quotations: [{ id, paymentRequestId, jobId, requestNumber, customerName, createdAt,
-//                       distanceKm|null, statusLabel, originalAmount, proposedAmount|null, customerMessage }] }
-// `quotations` = customer price negotiations waiting for this provider (Jobs > Active > Quotations).
+//                 started, currentStepIndex, currentStepLabel }] }
 export const getProviderJobs = () => request('/provider/jobs');
 
 // GET /provider/jobs/:id
@@ -23,20 +20,24 @@ export const getProviderJobs = () => request('/provider/jobs');
 // Shop-based and home-based requests have different stage lists; the backend decides.
 export const getProviderJob = (jobId) => request(`/provider/jobs/${jobId}`);
 
-// Photos: up to 4 (5 MB each). Video: up to 1 (50 MB). Keep in sync with the backend limits.
-export const MAX_UPDATE_IMAGES = 4;
-export const MAX_UPDATE_VIDEOS = 1;
+// Photos and videos share one pool of 5 attachments. Photos are limited to 5 MB each
+// and videos to 50 MB each. Keep in sync with the backend and web limits.
+export const MAX_UPDATE_ATTACHMENTS = 5;
 
-// PATCH /provider/jobs/:id/status  { stage, notes, photos[]?, video? }
+// PATCH /provider/jobs/:id/status  { stage, notes, attachments[]? }
 // `media` is [{ uri, type, fileName, isVideo }] from JobUpdateStatus. With media the body is
-// multipart (photos repeat the "photos" field, the video uses "video"); without it, plain JSON.
+// multipart and every photo or video uses the "attachments" field, just like the web client.
+// Without media, plain JSON is sufficient; attachments are always optional.
 export const updateJobStatus = (jobId, { stage, notes, media = [] }) => {
+    if (media.length > MAX_UPDATE_ATTACHMENTS) {
+        throw new Error(`You can attach up to ${MAX_UPDATE_ATTACHMENTS} photos or videos per update.`);
+    }
     if (media.length > 0) {
         const form = new FormData();
         form.append('stage', stage);
         form.append('notes', notes || '');
         media.forEach((m, index) => {
-            form.append(m.isVideo ? 'video' : 'photos', {
+            form.append('attachments', {
                 uri: m.uri,
                 type: m.type || (m.isVideo ? 'video/mp4' : 'image/jpeg'),
                 name: m.fileName || `update-${index}.${m.isVideo ? 'mp4' : 'jpg'}`,
@@ -51,13 +52,24 @@ export const updateJobStatus = (jobId, { stage, notes, media = [] }) => {
     return request(`/provider/jobs/${jobId}/status`, { method: 'PATCH', body: { stage, notes } });
 };
 
+// GET /provider/jobs/quotations
+// Customer price negotiations are returned separately from the Jobs list, using the same
+// endpoint and DTO as the web Active Jobs screen.
+export const getProviderJobQuotations = () => request('/provider/jobs/quotations');
+
 // Customer price negotiation on an additional payment.
-// POST /provider/negotiations/:paymentRequestId/accept   -> the amount becomes the customer's suggestion
-// POST /provider/negotiations/:paymentRequestId/reject   { reason }
-export const acceptNegotiation = (paymentRequestId) =>
-    request(`/provider/negotiations/${paymentRequestId}/accept`, { method: 'POST' });
-export const rejectNegotiation = (paymentRequestId, reason) =>
-    request(`/provider/negotiations/${paymentRequestId}/reject`, { method: 'POST', body: { reason } });
+// POST /provider/jobs/:jobId/payment-requests/:paymentRequestId/negotiation/accept
+// POST /provider/jobs/:jobId/payment-requests/:paymentRequestId/negotiation/reject  { reason }
+export const acceptNegotiation = (jobId, paymentRequestId) =>
+    request(
+        `/provider/jobs/${encodeURIComponent(jobId)}/payment-requests/${encodeURIComponent(paymentRequestId)}/negotiation/accept`,
+        { method: 'POST' },
+    );
+export const rejectNegotiation = (jobId, paymentRequestId, reason) =>
+    request(
+        `/provider/jobs/${encodeURIComponent(jobId)}/payment-requests/${encodeURIComponent(paymentRequestId)}/negotiation/reject`,
+        { method: 'POST', body: { reason } },
+    );
 
 // POST /provider/jobs/:id/additional-parts  { additionalCost, notes }
 // The backend should notify the customer about the extra parts/cost.

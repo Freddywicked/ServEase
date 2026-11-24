@@ -79,8 +79,25 @@ const feeSplit = (quote, payments) => {
 };
 
 // Stored in service_request_providers.declined_reason when the CUSTOMER declines a quotation, so the
-// Closed tab can tell "you declined" from "the provider declined" without a new column.
+// Closed tab can tell "you declined" from "the provider declined" without a new column. A customer's
+// optional detail follows the marker; legacy rows contain only the marker itself.
 const CUSTOMER_DECLINED_QUOTATION_REASON = 'The customer declined the quotation';
+
+const encodeCustomerQuotationDecline = (reason) => {
+  const detail = String(reason ?? '').trim();
+  return detail ? `${CUSTOMER_DECLINED_QUOTATION_REASON}: ${detail}` : CUSTOMER_DECLINED_QUOTATION_REASON;
+};
+
+const isCustomerQuotationDecline = (storedReason) => {
+  const value = String(storedReason || '');
+  return value === CUSTOMER_DECLINED_QUOTATION_REASON || value.startsWith(`${CUSTOMER_DECLINED_QUOTATION_REASON}:`);
+};
+
+const decodeCustomerQuotationDecline = (storedReason) => {
+  if (!isCustomerQuotationDecline(storedReason)) return null;
+  const detail = String(storedReason).slice(CUSTOMER_DECLINED_QUOTATION_REASON.length).replace(/^:\s*/, '').trim();
+  return detail || null;
+};
 
 module.exports = {
   round2,
@@ -91,4 +108,7 @@ module.exports = {
   toQuoteDto,
   feeSplit,
   CUSTOMER_DECLINED_QUOTATION_REASON,
+  encodeCustomerQuotationDecline,
+  isCustomerQuotationDecline,
+  decodeCustomerQuotationDecline,
 };

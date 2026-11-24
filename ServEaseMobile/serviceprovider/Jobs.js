@@ -16,7 +16,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { getProviderJobs, acceptNegotiation, rejectNegotiation } from '../api/providerWork_api';
+import {
+    getProviderJobs,
+    getProviderJobQuotations,
+    acceptNegotiation,
+    rejectNegotiation,
+} from '../api/providerWork_api';
 import { formatPeso, formatShortDate } from '../utils/provider_formatters';
 import { ROUTES as CHAT_ROUTES } from '../constants/messaging';
 import LinearGradient from 'react-native-linear-gradient';
@@ -24,12 +29,14 @@ import LinearGradient from 'react-native-linear-gradient';
 /* ============================================================================
  * Jobs (Service Provider) — "Active Jobs"
  * ----------------------------------------------------------------------------
- * Everything comes from GET /provider/jobs (see api/providerWork_api.js):
- *   jobs       -> the On-going cards (stages, current step, AI suggestion, ...)
- *   quotations -> customer price negotiations waiting for the provider's answer
- * Accept / Decline on a quotation call POST /provider/negotiations/:id/accept|reject.
+ * Everything comes from the shared provider Jobs endpoints (see api/providerWork_api.js):
+ *   GET /provider/jobs             -> On-going cards (stages, current step, AI suggestion, ...)
+ *   GET /provider/jobs/quotations  -> customer price negotiations waiting for the provider's answer
+ * Accept / Decline use the same job/payment-request negotiation endpoints as the web app.
  * Nothing on this screen is hard-coded data; only labels of the UI itself are static.
  * ========================================================================== */
+
+const POLL_INTERVAL_MS = 15000;
 
 // Fonts from the Figma (same convention as IncomingServiceRequest.js).
 const FONT_ROBOTO_BOLD = Platform.OS === 'ios' ? { fontFamily: 'Roboto-Bold' } : { fontWeight: '700' };
@@ -65,9 +72,12 @@ const Jobs = ({ navigation }) => {
 
     const loadJobs = useCallback(async () => {
         try {
-            const data = await getProviderJobs();
-            setJobs(data?.jobs ?? []);
-            setQuotations(data?.quotations ?? []);
+            const [jobsData, quotationsData] = await Promise.all([
+                getProviderJobs(),
+                getProviderJobQuotations(),
+            ]);
+            setJobs(jobsData?.jobs ?? []);
+            setQuotations(quotationsData?.quotations ?? []);
             setLoadFailed(false);
         } catch (error) {
             // Keep the last known data. A 401 is already handled by api/client.
@@ -75,11 +85,13 @@ const Jobs = ({ navigation }) => {
         }
     }, []);
 
-    // Load on mount and whenever the screen regains focus, so a status update pushed from
-    // JobUpdateStatus (or a new negotiation) shows up when the provider comes back.
+    // Load on focus and poll while visible, matching the web Active Jobs behavior. Cleanup stops
+    // requests when the provider navigates away; pull-to-refresh remains available as well.
     useFocusEffect(
         useCallback(() => {
             loadJobs().finally(() => setLoading(false));
+            const timer = setInterval(loadJobs, POLL_INTERVAL_MS);
+            return () => clearInterval(timer);
         }, [loadJobs]),
     );
 
@@ -101,9 +113,9 @@ const Jobs = ({ navigation }) => {
 
     const handleAccept = async (quotation) => {
         if (busyId) return;
-        setBusyId(quotation.id);
+        setBusyId(quotation.paymentRequestId);
         try {
-            await acceptNegotiation(quotation.paymentRequestId);
+            await acceptNegotiation(quotation.jobId, quotation.paymentRequestId);
             setAcceptedNotice(true);
             await loadJobs();
         } catch (error) {
@@ -134,7 +146,7 @@ const Jobs = ({ navigation }) => {
         }
         setSendingReject(true);
         try {
-            await rejectNegotiation(rejectTarget.paymentRequestId, reason);
+            await rejectNegotiation(rejectTarget.jobId, rejectTarget.paymentRequestId, reason);
             setRejectTarget(null);
             setRejectReason('');
             await loadJobs();
@@ -236,13 +248,13 @@ const Jobs = ({ navigation }) => {
     );
 
     const renderQuotationCard = (quotation) => {
-        const busy = busyId === quotation.id;
+        const busy = busyId === quotation.paymentRequestId;
         return (
-            <View key={quotation.id} style={styles.card}>
+            <View key={quotation.paymentRequestId} style={styles.card}>
                 <View style={styles.cardTopRow}>
                     <Text style={styles.requestNumber}>Request #{quotation.requestNumber}</Text>
                     <View style={[styles.statusBadge, styles.statusBadgeNegotiation]}>
-                        <Text style={styles.statusBadgeText}>{quotation.statusLabel}</Text>
+                        <Text style={styles.statusBadgeText}>{quotation.statusLabel || 'Price Negotiation'}</Text>
                     </View>
                 </View>
                 <Text style={styles.cardSubtitle}>

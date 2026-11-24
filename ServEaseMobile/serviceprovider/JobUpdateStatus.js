@@ -16,14 +16,12 @@ import { launchImageLibrary } from 'react-native-image-picker';
 import {
     getProviderJob,
     updateJobStatus,
-    MAX_UPDATE_IMAGES,
-    MAX_UPDATE_VIDEOS,
+    MAX_UPDATE_ATTACHMENTS,
 } from '../api/providerWork_api';
 import LinearGradient from 'react-native-linear-gradient';
 
 // Fonts from the Figma (same convention as IncomingServiceRequest.js).
 const FONT_ROBOTO_BOLD = Platform.OS === 'ios' ? { fontFamily: 'Roboto-Bold' } : { fontWeight: '700' };
-const FONT_QUICKSAND_MEDIUM = { fontFamily: 'Quicksand-Medium' };
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB per photo (keep in sync with the backend limit)
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024; // 50 MB per video
@@ -38,7 +36,7 @@ const isVideoAsset = (asset) => String(asset?.type || '').startsWith('video/');
  * Arrived at the Customer's location -> Completed. The backend decides
  * (GET /provider/jobs/:id -> job.stageOptions); this screen only displays what it is given.
  * Pushing the update (PATCH /provider/jobs/:id/status) shows it on the customer's Track and
- * RepairDetails screens, together with the notes, up to 4 photos and 1 video.
+ * RepairDetails screens, together with the notes and any optional mix of up to 5 photos / videos.
  * ========================================================================== */
 const JobUpdateStatus = ({ navigation, route }) => {
     const jobId = route?.params?.jobId;
@@ -82,9 +80,7 @@ const JobUpdateStatus = ({ navigation, route }) => {
         };
     }, [jobId]);
 
-    const imageCount = media.filter((m) => !m.isVideo).length;
-    const videoCount = media.filter((m) => m.isVideo).length;
-    const mediaFull = imageCount >= MAX_UPDATE_IMAGES && videoCount >= MAX_UPDATE_VIDEOS;
+    const mediaFull = media.length >= MAX_UPDATE_ATTACHMENTS;
     const currentLabel = stageOptions.find((o) => o.value === currentStage)?.label;
 
     const handleBack = () => navigation.goBack();
@@ -97,48 +93,48 @@ const JobUpdateStatus = ({ navigation, route }) => {
     const handleUploadMedia = async () => {
         if (saving) return;
         if (mediaFull) {
-            Alert.alert(
-                'Limit reached',
-                `You can attach up to ${MAX_UPDATE_IMAGES} photos and ${MAX_UPDATE_VIDEOS} video per update.`,
-            );
+            Alert.alert('Limit reached', `You can attach up to ${MAX_UPDATE_ATTACHMENTS} photos or videos per update.`);
             return;
         }
         try {
             const result = await launchImageLibrary({
-                mediaType: 'mixed', // photos and videos
-                selectionLimit: MAX_UPDATE_IMAGES + MAX_UPDATE_VIDEOS - media.length,
+                mediaType: 'mixed', // any combination of photos and videos
+                selectionLimit: MAX_UPDATE_ATTACHMENTS - media.length,
+                restrictMimeTypes: ['image/*', 'video/*'],
                 videoQuality: 'medium',
+                // Keep ordinary phone photos comfortably below the backend's 5 MB image limit.
+                quality: 0.8,
+                maxWidth: 1600,
+                maxHeight: 1600,
             });
             if (result.didCancel) return;
             if (result.errorCode) {
-                Alert.alert('Unable to open gallery', result.errorMessage || 'Please try again.');
+                Alert.alert('Unable to open gallery', 'The selected media could not be read. Please try another photo or video.');
                 return;
             }
 
-            let images = imageCount;
-            let videos = videoCount;
+            let total = media.length;
             const accepted = [];
             const problems = [];
             (result.assets || [])
                 .filter((a) => a?.uri)
                 .forEach((a, i) => {
                     const video = isVideoAsset(a);
+                    const type = a.type || (video ? 'video/mp4' : 'image/jpeg');
+                    if (!type.startsWith('image/') && !type.startsWith('video/')) {
+                        problems.push('Attach photos or videos only.');
+                        return;
+                    }
+                    if (total >= MAX_UPDATE_ATTACHMENTS) {
+                        problems.push(`You can attach up to ${MAX_UPDATE_ATTACHMENTS} photos or videos per update.`);
+                        return;
+                    }
                     const maxBytes = video ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES;
                     if (a.fileSize && a.fileSize > maxBytes) {
                         problems.push(video ? 'Each video must be 50 MB or smaller.' : 'Each photo must be 5 MB or smaller.');
                         return;
                     }
-                    if (video ? videos >= MAX_UPDATE_VIDEOS : images >= MAX_UPDATE_IMAGES) {
-                        problems.push(
-                            video
-                                ? `Only ${MAX_UPDATE_VIDEOS} video can be attached per update.`
-                                : `Only ${MAX_UPDATE_IMAGES} photos can be attached per update.`,
-                        );
-                        return;
-                    }
-                    if (video) videos += 1;
-                    else images += 1;
-                    const type = a.type || (video ? 'video/mp4' : 'image/jpeg');
+                    total += 1;
                     const ext = type.split('/')[1] || (video ? 'mp4' : 'jpg');
                     accepted.push({
                         uri: a.uri,
@@ -178,8 +174,8 @@ const JobUpdateStatus = ({ navigation, route }) => {
     };
 
     const uploadLabel = media.length
-        ? `Add More (${imageCount}/${MAX_UPDATE_IMAGES} photos, ${videoCount}/${MAX_UPDATE_VIDEOS} video)`
-        : 'Upload Photos / Video';
+        ? `Add More (${media.length}/${MAX_UPDATE_ATTACHMENTS} photos or videos)`
+        : 'Upload Photos / Videos (optional, up to 5)';
 
     return (
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -253,7 +249,7 @@ const JobUpdateStatus = ({ navigation, route }) => {
                             style={[styles.uploadBox, mediaFull && styles.uploadBoxFull]}
                             onPress={handleUploadMedia}
                             activeOpacity={0.8}
-                            disabled={saving}
+                            disabled={saving || mediaFull}
                         >
                             <Image source={require('../assets/icon_image.png')} style={styles.uploadIcon} />
                             <Text style={styles.uploadText}>{uploadLabel}</Text>

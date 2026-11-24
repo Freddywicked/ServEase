@@ -13,6 +13,7 @@ import {
     Alert,
     Dimensions,
     Platform,
+    AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -28,7 +29,7 @@ import { formatDateTime } from '../utils/formatters';
  * Everything comes from GET /service-requests/:id/repair-details:
  *   steps  -> the request's own step list (shop-based or home-based), each with `done` + time
  *   updates under a step -> what the service provider pushed from JobUpdateStatus:
- *                           the note, up to 4 photos and 1 video
+ *                           the note and any mix of up to 5 photos / videos
  * No step, text, photo or time is hard-coded here. The only sentence this screen writes itself is
  * "The repair status was updated at <time>." for an update that came without a note.
  * ========================================================================== */
@@ -44,6 +45,7 @@ const MONTHS = [
 const MAX_TILES = 4;
 const TILE_WIDTH = 70;
 const TILE_HEIGHT = 90;
+const POLL_INTERVAL_MS = 15000; // match the web repair-details live refresh
 
 // "June 24, 2026, 9:12 AM"
 const formatLongDateTime = (iso) => {
@@ -76,10 +78,15 @@ const RepairDetails = ({ navigation, route }) => {
         }
     }, [requestId]);
 
-    // Reload whenever the screen regains focus so new provider updates show up.
+    // Reload on focus and poll while visible, matching the web screen. Provider updates appear
+    // without the customer leaving this view or manually pulling to refresh.
     useFocusEffect(
         useCallback(() => {
             load().finally(() => setLoading(false));
+            const timer = setInterval(() => {
+                if (AppState.currentState === 'active') load();
+            }, POLL_INTERVAL_MS);
+            return () => clearInterval(timer);
         }, [load]),
     );
 

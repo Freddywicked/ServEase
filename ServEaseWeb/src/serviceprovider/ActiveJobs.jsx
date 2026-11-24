@@ -28,7 +28,12 @@ import pinIcon from '../assets/icon_pinloc.png';
 // GET /api/provider/jobs -> { jobs: [{ id, requestNumber, customerName, createdAt, category,
 //   status: 'Active' | 'Pending' | 'Done', aiSuggestion, aiConfidence,
 //   stages: ['Assessing', ...], stageOptions: [{ value, label }], serviceLocationType: 'home' | 'shop',
-//   currentStepLabel, paidTotal }] }
+//   currentStepLabel, paidTotal, finalPaymentPaid, remainingBalance }] }
+//   finalPaymentPaid (boolean) = the customer already paid the remaining balance / final payment.
+//   remainingBalance (number, optional) = the unpaid balance, shown on a "Pending Payment" card.
+//   A repair is COMPLETED when status is 'Done' or its current stage is the last stage (Completed).
+//   Completed + finalPaymentPaid  -> status "Completed" (no separate tab or section for it).
+//   Completed + NOT paid yet      -> stays in On-Going, badge "Completed and Pending Payment".
 //   The stage list depends on the request: Shop-based = Assessing / Repairing / Quality Checking /
 //   Completed, Home-based = Preparing / Service Provider is on the way / Arrived at the Customer's
 //   location / Completed. The backend sends both the stored value and the label to show.
@@ -55,12 +60,13 @@ const TABS = [
   { key: 'quotation', label: 'Quotation' },
 ];
 
-// Status dropdown (the default view is "Active", like the Figma frame).
+// Status dropdown. "Active" = in progress + completed but still waiting for the final payment.
+// "Completed" = completed AND the remaining balance was paid by the customer. There is no
+// separate Completed tab: the tabs stay On-Going | Quotation.
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All' },
   { value: 'active', label: 'Active' },
   { value: 'completed', label: 'Completed' },
-  
 ];
 
 // Button colours of the job card (Figma "Request - Active Jobs").
@@ -88,15 +94,23 @@ const toJobCard = (j) => {
     Array.isArray(j.stageOptions) && j.stageOptions.length
       ? j.stageOptions
       : stages.map((value) => ({ value, label: value }));
-  const done = j.status === 'Done';
   const currentStage = j.currentStepLabel && j.currentStepLabel !== 'Not started' ? j.currentStepLabel : null;
+  const lastStage = stageOptions.length ? stageOptions[stageOptions.length - 1].value : null;
+  // The repair itself is finished (last stage reached) ...
+  const done = j.status === 'Done' || (currentStage != null && lastStage != null && sameText(currentStage, lastStage));
+  // ... but it only counts as Completed once the customer paid the remaining balance.
+  const finalPaid = j.finalPaymentPaid === true;
+  const remainingBalance = Number(j.remainingBalance) > 0 ? Number(j.remainingBalance) : 0;
   return {
     id: j.id,
     requestNumber: j.requestNumber || j.id,
     customerName: j.customerName,
     dateLabel: formatDateLabel(j.createdAt),
     category: j.category || '',
-    done,
+    done, // repair finished
+    closed: done && finalPaid, // repair finished AND final payment paid -> Completed status
+    pendingPayment: done && !finalPaid, // repair finished, final payment not paid yet -> stays On-Going
+    remainingBalance,
     awaitingCustomer: j.status === 'Pending', // quotation not accepted yet -> still under Incoming Requests
     stages: stageOptions.map((o) => o.value),
     stageOptions,
@@ -492,12 +506,16 @@ const CARD_BASE = `relative box-border w-full rounded-[10px] border border-[#818
 
 function JobCard({ job, onUpdate, onNotify }) {
   const stageIndex = job.done ? job.stages.length : job.currentStage ? job.stages.indexOf(job.currentStage) : -1;
-  const badge = job.done ? { label: 'Completed', bg: 'bg-[#0255AF]' } : { label: 'In Progress', bg: 'bg-[#62BB57]' };
+  const badge = job.closed
+    ? { label: 'Completed', bg: 'bg-[#0255AF]' }
+    : job.pendingPayment
+      ? { label: 'Completed and Pending Payment', bg: 'bg-[#BB8157]' }
+      : { label: 'In Progress', bg: 'bg-[#62BB57]' };
 
   return (
     <article className={`${CARD_BASE} pb-[26px] pt-[18px]`}>
       <span
-        className={`absolute right-[26px] top-[20px] box-border flex h-[30px] w-[124px] items-center justify-center rounded-full border border-[#B1A8A8] font-[Quicksand] text-[14px] font-medium leading-[20px] text-white ${badge.bg}`}
+        className={`absolute right-[26px] top-[20px] box-border flex h-[30px] min-w-[124px] items-center justify-center whitespace-nowrap rounded-full border border-[#B1A8A8] px-4 font-[Quicksand] text-[14px] font-medium leading-[20px] text-white ${badge.bg}`}
       >
         {badge.label}
       </span>
@@ -539,6 +557,13 @@ function JobCard({ job, onUpdate, onNotify }) {
       {job.paidTotal > 0 && (
         <p className="m-0 mt-[4px] px-[26px] text-[14px] font-normal leading-[22px]">
           Progress Payment ₱{formatPesos(job.paidTotal)} already paid by customer
+        </p>
+      )}
+      {job.pendingPayment && (
+        <p className="m-0 mt-[4px] px-[26px] text-[14px] font-bold leading-[22px] text-[#BB8157]">
+          {job.remainingBalance > 0
+            ? `Remaining balance ₱${formatPesos(job.remainingBalance)} is not yet paid by the customer`
+            : 'Waiting for the customer to pay the remaining balance'}
         </p>
       )}
 
@@ -742,9 +767,8 @@ export default function ActiveJobs() {
       jobs.filter((job) => {
         if (job.awaitingCustomer) return false; // not a repair yet: the customer has not accepted the quotation
         if (category !== 'all' && !sameText(job.category, category)) return false;
-        if (statusFilter === 'active' && job.done) return false;
-        if (statusFilter === 'completed' && !job.done) return false;
-        
+        if (statusFilter === 'active' && job.closed) return false; // Active keeps the Pending Payment repairs
+        if (statusFilter === 'completed' && !job.closed) return false; // Completed = repaired AND fully paid only
         return matchesSearch([
           job.requestNumber,
           job.customerName,

@@ -32,11 +32,13 @@ const {
 } = require('../utils/appointment_slots');
 const {
   INITIAL_FEE_RATE,
-  CUSTOMER_DECLINED_QUOTATION_REASON,
   quoteBreakdown,
   serviceFeeFor,
   initialAmountFor,
   feeSplit,
+  encodeCustomerQuotationDecline,
+  isCustomerQuotationDecline,
+  decodeCustomerQuotationDecline,
 } = require('../utils/pricing');
 
 // The stage list the provider's Jobs screen offers; also the customer's timeline.
@@ -562,7 +564,7 @@ const getTracking = asyncHandler(async (req, res) => {
       const declinedRecipient = recipients.find((r) => r.status === 'declined');
       const cancelled = row.request_status === 'Cancelled';
       // There is no provider-side cancel yet, so a cancelled request is treated as the customer's.
-      const byCustomer = cancelled || declinedRecipient?.declined_reason === CUSTOMER_DECLINED_QUOTATION_REASON;
+      const byCustomer = cancelled || isCustomerQuotationDecline(declinedRecipient?.declined_reason);
       groups.declined.push({
         ...base,
         id: cardId('declined'),
@@ -570,8 +572,9 @@ const getTracking = asyncHandler(async (req, res) => {
         statusLabel: cancelled ? 'Cancelled' : 'Declined',
         closedBy: byCustomer ? 'customer' : 'provider',
         closedAction: cancelled ? 'cancelled' : 'declined',
-        // The provider's own reason; the customer's quotation decline has no reason to show.
-        reason: byCustomer ? null : declinedRecipient?.declined_reason || null,
+        reason: byCustomer
+          ? decodeCustomerQuotationDecline(declinedRecipient?.declined_reason)
+          : declinedRecipient?.declined_reason || null,
       });
       return;
     }
@@ -701,13 +704,15 @@ const negotiatePaymentRequest = asyncHandler(async (req, res) => {
   res.status(201).json({ ok: true, status: 'pending', proposedAmount });
 });
 
-// POST /api/service-requests/:requestId/quotation/respond  body: { approve }
+// POST /api/service-requests/:requestId/quotation/respond  body: { approve, reason? }
 // approve: the request is booked with that provider (ERD: "Accepted by").
 // decline: the quotation is refused and the request is closed (it moves to the customer's Closed tab,
-// closedBy 'customer').
+// closedBy 'customer'). The optional reason keeps older clients compatible; the mobile modal requires it.
 const respondToQuotation = asyncHandler(async (req, res) => {
   const row = await getOwnedRequest(req);
   const approve = Boolean(req.body.approve);
+  const reason = String(req.body.reason || '').trim();
+  if (!approve && reason.length > 500) throw new ApiError(400, 'Reasons are limited to 500 characters');
 
   const recipients = await Request.listRecipients(row.request_id);
   const quoted = recipients.find((r) => r.status === 'quoted');
@@ -729,14 +734,14 @@ const respondToQuotation = asyncHandler(async (req, res) => {
   } else {
     await Request.updateRecipient(row.request_id, quoted.provider_id, {
       status: 'declined',
-      declined_reason: CUSTOMER_DECLINED_QUOTATION_REASON,
+      declined_reason: encodeCustomerQuotationDecline(reason),
       responded_at: new Date().toISOString(),
     });
     await Request.update(row.request_number, { request_status: 'Declined' });
     await Workflow.notify({
       userId: quoted.provider_id,
       type: 'quotation_declined',
-      message: `${customerName} declined your quotation for ${refOf(row)}.`,
+      message: `${customerName} declined your quotation for ${refOf(row)}.${reason ? ` Reason: ${reason}` : ''}`,
       requestId: row.request_id,
     });
   }
@@ -1352,12 +1357,24 @@ const providerRequests = async (providerId, statuses) => {
     .sort((a, b) => new Date(b.row.created_at) - new Date(a.row.created_at));
 };
 
-const toJobDto = (row, customer, updates, payments) => {
+const toJobDto = (row, customer, updates, payments, quotation, paymentRequests) => {
   const stages = stagesFor(row); // Shop-based vs Home-based steps
   const doneSteps = (updates || []).map((u) => u.step);
   const lastIndex = doneSteps.reduce((max, step) => Math.max(max, stages.indexOf(step)), -1);
-  const status =
-    row.request_status === 'Completed' ? 'Done' : row.request_status === 'Pending' ? 'Pending' : 'Active';
+  const paidTotal = (payments || [])
+    .filter((p) => p.status === 'paid')
+    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const quoteTotal = quotation ? quoteBreakdown(quotation).total : 0;
+  const approvedExtras = (paymentRequests || [])
+    .filter((p) => p.status === 'approved')
+    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const finalAmount = Math.round(Math.max(0, quoteTotal + approvedExtras - paidTotal) * 100) / 100;
+  const repairCompleted = row.request_status === 'Completed';
+  const isPaid = repairCompleted && finalAmount <= 0;
+  // Finishing the repair and settling its balance are different milestones. Match customer Track:
+  // completed-but-unpaid work stays Active; only a zero remaining balance moves it to Completed.
+  const status = repairCompleted && isPaid ? 'Done' : row.request_status === 'Pending' ? 'Pending' : 'Active';
+  const statusLabel = status === 'Done' ? 'Completed' : repairCompleted ? 'Pending Payment' : status;
   return {
     id: refOf(row),
     requestNumber: refOf(row),
@@ -1365,20 +1382,21 @@ const toJobDto = (row, customer, updates, payments) => {
     createdAt: row.created_at,
     category: row.category ?? null, // Categories dropdown on Active Jobs
     status,
-    statusLabel: status,
+    statusLabel,
+    isPaid,
+    finalAmount,
     aiSuggestion: row.ai_diagnosis?.status === 'done' ? row.ai_diagnosis.probableCause : null,
     aiConfidence: row.ai_diagnosis?.status === 'done' ? row.ai_diagnosis.confidencePercent ?? null : null,
     stages,
     // Stored value + the label the UI shows (Home-based "On the way" -> "Service Provider is on the way").
     stageOptions: stages.map((step) => ({ value: step, label: STEP_LABELS[step] || step })),
     serviceLocationType: locationTypeOf(row),
+    started: lastIndex >= 0,
     currentStepIndex: Math.max(lastIndex, 0),
     currentStepLabel: lastIndex >= 0 ? stages[lastIndex] : 'Not started',
-    progressPaymentPaid: (payments || []).length > 0,
+    progressPaymentPaid: paidTotal > 0,
     // Sum of what the customer has actually paid so far (the web Active Jobs card shows it).
-    paidTotal: (payments || [])
-      .filter((p) => p.status === 'paid')
-      .reduce((sum, p) => sum + Number(p.amount || 0), 0),
+    paidTotal,
   };
 };
 
@@ -1433,10 +1451,13 @@ const getProviderDashboard = asyncHandler(async (req, res) => {
 const listJobs = asyncHandler(async (req, res) => {
   const involved = await providerRequests(req.user.user_id, ['accepted', 'quoted']);
   const requestIds = involved.map(({ row }) => row.request_id);
-  const [customerMap, progressRows, paymentRows] = await Promise.all([
+  const [customerMap, progressRows, paymentRows, paymentRequests, quotationRows] = await Promise.all([
     Request.findUsersByIds(involved.map(({ row }) => row.customer_id)),
     Workflow.listProgressUpdates(requestIds),
-    Workflow.listPayments(requestIds),
+    // Reconcile checkouts here too, so a final payment moves the provider card to Completed promptly.
+    Workflow.listPayments(requestIds).then(reconcilePendingPayments),
+    Workflow.listPaymentRequests(requestIds),
+    Request.listQuotationsForProvider(req.user.user_id, requestIds),
   ]);
   res.json({
     jobs: involved.map(({ row }) =>
@@ -1444,7 +1465,9 @@ const listJobs = asyncHandler(async (req, res) => {
         row,
         customerMap[row.customer_id],
         progressRows.filter((u) => u.request_id === row.request_id),
-        paymentRows.filter((p) => p.request_id === row.request_id)
+        paymentRows.filter((p) => p.request_id === row.request_id),
+        quotationRows.find((q) => q.request_id === row.request_id),
+        paymentRequests.filter((p) => p.request_id === row.request_id)
       )
     ),
   });

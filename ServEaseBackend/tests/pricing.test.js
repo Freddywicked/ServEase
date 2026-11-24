@@ -7,6 +7,10 @@ const {
   initialAmountFor,
   toQuoteDto,
   feeSplit,
+  CUSTOMER_DECLINED_QUOTATION_REASON,
+  encodeCustomerQuotationDecline,
+  isCustomerQuotationDecline,
+  decodeCustomerQuotationDecline,
 } = require('../src/utils/pricing');
 
 const quote = {
@@ -63,4 +67,20 @@ test('pending payments do not consume any service fee', () => {
 
   assert.equal(split.has('pending'), false);
   assert.equal(split.get('final'), 75);
+});
+
+test('customer quotation declines retain their reason without losing customer attribution', () => {
+  const stored = encodeCustomerQuotationDecline('  The price is beyond my budget.  ');
+
+  assert.equal(stored, `${CUSTOMER_DECLINED_QUOTATION_REASON}: The price is beyond my budget.`);
+  assert.equal(isCustomerQuotationDecline(stored), true);
+  assert.equal(decodeCustomerQuotationDecline(stored), 'The price is beyond my budget.');
+});
+
+test('legacy customer declines and provider decline reasons remain compatible', () => {
+  assert.equal(encodeCustomerQuotationDecline(''), CUSTOMER_DECLINED_QUOTATION_REASON);
+  assert.equal(isCustomerQuotationDecline(CUSTOMER_DECLINED_QUOTATION_REASON), true);
+  assert.equal(decodeCustomerQuotationDecline(CUSTOMER_DECLINED_QUOTATION_REASON), null);
+  assert.equal(isCustomerQuotationDecline('Provider schedule is unavailable'), false);
+  assert.equal(decodeCustomerQuotationDecline('Provider schedule is unavailable'), null);
 });

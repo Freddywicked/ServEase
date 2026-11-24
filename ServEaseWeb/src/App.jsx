@@ -11,6 +11,7 @@ import ServiceCategory from './serviceprovider/ServiceCategory'
 import VerificationRequirements from './serviceprovider/VerificationRequirements'
 import AdminDashboard from './admin/AdminDashboard'
 import UserManagement from './admin/UserManagement'
+import ReportsAndErrors from './admin/ReportsAndErrors'
 import CustomerDashboard from './customer/CustomerDashboard'
 import CustomerProfile from './customer/CustomerProfile'
 import CustomerEditProfile from './customer/CustomerEditProfile'
@@ -59,6 +60,7 @@ function App() {
         {/* Admin */}
         <Route path="/admin/dashboard" element={<AdminDashboard />} />
         <Route path="/admin/users" element={<UserManagement />} />
+        <Route path="/admin/reports" element={<ReportsAndErrors />} />
         {/* TODO: add more admin routes here as they're built */}
 
         {/* Customer */}

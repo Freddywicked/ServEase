@@ -16,7 +16,7 @@ const { authenticate } = require('../middleware/auth');
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024, files: 6 },
+  limits: { fileSize: 50 * 1024 * 1024, files: 5 },
   fileFilter: (req, file, cb) => {
     const isMedia = file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/');
     if (!['attachments', 'photo'].includes(file.fieldname) || !isMedia) {
@@ -36,7 +36,9 @@ const uploadAttachments = (req, res, next) =>
     if (err) {
       err.status = err.status || 400;
       if (err.code === 'LIMIT_FILE_SIZE') err.message = 'Videos must be 50 MB or smaller.';
-      if (err.code === 'LIMIT_UNEXPECTED_FILE') err.message = 'You can attach up to 5 photos or videos.';
+      if (['LIMIT_UNEXPECTED_FILE', 'LIMIT_FILE_COUNT'].includes(err.code)) {
+        err.message = 'You can attach up to 5 photos or videos.';
+      }
       return next(err);
     }
     const files = Object.values(req.files || {}).flat();

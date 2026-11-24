@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Image, Text, TouchableOpacity, ScrollView, Modal, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, Modal, KeyboardAvoidingView, Platform, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { ROUTES } from '../navigation/routes';
@@ -26,8 +26,10 @@ import { getServiceRequest, respondToQuotation } from '../api/servicerequest_api
  *   Respond  POST /service-requests/:id/quotation/respond  (respondToQuotation) { approve: boolean }
  *            Approve -> the provider is booked and notified, then the customer is asked to pay the
  *                       initial fee (Payment screen, stage 'initial').
- *            Decline -> the quotation is declined and the provider is notified; the request moves to
- *                       the Closed tab (backend: closedBy 'customer', closedAction 'declined').
+ *            Decline -> opens the "Reason for Rejection" modal; Send -> { approve: false, reason }.
+ *                       The quotation is declined and the provider is notified with the reason; the
+ *                       request moves to the Closed tab (backend: closedBy 'customer',
+ *                       closedAction 'declined', reason). Nothing is sent until the customer taps Send.
  *
  * Layout follows the Figma "SR- Quotation" frame (402px wide): Roboto title, 16px request number,
  * 8px line items, 96x32 Approve / Decline buttons aligned to the right.
@@ -48,6 +50,9 @@ const RequestDetails = ({ navigation, route }) => {
     const [acting, setActing] = useState(false);
     // null | 'approved' — which modal (if any) is on screen.
     const [modalStep, setModalStep] = useState(null);
+    // "Reason for Rejection" modal (customer declining the quotation).
+    const [rejectOpen, setRejectOpen] = useState(false);
+    const [rejectReason, setRejectReason] = useState('');
 
     useEffect(() => {
         let cancelled = false;
@@ -116,12 +121,31 @@ const RequestDetails = ({ navigation, route }) => {
         }
     };
 
-    // Declining the quotation notifies the provider and the request goes to the Closed tab.
-    const handleDecline = async () => {
+    // Decline opens the "Reason for Rejection" modal; nothing is sent until Send.
+    const handleDecline = () => {
         if (acting) return;
+        setRejectReason('');
+        setRejectOpen(true);
+    };
+
+    const handleCloseRejectModal = () => {
+        if (acting) return;
+        setRejectOpen(false);
+        setRejectReason('');
+    };
+
+    // Declining the quotation notifies the provider (with the reason) and the request goes to the Closed tab.
+    const handleSendRejection = async () => {
+        const reason = rejectReason.trim();
+        if (acting) return;
+        if (!reason) {
+            Alert.alert('Reason needed', 'Please state a reason for rejecting this quotation.');
+            return;
+        }
         setActing(true);
         try {
-            await respondToQuotation(requestId, { approve: false });
+            await respondToQuotation(requestId, { approve: false, reason });
+            setRejectOpen(false);
             navigation.goBack();
         } catch (error) {
             setActing(false);
@@ -215,13 +239,48 @@ const RequestDetails = ({ navigation, route }) => {
                         <Text style={styles.modalTitle}>Service Request Approved</Text>
                         <Text style={styles.modalSubtitle}>You are required to pay {initialFeeSentence}.</Text>
 
-                        <TouchableOpacity onPress={handleProceedToPayment}>
-                            <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.proceedButton}>
-                                <Text style={styles.proceedButtonText}>Proceed to Payment</Text>
-                            </LinearGradient>
+                        <TouchableOpacity style={styles.gradientButton} onPress={handleProceedToPayment} activeOpacity={0.85} accessibilityRole="button">
+                            <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+                            <Text style={styles.gradientButtonText}>Proceed to Payment</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
+            </Modal>
+
+            {/* Modal — reason for declining the quotation (Figma "Reason for Rejection"). */}
+            <Modal visible={rejectOpen} transparent animationType="fade" onRequestClose={handleCloseRejectModal}>
+                <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+                    <View style={styles.modalCardReject}>
+                        <TouchableOpacity style={styles.modalCloseButton} onPress={handleCloseRejectModal} disabled={acting}>
+                            <Image source={require('../assets/icon_close.png')} style={styles.modalCloseIcon} />
+                        </TouchableOpacity>
+
+                        <Text style={styles.rejectTitle}>Reason for Rejection</Text>
+                        <Text style={styles.rejectSubtitle}>State a proper reason for rejection.</Text>
+
+                        <TextInput
+                            style={styles.rejectInput}
+                            value={rejectReason}
+                            onChangeText={setRejectReason}
+                            placeholder="Enter your reason here."
+                            placeholderTextColor="#999999"
+                            multiline
+                            textAlignVertical="top"
+                            editable={!acting}
+                        />
+
+                        <TouchableOpacity
+                            style={[styles.gradientButton, styles.sendButton, (!rejectReason.trim() || acting) && styles.actionButtonDisabled]}
+                            onPress={handleSendRejection}
+                            disabled={!rejectReason.trim() || acting}
+                            activeOpacity={0.85}
+                            accessibilityRole="button"
+                        >
+                            <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+                            {acting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.gradientButtonText}>Send</Text>}
+                        </TouchableOpacity>
+                    </View>
+                </KeyboardAvoidingView>
             </Modal>
         </SafeAreaView>
     );
@@ -357,11 +416,22 @@ const styles = StyleSheet.create({
     },
     modalCardCompact: {
         width: '100%',
-        maxWidth: 420,
+        maxWidth: 340,
         backgroundColor: '#FFFFFF',
-        borderRadius: 16,
-        padding: 24,
+        borderRadius: 10,
+        paddingHorizontal: 20,
+        paddingTop: 16,
+        paddingBottom: 24,
         alignItems: 'center',
+    },
+    modalCardReject: {
+        width: '100%',
+        maxWidth: 340,
+        backgroundColor: '#FFFFFF',
+        borderRadius: 10,
+        paddingHorizontal: 20,
+        paddingTop: 16,
+        paddingBottom: 24,
     },
     modalCloseButton: {
         alignSelf: 'flex-end',
@@ -373,29 +443,64 @@ const styles = StyleSheet.create({
         resizeMode: 'contain',
     },
     modalTitle: {
-        fontSize: 16,
+        fontSize: 13,
         fontWeight: '700',
-        color: '#111111',
+        lineHeight: 22,
+        color: '#414141',
         textAlign: 'center',
         marginBottom: 6,
     },
     modalSubtitle: {
-        fontSize: 12,
-        color: '#666666',
+        fontSize: 11,
+        color: '#5B5959',
         textAlign: 'center',
-        lineHeight: 17,
-        marginBottom: 16,
+        lineHeight: 19,
+        marginBottom: 20,
     },
-    proceedButton: {
+    // Blue-to-teal gradient button (Figma: 150x40, 10px radius, grey outline, 12px bold white text).
+    gradientButton: {
+        width: 150,
+        height: 40,
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
         borderRadius: 10,
-        paddingHorizontal: 20,
-        paddingVertical: 12,
+        overflow: 'hidden',
         alignItems: 'center',
+        justifyContent: 'center',
     },
-    proceedButtonText: {
-        fontSize: 14,
-        color: '#FFFFFF',
+    gradientButtonText: {
+        fontSize: 12,
         fontWeight: '700',
+        lineHeight: 20,
+        color: '#FFFFFF',
+    },
+    // "Reason for Rejection" modal.
+    rejectTitle: {
+        fontSize: 13,
+        fontWeight: '700',
+        lineHeight: 22,
+        color: '#414141',
+    },
+    rejectSubtitle: {
+        fontSize: 10,
+        lineHeight: 17,
+        color: '#5B5959',
+        marginBottom: 10,
+    },
+    rejectInput: {
+        minHeight: 90,
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
+        borderRadius: 10,
+        backgroundColor: '#FFFFFF',
+        padding: 10,
+        fontSize: 11,
+        color: '#333333',
+        marginBottom: 20,
+    },
+    sendButton: {
+        width: '80%',
+        alignSelf: 'center',
     },
 });
 

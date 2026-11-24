@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react';
-import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl, Alert, Modal, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
+import React, { useState, useCallback, useRef } from 'react';
+import { View, Image, Text, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, RefreshControl, Alert, Modal, KeyboardAvoidingView, Platform, StyleSheet, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { ROUTES } from '../navigation/routes';
@@ -78,8 +78,8 @@ import { useTrackBadges, TAB_SOURCES, ACTION_CARD_TYPES } from '../utils/trackBa
  * indicator that clears when that icon is tapped. All of it lives in utils/trackBadges.js and is
  * derived from the loaded data; nothing is hard-coded.
  *
- * Reloads on focus and on pull-to-refresh. For live updates the moment the provider acts,
- * see the commented Realtime subscription inside the component.
+ * Reloads on focus, on pull-to-refresh, and every 15 seconds while focused, matching the web.
+ * The FCM/Realtime hooks below can also trigger an immediate refresh when enabled.
  *
  * ========================================================================== */
 
@@ -96,6 +96,7 @@ const TIMELINE_DOT_SIZE = 26; // status circles
 const TIMELINE_STEP_GAP = 11; // space between two circles (37px pitch)
 const TIMELINE_LINE_COLOR = '#D9D9D9'; // the thin line joining the circles
 const FOOTER_BUTTON_GAP = 15; // space between View and Proceed to Payment
+const POLL_INTERVAL_MS = 15000; // same live-refresh interval as the web Track screen
 
 // Customer-facing tabs. `sources` are the properties of the tracking response whose cards belong
 // to the tab, so the backend contract (sent / approved / ongoing / declined / done) is unchanged.
@@ -146,6 +147,21 @@ const isCompletedStep = (step) =>
     String(step.id ?? '').toLowerCase() === 'completed' || String(step.label ?? '').trim().toLowerCase() === 'completed';
 
 const formatPeso = (amount) => `₱${Number(amount ?? 0).toFixed(2)}`;
+
+// Outcome of the customer's price negotiation on an additional payment, shown as a badge on the
+// payment card (Figma "Negotiation Declined" / "Negotiation Approved"). `negotiationStatus` comes
+// from the backend: 'requested' | 'accepted' | 'rejected'. A backend `negotiationLabel` wins.
+const getNegotiationBadge = (request) => {
+    if (request.negotiationLabel) return request.negotiationLabel;
+    if (request.negotiationStatus === 'rejected') return 'Negotiation Declined';
+    if (request.negotiationStatus === 'accepted') return 'Negotiation Approved';
+    return null;
+};
+
+// One negotiation round per additional payment: once the provider answered (accepted or declined)
+// the Negotiate button is gone and only Approve / Decline remain (Figma).
+const isNegotiationAnswered = (request) =>
+    request.negotiationStatus === 'accepted' || request.negotiationStatus === 'rejected';
 
 // Closed tab wording. The backend says who closed the request (`closedBy`: 'customer' | 'provider')
 // and how (`closedAction`: 'declined' | 'cancelled'); a backend `statusLabel` wins for the badge.
@@ -240,6 +256,20 @@ const SearchIcon = () => (
     </View>
 );
 
+// Blue-to-teal gradient button used by the modals (Figma: 150x40, 10px radius, grey outline).
+const GradientButton = ({ label, onPress, disabled, loading, style }) => (
+    <TouchableOpacity
+        style={[styles.gradientButton, disabled && styles.actionButtonDisabled, style]}
+        onPress={onPress}
+        disabled={disabled}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+    >
+        <LinearGradient colors={['#0255AF', '#04A5A5']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
+        {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.gradientButtonText}>{label}</Text>}
+    </TouchableOpacity>
+);
+
 const Track = ({ navigation, route }) => {
     const [selectedStatus, setSelectedStatus] = useState(STATUS_FILTERS[0]);
     const [searchQuery, setSearchQuery] = useState('');
@@ -247,6 +277,7 @@ const Track = ({ navigation, route }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
+    const trackingRequestRef = useRef(false);
     const [busyCardId, setBusyCardId] = useState(null);
     // Additional-payment modals. `approvedPayment` is a snapshot taken when the customer approves
     // (so the modal survives the reload that follows); `rejectTarget` is the card being rejected.
@@ -262,19 +293,28 @@ const Track = ({ navigation, route }) => {
     // Red indicators on the status tabs (shared with the nav bar's Track icon).
     const { counts: badgeCounts, sync: syncBadges, markTabSeen } = useTrackBadges();
 
-    const loadTracking = useCallback(async ({ refresh = false } = {}) => {
-        if (refresh) setIsRefreshing(true);
-        else setIsLoading(true);
-        setErrorMessage('');
+    const loadTracking = useCallback(async ({ refresh = false, silent = false } = {}) => {
+        // A manual refresh/action and the live poll must not overwrite each other out of order.
+        if (trackingRequestRef.current) return;
+        trackingRequestRef.current = true;
+        if (!silent) {
+            if (refresh) setIsRefreshing(true);
+            else setIsLoading(true);
+            setErrorMessage('');
+        }
         try {
             const data = await getTrackedRequests();
             setGroups(data);
             syncBadges(data);
         } catch (error) {
-            setErrorMessage(error.message);
+            // Keep showing the last good cards when a background poll fails.
+            if (!silent) setErrorMessage(error.message);
         } finally {
-            setIsLoading(false);
-            setIsRefreshing(false);
+            trackingRequestRef.current = false;
+            if (!silent) {
+                setIsLoading(false);
+                setIsRefreshing(false);
+            }
         }
     }, [syncBadges]);
 
@@ -294,6 +334,17 @@ const Track = ({ navigation, route }) => {
             }
             loadTracking();
         }, [loadTracking, navigation, route?.params?.tab, route?.params?.section]),
+    );
+
+    // Match the web's live tracking: poll only while this screen is focused and the app is active.
+    // Background failures keep the last good cards; an in-flight action temporarily pauses polling.
+    useFocusEffect(
+        useCallback(() => {
+            const timer = setInterval(() => {
+                if (AppState.currentState === 'active' && !busyCardId) loadTracking({ silent: true });
+            }, POLL_INTERVAL_MS);
+            return () => clearInterval(timer);
+        }, [busyCardId, loadTracking]),
     );
 
     // ---------------------------------------------------------------------
@@ -453,14 +504,13 @@ const Track = ({ navigation, route }) => {
         const target = negotiateTarget;
         if (!target) return;
         const message = negotiateMessage.trim();
-        const hasAmount = negotiateAmount.trim() !== '';
-        const proposedAmount = hasAmount ? Number(negotiateAmount) : undefined;
-        if (hasAmount && (!Number.isFinite(proposedAmount) || proposedAmount <= 0)) {
+        const proposedAmount = Number(negotiateAmount);
+        if (!negotiateAmount.trim() || !Number.isFinite(proposedAmount) || proposedAmount <= 0) {
             Alert.alert('Enter a valid amount', 'The suggested amount must be greater than zero.');
             return;
         }
-        if (!hasAmount && !message) {
-            Alert.alert('Add a suggestion', 'Enter a suggested amount or a message for the service provider.');
+        if (!message) {
+            Alert.alert('Reason needed', 'Please state a reason for your suggested amount.');
             return;
         }
         runAction(
@@ -651,17 +701,30 @@ const Track = ({ navigation, route }) => {
     // Header shared by the on-going / completed cards. The badge wraps under the request number
     // when it is too long for one line (e.g. "Additional payment requested") instead of running
     // off the screen.
-    const renderCardHeader = (request) => (
-        <>
-            <View style={styles.cardTopRow}>
-                <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
-                <View style={styles.badgeBlue}>
-                    <Text style={styles.badgeBlueText}>{getStatusTag(request, isRequestPaid(request))}</Text>
+    // On the additional-payment card the badge becomes "Negotiation Declined" / "Negotiation Approved"
+    // once the service provider answered the customer's negotiation.
+    const renderCardHeader = (request, showNegotiationBadge = false) => {
+        const negotiationBadge = showNegotiationBadge ? getNegotiationBadge(request) : null;
+        return (
+            <>
+                <View style={styles.cardTopRow}>
+                    <Text style={styles.requestNumber}>Request #{request.requestNumber}</Text>
+                    {negotiationBadge ? (
+                        <View style={styles.badgeNegotiation}>
+                            <Text style={styles.badgeNegotiationText}>{negotiationBadge}</Text>
+                        </View>
+                    ) : (
+                        <View style={styles.badgeBlue}>
+                            <Text style={styles.badgeBlueText}>{getStatusTag(request, isRequestPaid(request))}</Text>
+                        </View>
+                    )}
                 </View>
-            </View>
-            <Text style={styles.providerNameLine}>{request.providerName}</Text>
-        </>
-    );
+                <Text style={styles.providerNameLine}>
+                    {negotiationBadge ? `${request.providerName} sent a quotation` : request.providerName}
+                </Text>
+            </>
+        );
+    };
 
     // Shown once the customer chose "Pay Later": the amount waits on the final payment.
     const renderDeferredNote = (request) =>
@@ -677,7 +740,7 @@ const Track = ({ navigation, route }) => {
         const isBusy = busyCardId !== null;
         return (
             <View key={request.id} style={styles.requestCard}>
-                {renderCardHeader(request)}
+                {renderCardHeader(request, true)}
 
                 <View style={styles.paymentNotice}>
                     <View style={styles.paymentNoticeTextWrap}>
@@ -699,7 +762,7 @@ const Track = ({ navigation, route }) => {
                     >
                         <Text style={styles.paymentActionText}>Approve</Text>
                     </TouchableOpacity>
-                    {request.canNegotiate !== false && (
+                    {request.canNegotiate !== false && !isNegotiationAnswered(request) && (
                         <TouchableOpacity
                             style={[styles.paymentActionButton, styles.paymentActionNegotiate, isBusy && styles.actionButtonDisabled]}
                             disabled={isBusy}
@@ -779,13 +842,8 @@ const Track = ({ navigation, route }) => {
             text = request.proposedAmount !== null && request.proposedAmount !== undefined
                 ? `You suggested ${formatPesoSpaced(request.proposedAmount)}. Waiting for the service provider to answer.`
                 : 'Your negotiation was sent. Waiting for the service provider to answer.';
-        } else if (request.negotiationStatus === 'accepted') {
-            text = request.originalAmount
-                ? `The service provider accepted your suggested amount (was ${formatPesoSpaced(request.originalAmount)}).`
-                : 'The service provider accepted your suggested amount.';
-        } else if (request.negotiationStatus === 'rejected') {
-            text = `The service provider declined your suggestion${request.negotiationReason ? `: ${request.negotiationReason}` : '.'}`;
         }
+        // 'accepted' / 'rejected' are shown by the badge in the card header (Figma), not by a note.
         return text ? <Text style={styles.negotiationNote}>{text}</Text> : null;
     };
 
@@ -941,92 +999,82 @@ const Track = ({ navigation, route }) => {
             {/* Additional payment approved: pay now (payment gateway) or pay later (added to the final payment). */}
             <Modal visible={!!approvedPayment} transparent animationType="fade" onRequestClose={handlePayAdditionalLater}>
                 <View style={styles.modalOverlay}>
-                    <View style={styles.modalCard}>
+                    <View style={[styles.modalCard, styles.modalCardApproved]}>
                         <TouchableOpacity style={styles.modalCloseButton} onPress={handlePayAdditionalLater}>
                             <Image source={require('../assets/icon_close.png')} style={styles.modalCloseIcon} />
                         </TouchableOpacity>
-                        <Text style={styles.modalTitle}>Additional Payment Approved</Text>
-                        <Text style={styles.modalSubtitle}>
-                            {approvedPayment ? `${formatPeso(approvedPayment.amount)} — ` : ''}
-                            pay now, or pay later and it will be added to your final payment.
-                        </Text>
-                        <TouchableOpacity style={styles.modalPillButton} onPress={handlePayAdditionalNow}>
-                            <Text style={styles.modalPillButtonText}>Proceed to Payment</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.modalPillButton} onPress={handlePayAdditionalLater}>
-                            <Text style={styles.modalPillButtonText}>Pay Later</Text>
-                        </TouchableOpacity>
+                        <Text style={styles.modalTitleApproved}>Additional Payment Approved</Text>
+                        <GradientButton label="Proceed to Payment" onPress={handlePayAdditionalNow} style={styles.gradientButtonSpaced} />
+                        <GradientButton label="Pay Later" onPress={handlePayAdditionalLater} />
                     </View>
                 </View>
             </Modal>
 
-            {/* Additional payment rejection: a reason is collected before anything is sent. */}
+            {/* Additional payment rejection (Figma "Negotiation Rejection Modal"): a reason is collected before anything is sent. */}
             <Modal visible={!!rejectTarget} transparent animationType="fade" onRequestClose={handleCloseRejectModal}>
-                <KeyboardAvoidingView
-                    style={styles.modalOverlay}
-                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                >
+                <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
                     <View style={styles.modalCard}>
                         <TouchableOpacity style={styles.modalCloseButton} onPress={handleCloseRejectModal}>
                             <Image source={require('../assets/icon_close.png')} style={styles.modalCloseIcon} />
                         </TouchableOpacity>
-                        <Text style={styles.modalSectionLabel}>Reason for rejection</Text>
+                        <Text style={styles.formModalTitle}>Reason for Rejection</Text>
+                        <Text style={styles.formModalLabel}>State a proper reason for rejection.</Text>
                         <TextInput
-                            style={styles.reasonInput}
+                            style={styles.formModalTextArea}
                             value={rejectReason}
                             onChangeText={setRejectReason}
+                            placeholder="Enter your reason here."
+                            placeholderTextColor="#A8A3A3"
                             multiline
                             textAlignVertical="top"
-                            placeholder="Tell the service provider why"
-                            placeholderTextColor="#999999"
                         />
-                        <TouchableOpacity
-                            style={[styles.modalConfirmButton, (!rejectReason.trim() || busyCardId !== null) && styles.actionButtonDisabled]}
-                            disabled={!rejectReason.trim() || busyCardId !== null}
+                        <GradientButton
+                            label="Send"
                             onPress={handleConfirmRejectPayment}
-                        >
-                            {busyCardId !== null ? (
-                                <ActivityIndicator color="#333333" />
-                            ) : (
-                                <Text style={styles.modalPillButtonText}>Confirm</Text>
-                            )}
-                        </TouchableOpacity>
+                            disabled={!rejectReason.trim() || busyCardId !== null}
+                            loading={busyCardId !== null}
+                            style={styles.gradientButtonWide}
+                        />
                     </View>
                 </KeyboardAvoidingView>
             </Modal>
 
-            {/* Price negotiation (additional payment). Confirm sends the counter-offer to the service provider. */}
+            {/* Price negotiation (Figma "Price Negotiation"). Send sends the counter-offer to the service provider. */}
             <Modal visible={!!negotiateTarget} transparent animationType="fade" onRequestClose={handleCloseNegotiateModal}>
-                <KeyboardAvoidingView
-                    style={styles.modalOverlay}
-                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                >
+                <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
                     <View style={styles.modalCard}>
                         <TouchableOpacity style={styles.modalCloseButton} onPress={handleCloseNegotiateModal}>
                             <Image source={require('../assets/icon_close.png')} style={styles.modalCloseIcon} />
                         </TouchableOpacity>
-                        <Text style={styles.negotiateTitle}>Request a Price Negotiation</Text>
+                        <Text style={styles.formModalTitle}>Request a Price Negotiation</Text>
 
-                        <Text style={styles.negotiateLabel}>Your Message</Text>
+                        <Text style={styles.formModalLabel}>Suggest Amount</Text>
                         <TextInput
-                            style={styles.negotiateMessageInput}
+                            style={styles.formModalAmountInput}
+                            value={negotiateAmount}
+                            onChangeText={(text) => setNegotiateAmount(text.replace(/[^0-9.]/g, ''))}
+                            keyboardType="decimal-pad"
+                            placeholder="0.00"
+                            placeholderTextColor="#A8A3A3"
+                        />
+
+                        <Text style={styles.formModalLabel}>State a proper reason for rejection.</Text>
+                        <TextInput
+                            style={styles.formModalTextArea}
                             value={negotiateMessage}
                             onChangeText={setNegotiateMessage}
+                            placeholder="Enter your reason here."
+                            placeholderTextColor="#A8A3A3"
                             multiline
                             textAlignVertical="top"
                         />
 
-                        <Text style={styles.negotiateLabel}>Suggested Additional Amount</Text>
-                        <TextInput
-                            style={styles.negotiateAmountInput}
-                            value={negotiateAmount}
-                            onChangeText={(text) => setNegotiateAmount(text.replace(/[^0-9.]/g, ''))}
-                            keyboardType="decimal-pad"
+                        <GradientButton
+                            label="Send"
+                            onPress={handleConfirmNegotiation}
+                            disabled={busyCardId !== null}
+                            loading={busyCardId !== null}
                         />
-
-                        <TouchableOpacity style={styles.negotiateConfirmButton} onPress={handleConfirmNegotiation}>
-                            <Text style={styles.messageButtonText}>Confirm</Text>
-                        </TouchableOpacity>
                     </View>
                 </KeyboardAvoidingView>
             </Modal>
@@ -1272,6 +1320,22 @@ const styles = StyleSheet.create({
         includeFontPadding: false,
         flexShrink: 1,
     },
+    // Figma: "Negotiation Declined" / "Negotiation Accepted" pill (#BB8157), same 18px height as the blue badge.
+    badgeNegotiation: {
+        ...badgeShape,
+        backgroundColor: '#BB8157',
+        minHeight: 18,
+        height: 18,
+        paddingHorizontal: 10,
+        maxWidth: '100%',
+        marginBottom: 4,
+    },
+    badgeNegotiationText: {
+        ...badgeTextBase,
+        lineHeight: 15,
+        includeFontPadding: false,
+        flexShrink: 1,
+    },
     divider: {
         height: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.4)',
@@ -1403,11 +1467,12 @@ const styles = StyleSheet.create({
     },
     paymentActionRow: {
         flexDirection: 'row',
+        justifyContent: 'flex-end',
     },
     paymentActionButton: {
-        flex: 1,
-        marginHorizontal: 4,
-        height: 26,
+        width: 90,
+        marginLeft: 10,
+        height: 30,
         borderWidth: 1,
         borderColor: '#B1A8A8',
         borderRadius: 10,
@@ -1661,6 +1726,83 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: '#333333',
         marginBottom: 8,
+    },
+    // "Additional Payment Approved" modal (Figma: 13px bold title, two 150x40 gradient buttons 23px apart).
+    modalCardApproved: {
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingBottom: 28,
+        borderRadius: 10,
+    },
+    modalTitleApproved: {
+        fontSize: 13,
+        fontWeight: '700',
+        lineHeight: 22,
+        color: '#414141',
+        textAlign: 'center',
+        marginBottom: 20,
+    },
+    gradientButton: {
+        alignSelf: 'center',
+        width: 150,
+        height: 40,
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
+        borderRadius: 10,
+        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    gradientButtonWide: {
+        width: '77%',
+        alignSelf: 'center',
+    },
+    // Shared by the rejection and negotiation modals (Figma).
+    formModalTitle: {
+        fontSize: 13,
+        fontWeight: '700',
+        lineHeight: 22,
+        color: '#414141',
+        marginBottom: 6,
+    },
+    formModalLabel: {
+        fontSize: 10,
+        lineHeight: 17,
+        color: '#5B5959',
+        marginBottom: 6,
+    },
+    formModalAmountInput: {
+        width: 100,
+        height: 30,
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
+        borderRadius: 10,
+        backgroundColor: '#FFFDFD',
+        paddingHorizontal: 10,
+        paddingVertical: 0,
+        fontSize: 10,
+        color: '#333333',
+        marginBottom: 14,
+    },
+    formModalTextArea: {
+        minHeight: 80,
+        borderWidth: 1,
+        borderColor: '#B1A8A8',
+        borderRadius: 10,
+        backgroundColor: '#FFFDFD',
+        padding: 10,
+        fontSize: 10,
+        color: '#333333',
+        marginBottom: 18,
+    },
+    gradientButtonSpaced: {
+        marginBottom: 23,
+    },
+    gradientButtonText: {
+        fontSize: 12,
+        fontWeight: '700',
+        lineHeight: 20,
+        color: '#FFFFFF',
     },
     modalPillButton: {
         alignSelf: 'center',

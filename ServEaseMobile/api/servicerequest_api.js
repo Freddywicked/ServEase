@@ -363,8 +363,12 @@ export const rejectAdditionalPayment = (requestId, paymentRequestId) =>
 
 // Customer approves / declines the provider's quotation (used by RequestDetails.js, which is
 // where the quotation card on Track.js leads). Backend notifies the provider; 409 if no longer open.
-export const respondToQuotation = (requestId, { approve }) =>
-    request(`/service-requests/${requestId}/quotation/respond`, { method: 'POST', body: { approve } });
+// Declines include the trimmed reason collected by the RequestDetails rejection modal.
+export const respondToQuotation = (requestId, { approve, reason }) =>
+    request(`/service-requests/${requestId}/quotation/respond`, {
+        method: 'POST',
+        body: { approve, ...(approve ? {} : { reason: String(reason ?? '').trim() }) },
+    });
 
 // Customer's counter-offer on an additional payment (the Negotiate modal on Track). The provider
 // answers it from Jobs > Active > Quotations; an accepted offer replaces the payment's amount.
@@ -374,13 +378,32 @@ export const negotiateAdditionalPayment = (requestId, paymentRequestId, { propos
         body: { proposedAmount, message },
     });
 
-// Expanded tracking for one request (RepairDetails screen):
+// Expanded tracking for one request (RepairDetails screen). The shared backend DTO uses
+// updatedAt / notes / attachments for the web. Normalize those names at the mobile API boundary
+// so the mobile screen and backend can evolve independently without losing notes, times or media.
+export const normalizeRepairDetails = (data) => ({
+    ...(data || {}),
+    steps: (Array.isArray(data?.steps) ? data.steps : []).map((step) => ({
+        ...step,
+        timestamp: step.timestamp ?? step.updatedAt ?? null,
+        updates: (Array.isArray(step.updates) ? step.updates : []).map((update) => ({
+            ...update,
+            note: update.note ?? update.notes ?? '',
+            createdAt: update.createdAt ?? update.updatedAt ?? null,
+            media: Array.isArray(update.media)
+                ? update.media
+                : (Array.isArray(update.attachments) ? update.attachments : []),
+        })),
+    })),
+});
+
 //   { requestId, requestNumber, providerName, serviceLocationType, statusLabel,
 //     steps: [{ key, label, done, timestamp|null,
 //               updates: [{ id, note, createdAt, media: [{ type: 'image'|'video', url }] }] }] }
 // Steps come from the request's own step list (shop-based or home-based); updates are what the
 // service provider pushed from JobUpdateStatus.
-export const getRepairDetails = (requestId) => request(`/service-requests/${requestId}/repair-details`);
+export const getRepairDetails = (requestId) =>
+    request(`/service-requests/${requestId}/repair-details`).then(normalizeRepairDetails);
 
 // The customer's submitted requests, newest first (History screen). Same endpoint the
 // web app uses; each entry is the toCustomerDto shape (id, status, category, providers...).
