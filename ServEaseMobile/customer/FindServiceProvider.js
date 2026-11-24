@@ -180,25 +180,24 @@ const FindServiceProvider = ({ navigation }) => {
             >
                 <Text style={styles.headerTitle}>Find Service Providers</Text>
 
-                <View style={styles.searchWrap}>
+                <View style={styles.searchBox}>
+                    <SearchIcon />
                     <TextInput
                         style={styles.searchInput}
                         value={searchQuery}
                         onChangeText={setSearchQuery}
                         placeholder="Search services or service providers..."
-                        placeholderTextColor="rgba(0, 0, 0, 0.34)"
+                        placeholderTextColor="#727272"
                         returnKeyType="search"
                         autoCorrect={false}
                         autoCapitalize="none"
                         clearButtonMode="while-editing"
-                        // One line, fixed 14px: the bar is a fixed 45px tall, so letting the phone's
-                        // font-size setting scale the text made the placeholder wrap and get cut off.
+                        // One line, fixed size: the bar is a fixed 37px tall, so letting the phone's
+                        // font-size setting scale the text would make the placeholder wrap and get cut off.
                         multiline={false}
                         numberOfLines={1}
                         allowFontScaling={false}
                     />
-                    {/* Figma's 1px outline (radius 8) drawn over the full input; it doesn't take touches. */}
-                    <View pointerEvents="none" style={styles.searchOutline} />
                 </View>
 
                 {/* Scrolls sideways when the chips don't fit the screen width */}
@@ -229,6 +228,14 @@ const FindServiceProvider = ({ navigation }) => {
     );
 };
 
+// Magnifier drawn with Views so this screen does not depend on an icon asset.
+const SearchIcon = () => (
+    <View style={styles.searchIcon}>
+        <View style={styles.searchIconCircle} />
+        <View style={styles.searchIconHandle} />
+    </View>
+);
+
 const styles = StyleSheet.create({
     safeArea: {
         flex: 1,
@@ -246,29 +253,49 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24,
         marginBottom: 10,
     },
-    // Figma "Input": 24px side margins, 45px tall, #EAEAEA, radius 30.
-    searchWrap: {
-        marginHorizontal: 24,
-        height: 45,
+    // Figma search bar: 346x37 (28px side margins), white, 1px #9E9898 outline, radius 10.
+    searchBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        height: 37,
+        marginHorizontal: 28,
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: '#9E9898',
+        borderRadius: 10,
+        paddingHorizontal: 12,
+    },
+    searchIcon: {
+        width: 18,
+        height: 18,
+    },
+    searchIconCircle: {
+        width: 13,
+        height: 13,
+        borderRadius: 7,
+        borderWidth: 1.6,
+        borderColor: '#9A9A9A',
+    },
+    searchIconHandle: {
+        position: 'absolute',
+        right: 0,
+        bottom: 1.5,
+        width: 6,
+        height: 1.8,
+        borderRadius: 1,
+        backgroundColor: '#9A9A9A',
+        transform: [{ rotate: '45deg' }],
     },
     searchInput: {
-        height: 45,
-        backgroundColor: '#EAEAEA',
-        borderRadius: 30,
-        paddingLeft: 20, // Figma text starts ~5.5% in
-        paddingRight: 12,
+        flex: 1,
+        marginLeft: 10,
         paddingVertical: 0,
-        fontSize: 14,
+        fontFamily: 'Quicksand',
+        fontSize: 10,
         fontWeight: '500',
-        color: '#000000',
+        color: '#414141',
         textAlignVertical: 'center',
         includeFontPadding: false,
-    },
-    searchOutline: {
-        ...StyleSheet.absoluteFillObject,
-        borderWidth: 1,
-        borderColor: 'rgba(31, 29, 29, 0.12)',
-        borderRadius: 8,
     },
     chipScroll: {
         marginTop: 20,
