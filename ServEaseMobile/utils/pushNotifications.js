@@ -55,7 +55,7 @@ const askPermission = async () => {
 };
 
 // A release phone without USB cannot show Metro's [push] logs. Surface one
-// token-safe setup result so registration failures are diagnosable on-device.
+// token-safe setup failure so registration problems are diagnosable on-device.
 let releaseDiagnosticShown = false;
 const showReleaseDiagnostic = (title, message) => {
     if (__DEV__ || releaseDiagnosticShown) return;
@@ -80,10 +80,6 @@ const registerFcmToken = async (token) => {
     try {
         await registerDeviceToken(token, Platform.OS);
         if (__DEV__) console.log('[push] device token registered');
-        showReleaseDiagnostic(
-            'Notifications ready',
-            'This device was registered successfully with the ServEase server.'
-        );
     } catch (error) {
         // A backend/network failure must not disable foreground FCM listeners.
         // setupPushNotifications retries when the app next becomes active.

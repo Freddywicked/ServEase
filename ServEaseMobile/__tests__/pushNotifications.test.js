@@ -1,4 +1,4 @@
-import { AppState, PermissionsAndroid, Platform } from 'react-native';
+import { Alert, AppState, PermissionsAndroid, Platform } from 'react-native';
 import { getMessaging } from '@react-native-firebase/messaging';
 import { registerDeviceToken } from '../api/client';
 import { setupPushNotifications } from '../utils/pushNotifications';
@@ -31,6 +31,9 @@ describe('push notification setup', () => {
     jest.clearAllMocks();
     jest.spyOn(console, 'warn').mockImplementation(() => {});
     jest.spyOn(console, 'log').mockImplementation(() => {});
+    jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    // Exercise release behavior, where setup diagnostics are user-visible.
+    jest.replaceProperty(global, '__DEV__', false);
     jest.replaceProperty(Platform, 'OS', 'android');
     jest.spyOn(Platform, 'Version', 'get').mockReturnValue(33);
     useNotificationBannerStore.setState({ current: null, receivedTick: 0 });
@@ -70,6 +73,7 @@ describe('push notification setup', () => {
     cleanup = await setupPushNotifications();
 
     expect(registerDeviceToken).toHaveBeenCalledWith('test-fcm-token', 'android');
+    expect(Alert.alert).not.toHaveBeenCalled();
     expect(messagingInstance.onMessage).toHaveBeenCalledTimes(1);
     expect(cleanup).toEqual(expect.any(Function));
 
