@@ -60,6 +60,15 @@ const sendPushToUser = async (userId, { title, body, data = {} }) => {
     // `notification` renders in the system tray when the app is backgrounded/quit;
     // `data` reaches the JS handlers (foreground) for in-app refreshes.
     notification: { title, body },
+    android: {
+      // Ask FCM for immediate delivery and use the app's high-importance channel
+      // instead of Android's low-priority "Miscellaneous" fallback channel.
+      priority: 'HIGH',
+      notification: {
+        channelId: 'servease_notifications',
+        sound: 'default',
+      },
+    },
     data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
   });
 

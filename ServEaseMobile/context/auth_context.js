@@ -58,10 +58,17 @@ export const AuthProvider = ({ children }) => {
     useEffect(() => {
         if (!user) return undefined;
         let cleanup;
+        let cancelled = false;
         setupPushNotifications().then((fn) => {
-            cleanup = fn;
+            // Setup can finish after logout/user refresh. Never leave its native
+            // listeners alive in that case.
+            if (cancelled) fn?.();
+            else cleanup = fn;
         });
-        return () => cleanup?.();
+        return () => {
+            cancelled = true;
+            cleanup?.();
+        };
     }, [user]);
 
     // Re-fetch user + provider status (e.g. after submitting a provider application).

@@ -8,9 +8,9 @@
 //   2. Project settings -> Service accounts -> Generate private key -> give the
 //      JSON to the backend (FIREBASE_SERVICE_ACCOUNT_JSON env var on Render, or
 //      FIREBASE_SERVICE_ACCOUNT_PATH locally).
-// Without those, every function here quietly no-ops and the app works as before
-// (in-app notifications only).
-import { Platform, PermissionsAndroid } from 'react-native';
+// Without those, push setup reports why it is unavailable and the app continues
+// working with its database-backed in-app notification list.
+import { AppState, Platform, PermissionsAndroid } from 'react-native';
 import { registerDeviceToken, unregisterDeviceToken } from '../api/client';
 import { useNotificationBannerStore } from './notificationBannerStore';
 import { normalizeRemoteMessage, openNotification } from './notificationActions';
@@ -49,7 +49,19 @@ const getFcmToken = async () => {
     try {
         return await messaging().getToken();
     } catch (error) {
+        console.warn('[push] could not get FCM token:', error.message);
         return null;
+    }
+};
+
+const registerFcmToken = async (token) => {
+    try {
+        await registerDeviceToken(token, Platform.OS);
+        if (__DEV__) console.log('[push] device token registered');
+    } catch (error) {
+        // A backend/network failure must not disable foreground FCM listeners.
+        // setupPushNotifications retries when the app next becomes active.
+        console.warn('[push] device registration failed:', error.message);
     }
 };
 
@@ -58,23 +70,30 @@ const getFcmToken = async () => {
 // the app-level banner while the app is in the FOREGROUND (in the background/quit
 // state the system tray shows them automatically).
 export const setupPushNotifications = async () => {
-    if (!isAvailable()) return undefined;
+    if (!isAvailable()) {
+        console.warn('[push] Firebase Messaging is unavailable in this build');
+        return undefined;
+    }
 
     try {
         const granted = await askPermission();
-        if (!granted) return undefined;
+        if (!granted) {
+            // Token registration and the custom foreground banner still work when
+            // Android's system-tray permission is denied. Do not abort setup here:
+            // enabling permission later in Settings does not rerun this function.
+            console.warn('[push] system notification permission is denied; foreground banners remain enabled');
+        }
 
-        const token = await getFcmToken();
-        if (token) await registerDeviceToken(token, Platform.OS);
+        const syncDeviceToken = async () => {
+            const token = await getFcmToken();
+            if (token) await registerFcmToken(token);
+        };
 
-        // Firebase rotates tokens occasionally; keep the backend's copy current.
+        // Install listeners before contacting the backend. A registration/network
+        // failure must never prevent an incoming foreground message from displaying.
         const unsubscribeRefresh = messaging().onTokenRefresh((newToken) => {
-            registerDeviceToken(newToken, Platform.OS).catch(() => {});
+            registerFcmToken(newToken);
         });
-
-        // Foreground messages arrive here (the tray only shows them when the app
-        // is in the background). They go to the shared banner store, which shows the
-        // custom <NotificationBanner /> and tells the badge hooks to refresh.
         const unsubscribeMessages = messaging().onMessage((remoteMessage) => {
             const notification = normalizeRemoteMessage(remoteMessage);
             useNotificationBannerStore.getState().showNotification(notification);
@@ -83,7 +102,16 @@ export const setupPushNotifications = async () => {
             }
         });
 
+        // Retry after a backend outage, and after returning from Android Settings.
+        const appStateSubscription = AppState.addEventListener('change', (state) => {
+            if (state === 'active') return syncDeviceToken();
+            return undefined;
+        });
+
+        await syncDeviceToken();
+
         return () => {
+            appStateSubscription.remove();
             unsubscribeRefresh();
             unsubscribeMessages();
         };
