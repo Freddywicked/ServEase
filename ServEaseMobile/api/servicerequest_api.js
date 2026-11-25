@@ -224,6 +224,8 @@ export const diagnoseServiceRequest = (draft, { signal } = {}) =>
  *   photoUrl,                      // optional
  *   specialty,                     // primary SERVICE_PROVIDER_SPECIALIZATION.specialization_name
  *   specialties: string[],         // all SERVICE_PROVIDER_SPECIALIZATION.specialization_name
+ *   categoryKeys: string[],        // parent request categories served by this provider
+ *   offersHomeServices: boolean,   // whether this provider accepts home-based requests
  *   verified: boolean,             // SERVICE_PROVIDER.verification_status === 'verified'
  *   available: boolean,            // SERVICE_PROVIDER.availability (right now)
  *   availabilitySchedule: string,  // e.g. 'Mon-Fri, 8AM-6PM'

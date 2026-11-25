@@ -729,6 +729,7 @@ const haversineKm = (lat1, lng1, lat2, lng2) => {
 const recommendedForDraft = asyncHandler(async (req, res) => {
   const category = normalizeCategory(req.query.category);
   const wanted = SPECIALIZATION_FOR_CATEGORY[category] || '';
+  if (!wanted) throw new ApiError(400, 'Choose a valid category');
   const latitude = toNumberOrNull(req.query.latitude);
   const longitude = toNumberOrNull(req.query.longitude);
   // The draft's preferred schedule: providers who can't take it are excluded below.
@@ -773,6 +774,9 @@ const recommendedForDraft = asyncHandler(async (req, res) => {
         name: users[p.user_id]?.name || p.company_name || 'Service provider',
         specialty: p.specializations[0] || '',
         specialties: p.specializations,
+        categoryKeys: CATEGORIES.filter((label) =>
+          p.specializations.includes(SPECIALIZATION_FOR_CATEGORY[label])
+        ).map(toCategorySlug),
         verified: true,
         available: !unavailable.has(p.user_id),
         availabilitySchedule: p.availability || null,
@@ -806,18 +810,23 @@ const recommendedForDraft = asyncHandler(async (req, res) => {
       (locationType !== 'home' || p.distanceKm <= (p.homeServiceRadiusKm ?? DEFAULT_PROVIDER_RADIUS_KM)));
   const inRangeList = availableList.filter((p) => offersRequestedService(p) && withinReach(p, radiusKm));
 
-  // Filter by the service category; if nobody matches, fall back to all verified
-  // providers so the screen never dead-ends. Rank by rating, then distance.
-  const matching = inRangeList.filter((p) => p.matchesCategory);
-  const pool = wanted && matching.length > 0 ? matching : inRangeList;
+  // Category is a HARD filter. When every matching provider is unavailable or out of range,
+  // return an empty list so the app can offer another schedule/radius — never substitute a
+  // provider from a different service category. Rank matches by rating, then distance.
+  const pool = inRangeList.filter((p) => p.matchesCategory);
   pool.sort(
     (a, b) => (b.rating ?? -1) - (a.rating ?? -1) || (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity)
   );
 
-  // Nobody in range: tell the app how far the nearest provider who WOULD appear after widening is,
-  // so it can say "Nearest provider is 38 km away. Widen your search?".
+  // Nobody in range: suggest only a SAME-CATEGORY provider who could serve this request type
+  // after widening. A nearer provider from another category is not a useful suggestion.
   const reachableIfWidened = availableList.filter(
-    (p) => offersRequestedService(p) && p.distanceKm !== null && !withinReach(p, radiusKm) && withinReach(p, MAX_RADIUS_KM)
+    (p) =>
+      p.matchesCategory &&
+      offersRequestedService(p) &&
+      p.distanceKm !== null &&
+      !withinReach(p, radiusKm) &&
+      withinReach(p, MAX_RADIUS_KM)
   );
   const nearestProviderKm =
     pool.length === 0 && reachableIfWidened.length > 0 ? Math.min(...reachableIfWidened.map((p) => p.distanceKm)) : null;

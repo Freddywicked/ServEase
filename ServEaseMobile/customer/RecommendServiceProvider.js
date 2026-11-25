@@ -17,8 +17,8 @@ import { getRecommendedProviders, createServiceRequest } from '../api/servicereq
  *   Loads    GET /service-providers/recommended using the draft (category,
  *            latitude/longitude, preferred date/time). Matching and sorting by
  *            specialization, ratings/sentiment, distance and availability is done
- *            server-side; the category match is a HARD filter, not a ranking boost,
- *            and providers who can't take the preferred schedule (blocked it on
+ *            server-side. Category and requested service type are HARD filters, not
+ *            ranking boosts, and providers who can't take the preferred schedule (blocked it on
  *            their Manage Calendar, or already have a request then) are excluded —
  *            when nobody is left the screen shows "No Service Provider Available".
  *            This screen re-checks both, so a provider from another category (e.g. a
@@ -90,7 +90,12 @@ const formatLocation = (provider) =>
         .filter(Boolean)
         .join(' · ');
 
-const normalizeKey = (value) => String(value ?? '').trim().toLowerCase();
+const normalizeKey = (value) =>
+    String(value ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
 
 // Which category keys a provider serves. Reads whichever field the endpoint returns;
 // `null` means the endpoint sent no category information at all.
@@ -105,19 +110,17 @@ const getProviderCategoryKeys = (provider) => {
         .filter(Boolean);
 };
 
-let warnedMissingCategory = false;
 const matchesRequestCategory = (provider, categoryKey) => {
+    if (provider.matchesCategory === false) return false;
     const keys = getProviderCategoryKeys(provider);
-    if (keys === null) {
-        // Can't verify, so trust the server's filter — but make the gap visible while developing.
-        if (__DEV__ && !warnedMissingCategory) {
-            warnedMissingCategory = true;
-            console.warn('[RecommendServiceProvider] providers have no category field (categoryKeys); client-side category check skipped.');
-        }
-        return true;
-    }
+    // Newer responses include categoryKeys. Older ones can still prove the match with
+    // matchesCategory; without either field, fail closed instead of showing another category.
+    if (keys === null) return provider.matchesCategory === true;
     return keys.includes(normalizeKey(categoryKey));
 };
+
+const offersRequestedService = (provider, serviceLocationType) =>
+    serviceLocationType !== 'home' || provider.offersHomeServices === true;
 
 const RecommendServiceProvider = ({ navigation }) => {
     const setDraft = useServiceRequestDraftStore((state) => state.setDraft);
@@ -191,10 +194,14 @@ const RecommendServiceProvider = ({ navigation }) => {
             exclude,
         });
         list.forEach((provider) => seenProviderIdsRef.current.add(provider.id));
-        // The server already excludes providers who are unavailable on the draft's
-        // preferred schedule; this keeps any stale/unfiltered response out as well.
+        // Defense in depth: never render a stale/unfiltered response from another category,
+        // an unavailable provider, or a shop-only provider for a home-based request.
+        // Shop-based requests intentionally allow both home-service and shop-only providers.
         return list.filter(
-            (provider) => provider.available !== false && matchesRequestCategory(provider, draft.categoryKey),
+            (provider) =>
+                provider.available !== false &&
+                matchesRequestCategory(provider, draft.categoryKey) &&
+                offersRequestedService(provider, draft.serviceLocationType),
         );
     }, []);
 
