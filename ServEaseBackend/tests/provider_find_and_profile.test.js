@@ -114,6 +114,36 @@ test('Find Available filter excludes a provider blocked for the whole requested 
   assert.deepEqual(res.body.providers, []);
 });
 
+test('Find category filters do not mix IT-related and Phone providers', async () => {
+  const originalListVerifiedProviders = Request.listVerifiedProviders;
+  const originalFindUsersByIds = Request.findUsersByIds;
+  Request.listVerifiedProviders = async () => [
+    { ...verifiedProvider, user_id: 'it-provider', specializations: ['IT-Related Device Repair'] },
+    { ...verifiedProvider, user_id: 'phone-provider', specializations: ['Phone Repair'] },
+  ];
+  Request.findUsersByIds = async () => ({
+    'it-provider': { name: 'IT Provider', address: 'Naga City' },
+    'phone-provider': { name: 'Phone Provider', address: 'Naga City' },
+  });
+
+  try {
+    const phoneRes = await invoke(workflowController.browseProviders, {
+      user: { user_id: 'customer-1' },
+      query: { category: 'Phone Device', date: '2026-11-21', slot: '10:00' },
+    });
+    assert.deepEqual(phoneRes.body.providers.map((provider) => provider.id), ['phone-provider']);
+
+    const itRes = await invoke(workflowController.browseProviders, {
+      user: { user_id: 'customer-1' },
+      query: { category: 'IT-Related Devices', date: '2026-11-21', slot: '10:00' },
+    });
+    assert.deepEqual(itRes.body.providers.map((provider) => provider.id), ['it-provider']);
+  } finally {
+    Request.listVerifiedProviders = originalListVerifiedProviders;
+    Request.findUsersByIds = originalFindUsersByIds;
+  }
+});
+
 test('provider own profile returns rating statistics and masked customer reviews', async () => {
   reviews = [
     {

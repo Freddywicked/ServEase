@@ -2000,11 +2000,26 @@ const deriveSummaryTags = (reviews, { rating, experienceYears }) => {
 };
 
 // GET /api/service-providers?category&search&available&sort -> { providers: [...] }
-// Verified providers only; category matches against specialization names,
-// punctuation-insensitive, so 'IT and Phone Repair' also matches 'IT-Related
-// Device Repair' and 'Phone Repair' specializations via word overlap below.
+// Verified providers only. Category labels/keys map to one exact specialization so
+// generic words such as "device" cannot make IT providers appear under Phone Device.
 // available=true keeps only providers free right now; sort=rating (the default
 // order) puts the highest rated first.
+const normalizeBrowseCategory = (value) =>
+  String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+const BROWSE_CATEGORY_SPECIALIZATIONS = {
+  'home repair': 'home repair services',
+  'home repair services': 'home repair services',
+  automotive: 'automotive services',
+  'automotive services': 'automotive services',
+  'it related': 'it related device repair',
+  'it related devices': 'it related device repair',
+  'it related device repair': 'it related device repair',
+  'phone device': 'phone repair',
+  'phone devices': 'phone repair',
+  'phone repair': 'phone repair',
+};
+
 const browseProviders = asyncHandler(async (req, res) => {
   const search = String(req.query.search || '').trim().toLowerCase();
   const wantedCategory = String(req.query.category || '').trim();
@@ -2018,10 +2033,8 @@ const browseProviders = asyncHandler(async (req, res) => {
     unavailableProviderIds(providerIds, calendarSlotFromQuery(req.query)),
   ]);
 
-  // Words shared between the picked category label and a specialization name,
-  // ignoring filler words — 'IT and Phone Repair' -> matches 'it', 'phone', 'repair'.
-  const STOP = new Set(['and', 'the', 'a', 'an', 'of', 'services', 'service', 'repair']);
-  const keywords = wantedCategory.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !STOP.has(w));
+  const normalizedCategory = normalizeBrowseCategory(wantedCategory);
+  const wantedSpecialization = BROWSE_CATEGORY_SPECIALIZATIONS[normalizedCategory] || normalizedCategory;
 
   const matches = (p) => {
     const name = users[p.user_id]?.name || p.company_name || '';
@@ -2029,11 +2042,10 @@ const browseProviders = asyncHandler(async (req, res) => {
       const hay = [name, p.company_name, ...p.specializations].join(' ').toLowerCase();
       if (!hay.includes(search)) return false;
     }
-    if (wantedCategory && wantedCategory.toLowerCase() !== 'all') {
-      return p.specializations.some((s) => {
-        const spec = s.toLowerCase();
-        return keywords.some((k) => spec.includes(k));
-      });
+    if (normalizedCategory && normalizedCategory !== 'all') {
+      return p.specializations.some((specialization) =>
+        normalizeBrowseCategory(specialization) === wantedSpecialization
+      );
     }
     return true;
   };
