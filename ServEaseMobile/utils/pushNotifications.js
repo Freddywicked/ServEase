@@ -19,21 +19,30 @@ import { refreshProviderBadgeCounts } from './providerTabBadges';
 // Lazy + guarded: if google-services.json was missing at build time the native
 // Firebase app never initialized, and touching the module would crash on launch.
 let messaging = null;
+let messagingModuleError = null;
 try {
-    messaging = require('@react-native-firebase/messaging').default;
+    const messagingModule = require('@react-native-firebase/messaging');
+    // v26 exports modular getMessaging(); older versions exported default messaging().
+    messaging = messagingModule.getMessaging || messagingModule.default;
 } catch (error) {
     messaging = null;
+    messagingModuleError = error;
 }
 
-const isAvailable = () => {
-    if (Platform.OS !== 'android' || !messaging) return false;
+const messagingUnavailableReason = () => {
+    if (Platform.OS !== 'android') return 'Firebase Messaging is currently configured for Android only.';
+    if (!messaging) {
+        return `The Firebase Messaging module could not load: ${messagingModuleError?.message || 'unknown module error'}`;
+    }
     try {
-        messaging(); // throws when Firebase isn't initialized (no google-services.json)
-        return true;
+        messaging();
+        return null;
     } catch (error) {
-        return false;
+        return `Firebase Messaging initialization failed: ${error.message || String(error)}`;
     }
 };
+
+const isAvailable = () => !messagingUnavailableReason();
 
 // Android 13+ asks for POST_NOTIFICATIONS at runtime; older versions allow it
 // by default. iOS would use messaging().requestPermission() instead.
@@ -91,12 +100,10 @@ const registerFcmToken = async (token) => {
 // the app-level banner while the app is in the FOREGROUND (in the background/quit
 // state the system tray shows them automatically).
 export const setupPushNotifications = async () => {
-    if (!isAvailable()) {
-        console.warn('[push] Firebase Messaging is unavailable in this build');
-        showReleaseDiagnostic(
-            'Notification setup failed',
-            'Firebase Messaging is unavailable in this installed build. Check the Google Services configuration.'
-        );
+    const unavailableReason = messagingUnavailableReason();
+    if (unavailableReason) {
+        console.warn(`[push] ${unavailableReason}`);
+        showReleaseDiagnostic('Notification setup failed', unavailableReason);
         return undefined;
     }
 

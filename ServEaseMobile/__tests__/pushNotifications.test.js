@@ -1,12 +1,12 @@
 import { AppState, PermissionsAndroid, Platform } from 'react-native';
-import messaging from '@react-native-firebase/messaging';
+import { getMessaging } from '@react-native-firebase/messaging';
 import { registerDeviceToken } from '../api/client';
 import { setupPushNotifications } from '../utils/pushNotifications';
 import { useNotificationBannerStore } from '../utils/notificationBannerStore';
 
 jest.mock('@react-native-firebase/messaging', () => ({
-  __esModule: true,
-  default: jest.fn(),
+  // This is the actual export shape of @react-native-firebase/messaging v26.
+  getMessaging: jest.fn(),
 }));
 
 jest.mock('../api/client', () => ({
@@ -46,7 +46,7 @@ describe('push notification setup', () => {
         return unsubscribeMessages;
       }),
     };
-    messaging.mockReturnValue(messagingInstance);
+    getMessaging.mockReturnValue(messagingInstance);
     registerDeviceToken.mockResolvedValue({ ok: true });
     jest.spyOn(PermissionsAndroid, 'request').mockResolvedValue(
       PermissionsAndroid.RESULTS.GRANTED
