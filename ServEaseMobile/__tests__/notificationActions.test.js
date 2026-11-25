@@ -23,6 +23,7 @@ beforeEach(() => {
 
 test('normalizes FCM data and prefers the public request reference', () => {
   expect(normalizeRemoteMessage({
+    messageId: 'fcm-delivery-1',
     notification: { title: 'ServEase', body: 'New quotation' },
     data: {
       notificationId: 'notification-1',
@@ -32,6 +33,7 @@ test('normalizes FCM data and prefers the public request reference', () => {
     },
   })).toMatchObject({
     id: 'notification-1',
+    deliveryId: 'fcm-delivery-1',
     title: 'ServEase',
     message: 'New quotation',
     type: 'quotation_received',

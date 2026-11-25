@@ -22,8 +22,36 @@ describe('notification banner store', () => {
     expect(state.receivedTick).toBe(1);
   });
 
-  test('deduplicates a backend notification id', () => {
-    const notification = { id: 'duplicate-test-id', title: 'ServEase', message: 'Once' };
+  test('shows every delivery when the same backend notification is sent twice', () => {
+    const notification = { id: 'repeated-test-id', title: 'ServEase', message: 'First delivery' };
+    const store = useNotificationBannerStore.getState();
+    store.showNotification({ ...notification, deliveryId: 'fcm-delivery-1' });
+    const first = useNotificationBannerStore.getState().current;
+
+    store.showNotification({
+      ...notification,
+      deliveryId: 'fcm-delivery-2',
+      message: 'Second delivery',
+    });
+
+    const state = useNotificationBannerStore.getState();
+    expect(state.current).not.toBe(first);
+    expect(state.current).toMatchObject({
+      id: 'repeated-test-id',
+      deliveryId: 'fcm-delivery-2',
+      message: 'Second delivery',
+    });
+    expect(state.current.key).not.toBe(first.key);
+    expect(state.receivedTick).toBe(2);
+  });
+
+  test('deduplicates repeated callbacks for one FCM delivery', () => {
+    const notification = {
+      id: 'duplicate-test-id',
+      deliveryId: 'duplicate-fcm-delivery',
+      title: 'ServEase',
+      message: 'Once',
+    };
     useNotificationBannerStore.getState().showNotification(notification);
     const first = useNotificationBannerStore.getState().current;
 

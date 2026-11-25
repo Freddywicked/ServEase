@@ -10,8 +10,8 @@
 //   import create from 'zustand';
 import { create } from 'zustand';
 
-const MAX_REMEMBERED_IDS = 50;
-let seenIds = [];
+const MAX_REMEMBERED_DELIVERY_IDS = 50;
+let seenDeliveryIds = [];
 let keyCounter = 0;
 
 export const useNotificationBannerStore = create((set) => ({
@@ -26,11 +26,16 @@ export const useNotificationBannerStore = create((set) => ({
   showNotification: (notification) => {
     if (!notification) return;
 
-    // De-duplicate by backend notificationId.
+    // The database ID is still needed for marking the notification as read.
     const id = notification.id != null ? String(notification.id) : null;
-    if (id) {
-      if (seenIds.includes(id)) return;
-      seenIds = [...seenIds, id].slice(-MAX_REMEMBERED_IDS);
+
+    // De-duplicate repeated callbacks for one FCM delivery. Do not key this by
+    // backend notificationId: sending that notification again is a new delivery
+    // and must produce a new banner.
+    const deliveryId = notification.deliveryId != null ? String(notification.deliveryId) : null;
+    if (deliveryId) {
+      if (seenDeliveryIds.includes(deliveryId)) return;
+      seenDeliveryIds = [...seenDeliveryIds, deliveryId].slice(-MAX_REMEMBERED_DELIVERY_IDS);
     }
 
     keyCounter += 1;
@@ -39,6 +44,7 @@ export const useNotificationBannerStore = create((set) => ({
       current: {
         ...notification,
         id,
+        deliveryId,
         key: keyCounter,
         createdAt: notification.createdAt || Date.now(),
       },

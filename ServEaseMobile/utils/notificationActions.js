@@ -76,6 +76,9 @@ export function normalizeRemoteMessage(remoteMessage) {
   const notification = remoteMessage?.notification || {};
   return {
     id: data.notificationId ? String(data.notificationId) : null,
+    // FCM IDs identify deliveries, not database rows. The same notification may
+    // legitimately be sent again, and each delivery must be allowed to display.
+    deliveryId: remoteMessage?.messageId ? String(remoteMessage.messageId) : null,
     title: notification.title || data.title || 'ServEase',
     message: notification.body || data.body || '',
     type: data.type || 'general',
