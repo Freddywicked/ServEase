@@ -10,7 +10,7 @@
 //      FIREBASE_SERVICE_ACCOUNT_PATH locally).
 // Without those, push setup reports why it is unavailable and the app continues
 // working with its database-backed in-app notification list.
-import { AppState, Platform, PermissionsAndroid } from 'react-native';
+import { Alert, AppState, Platform, PermissionsAndroid } from 'react-native';
 import { registerDeviceToken, unregisterDeviceToken } from '../api/client';
 import { useNotificationBannerStore } from './notificationBannerStore';
 import { normalizeRemoteMessage, openNotification } from './notificationActions';
@@ -45,11 +45,24 @@ const askPermission = async () => {
     return true;
 };
 
+// A release phone without USB cannot show Metro's [push] logs. Surface one
+// token-safe setup result so registration failures are diagnosable on-device.
+let releaseDiagnosticShown = false;
+const showReleaseDiagnostic = (title, message) => {
+    if (__DEV__ || releaseDiagnosticShown) return;
+    releaseDiagnosticShown = true;
+    Alert.alert(title, message);
+};
+
 const getFcmToken = async () => {
     try {
         return await messaging().getToken();
     } catch (error) {
         console.warn('[push] could not get FCM token:', error.message);
+        showReleaseDiagnostic(
+            'Notification setup failed',
+            `Firebase could not create a device token.\n\n${error.message}`
+        );
         return null;
     }
 };
@@ -58,10 +71,18 @@ const registerFcmToken = async (token) => {
     try {
         await registerDeviceToken(token, Platform.OS);
         if (__DEV__) console.log('[push] device token registered');
+        showReleaseDiagnostic(
+            'Notifications ready',
+            'This device was registered successfully with the ServEase server.'
+        );
     } catch (error) {
         // A backend/network failure must not disable foreground FCM listeners.
         // setupPushNotifications retries when the app next becomes active.
         console.warn('[push] device registration failed:', error.message);
+        showReleaseDiagnostic(
+            'Notification registration failed',
+            `Firebase created a token, but the ServEase server could not register it.\n\n${error.message}`
+        );
     }
 };
 
@@ -72,6 +93,10 @@ const registerFcmToken = async (token) => {
 export const setupPushNotifications = async () => {
     if (!isAvailable()) {
         console.warn('[push] Firebase Messaging is unavailable in this build');
+        showReleaseDiagnostic(
+            'Notification setup failed',
+            'Firebase Messaging is unavailable in this installed build. Check the Google Services configuration.'
+        );
         return undefined;
     }
 
@@ -87,6 +112,12 @@ export const setupPushNotifications = async () => {
         const syncDeviceToken = async () => {
             const token = await getFcmToken();
             if (token) await registerFcmToken(token);
+            else {
+                showReleaseDiagnostic(
+                    'Notification setup failed',
+                    'Firebase returned an empty device token.'
+                );
+            }
         };
 
         // Install listeners before contacting the backend. A registration/network
@@ -117,6 +148,7 @@ export const setupPushNotifications = async () => {
         };
     } catch (error) {
         console.warn('[push] setup failed:', error.message);
+        showReleaseDiagnostic('Notification setup failed', error.message);
         return undefined;
     }
 };
