@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { AppState } from 'react-native';
 import { getToken, me, logout, setOnUnauthorized } from '../api/client';
 import { setupPushNotifications, teardownPushNotifications } from '../utils/pushNotifications';
 import { signOutGoogle } from '../utils/googleSignIn';
@@ -88,6 +89,26 @@ export const AuthProvider = ({ children }) => {
         setProvider(data.provider);
         return data;
     }, []);
+
+    // Returning within the seven-day window renews both the JWT and the
+    // role-specific session. An expired token follows the normal 401 cleanup.
+    useEffect(() => {
+        if (!user) return undefined;
+        let lastResumeCheck = 0;
+        const renewSession = () => refreshUser().catch(() => {});
+        const subscription = AppState.addEventListener('change', (state) => {
+            if (state !== 'active' || Date.now() - lastResumeCheck < 60000) return;
+            lastResumeCheck = Date.now();
+            renewSession();
+        });
+        const renewalTimer = setInterval(() => {
+            if (AppState.currentState === 'active') renewSession();
+        }, 12 * 60 * 60 * 1000);
+        return () => {
+            clearInterval(renewalTimer);
+            subscription.remove();
+        };
+    }, [user, refreshUser]);
 
     const signOut = useCallback(async () => {
         // Forget the Google session too, so the next Google sign-in shows the

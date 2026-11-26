@@ -183,7 +183,12 @@ export const login = async (identifier, password) => {
 };
 
 export const logout = () => AsyncStorage.removeItem(TOKEN_KEY);
-export const me = () => request('/auth/me');
+export const me = async () => {
+  const data = await request('/auth/me');
+  // The backend renews the seven-day token after a valid session check.
+  if (data?.token) await AsyncStorage.setItem(TOKEN_KEY, data.token);
+  return data;
+};
 
 // Google sign-in: the native SDK (utils/googleSignIn.js) returns Google's ID
 // token; the backend verifies it (POST /auth/google) and answers with the same

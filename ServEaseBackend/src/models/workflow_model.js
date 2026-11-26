@@ -250,7 +250,15 @@ const deleteDeviceToken = async (fcmToken) => {
 };
 
 const listDeviceTokens = async (userId) => {
-  const { data, error } = await supabase.from('device_tokens').select('fcm_token').eq('user_id', userId);
+  // A closed app cannot revoke its own token when the seven-day rolling
+  // session expires. Enforce the same inactivity window on the server so stale
+  // devices stop receiving account pushes even if they never reopen the app.
+  const activeSince = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from('device_tokens')
+    .select('fcm_token')
+    .eq('user_id', userId)
+    .gte('updated_at', activeSince);
   if (error) return []; // table missing (migration 004 not run) -> just skip pushes
   return (data || []).map((r) => r.fcm_token);
 };

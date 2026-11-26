@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
+import { AppState } from 'react-native';
 import { getToken, me, logout, setOnUnauthorized } from '../api/client';
 import { AuthProvider, useAuth } from '../context/auth_context';
 import { setupPushNotifications, teardownPushNotifications } from '../utils/pushNotifications';
@@ -29,6 +30,7 @@ const CaptureAuth = () => {
 
 describe('authentication push lifecycle', () => {
   let renderer;
+  let appStateHandler;
 
   const renderProvider = async () => {
     await ReactTestRenderer.act(async () => {
@@ -47,11 +49,17 @@ describe('authentication push lifecycle', () => {
     setupPushNotifications.mockResolvedValue(undefined);
     teardownPushNotifications.mockResolvedValue(undefined);
     signOutGoogle.mockResolvedValue(undefined);
+    appStateHandler = undefined;
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((event, handler) => {
+      appStateHandler = handler;
+      return { remove: jest.fn() };
+    });
   });
 
   afterEach(() => {
     if (renderer) ReactTestRenderer.act(() => renderer.unmount());
     renderer = null;
+    jest.restoreAllMocks();
   });
 
   test('a cold start without a login revokes any stale native push token', async () => {
@@ -98,5 +106,20 @@ describe('authentication push lifecycle', () => {
       logout.mock.invocationCallOrder[0]
     );
     expect(auth.isAuthenticated).toBe(false);
+  });
+
+  test('resuming a valid session renews it and refreshes role information', async () => {
+    getToken.mockResolvedValue('saved-jwt');
+    me.mockResolvedValue({ user: { user_id: 'user-1' }, provider: null });
+    await renderProvider();
+    me.mockClear();
+
+    await ReactTestRenderer.act(async () => {
+      appStateHandler('active');
+      await Promise.resolve();
+    });
+
+    expect(me).toHaveBeenCalledTimes(1);
+    expect(auth.isAuthenticated).toBe(true);
   });
 });

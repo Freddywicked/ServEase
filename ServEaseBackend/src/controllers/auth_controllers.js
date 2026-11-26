@@ -107,9 +107,12 @@ const login = asyncHandler(async (req, res) => {
 });
 
 // Who am I? Also tells the app whether this user has applied as a provider.
+// A successful mobile session check renews the seven-day JWT, making the
+// automatic-login window roll forward when the user returns within it.
 const me = asyncHandler(async (req, res) => {
   const provider = await User.findProvider(req.user.user_id);
   res.json({
+    token: signToken(req.user),
     user: await User.withPhotoUrl(req.user),
     provider: provider ? { verification_status: provider.verification_status } : null,
   });

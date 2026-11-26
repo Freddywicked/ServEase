@@ -162,7 +162,13 @@ export const setupPushNotifications = async () => {
             if (state === 'active') return syncDeviceToken();
             return undefined;
         });
+        // updated_at is also the server's seven-day push-activity timestamp.
+        // Keep it fresh during long authenticated foreground sessions.
+        const activityTimer = setInterval(() => {
+            if (AppState.currentState === 'active') syncDeviceToken();
+        }, 12 * 60 * 60 * 1000);
         const cleanup = () => {
+            clearInterval(activityTimer);
             appStateSubscription.remove();
             unsubscribeRefresh();
             unsubscribeMessages();

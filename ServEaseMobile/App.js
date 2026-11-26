@@ -3,7 +3,7 @@ import { NavigationContainer, createNavigationContainerRef } from '@react-naviga
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { AuthProvider } from './context/auth_context';
+import { AuthProvider, homeRouteFor, useAuth } from './context/auth_context';
 import CustomerNavBar from './components/CustomerNavBar';
 import ServiceProviderNavBar from './components/ServiceProviderNavBar';
 import NotificationBanner from './components/NotificationBanner';
@@ -60,6 +60,27 @@ const Stack = createNativeStackNavigator();
 // Lets the navbar (rendered outside the stack) navigate and know the focused screen.
 const navigationRef = createNavigationContainerRef();
 
+// Keep navigation and authentication consistent in both directions: valid
+// sessions never sit on LoginScreen, and expired sessions never remain on a
+// protected dashboard after /auth/me or another authenticated request returns 401.
+const LOGIN_ONLY_ROUTES = new Set(['SplashScreen', 'LoginScreen']);
+const PUBLIC_ROUTES = new Set([
+  'SplashScreen', 'SignupScreen', 'SendOTP', 'OTPVerification', 'LoginScreen',
+  'ForgotPassword', 'OTPForgotPassword', 'NewPassword',
+]);
+const SessionRouteGuard = ({ routeName }) => {
+  const { user, provider, restoring } = useAuth();
+  useEffect(() => {
+    if (restoring || !routeName || !navigationRef.isReady()) return;
+    if (user && LOGIN_ONLY_ROUTES.has(routeName)) {
+      navigationRef.reset({ index: 0, routes: [{ name: homeRouteFor(provider) }] });
+    } else if (!user && !PUBLIC_ROUTES.has(routeName)) {
+      navigationRef.reset({ index: 0, routes: [{ name: 'LoginScreen' }] });
+    }
+  }, [user, provider, restoring, routeName]);
+  return null;
+};
+
 // Deep links into the app. 'payment-return' is where the backend's PayMongo return
 // page (servease://payment-return?status=...&tab=...) sends the customer after
 // checkout — it opens the Track screen (query params arrive as route params, and
@@ -92,6 +113,7 @@ const App = () => {
     <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
     <AuthProvider>
     <NavigationContainer ref={navigationRef} linking={linking} onReady={syncRoute} onStateChange={syncRoute}>
+    <SessionRouteGuard routeName={routeName} />
     <View style={{ flex: 1 }}>
     <View style={{ flex: 1 }}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
