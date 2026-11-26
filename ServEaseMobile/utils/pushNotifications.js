@@ -11,7 +11,7 @@
 // Without those, push setup reports why it is unavailable and the app continues
 // working with its database-backed in-app notification list.
 import { Alert, AppState, Platform, PermissionsAndroid } from 'react-native';
-import { registerDeviceToken, unregisterDeviceToken } from '../api/client';
+import { getToken as getAuthToken, registerDeviceToken, unregisterDeviceToken } from '../api/client';
 import { useNotificationBannerStore } from './notificationBannerStore';
 import { normalizeRemoteMessage, openNotification } from './notificationActions';
 import { refreshProviderBadgeCounts } from './providerTabBadges';
@@ -43,6 +43,16 @@ const messagingUnavailableReason = () => {
 };
 
 const isAvailable = () => !messagingUnavailableReason();
+
+// Token registration and logout cleanup must be serialized. Otherwise a slow
+// registration can finish after logout and re-enable pushes for the old account.
+let pushSessionId = 0;
+let tokenOperationQueue = Promise.resolve();
+const enqueueTokenOperation = (operation) => {
+    const result = tokenOperationQueue.then(operation, operation);
+    tokenOperationQueue = result.catch(() => {});
+    return result;
+};
 
 // Android 13+ asks for POST_NOTIFICATIONS at runtime; older versions allow it
 // by default. iOS would use messaging().requestPermission() instead.
@@ -103,8 +113,12 @@ export const setupPushNotifications = async () => {
         return undefined;
     }
 
+    const sessionId = ++pushSessionId;
+    const isCurrentSession = () => sessionId === pushSessionId;
+
     try {
         const granted = await askPermission();
+        if (!isCurrentSession()) return undefined;
         if (!granted) {
             // Token registration and the custom foreground banner still work when
             // Android's system-tray permission is denied. Do not abort setup here:
@@ -112,8 +126,10 @@ export const setupPushNotifications = async () => {
             console.warn('[push] system notification permission is denied; foreground banners remain enabled');
         }
 
-        const syncDeviceToken = async () => {
+        const syncDeviceToken = () => enqueueTokenOperation(async () => {
+            if (!isCurrentSession()) return;
             const token = await getFcmToken();
+            if (!isCurrentSession()) return;
             if (token) await registerFcmToken(token);
             else {
                 showReleaseDiagnostic(
@@ -121,14 +137,19 @@ export const setupPushNotifications = async () => {
                     'Firebase returned an empty device token.'
                 );
             }
-        };
+        });
 
         // Install listeners before contacting the backend. A registration/network
         // failure must never prevent an incoming foreground message from displaying.
         const unsubscribeRefresh = messaging().onTokenRefresh((newToken) => {
-            registerFcmToken(newToken);
+            enqueueTokenOperation(async () => {
+                if (isCurrentSession()) await registerFcmToken(newToken);
+            });
         });
         const unsubscribeMessages = messaging().onMessage((remoteMessage) => {
+            // A callback already queued by the native side must not display a
+            // banner after logout has invalidated this push session.
+            if (!isCurrentSession()) return;
             const notification = normalizeRemoteMessage(remoteMessage);
             useNotificationBannerStore.getState().showNotification(notification);
             if (['new_request', 'quotation_accepted'].includes(notification.type)) {
@@ -141,14 +162,18 @@ export const setupPushNotifications = async () => {
             if (state === 'active') return syncDeviceToken();
             return undefined;
         });
-
-        await syncDeviceToken();
-
-        return () => {
+        const cleanup = () => {
             appStateSubscription.remove();
             unsubscribeRefresh();
             unsubscribeMessages();
         };
+
+        await syncDeviceToken();
+        if (!isCurrentSession()) {
+            cleanup();
+            return undefined;
+        }
+        return cleanup;
     } catch (error) {
         console.warn('[push] setup failed:', error.message);
         showReleaseDiagnostic('Notification setup failed', error.message);
@@ -177,16 +202,33 @@ export const registerNotificationOpenHandlers = (navigationRef) => {
     return unsubscribe;
 };
 
-// Call on logout, BEFORE the auth token is cleared (the unregister call needs it).
+// Call on logout, BEFORE the auth token is cleared when one is available.
+// Always revokes the native token; the authenticated backend unregister is a
+// best-effort additional step so other app instances do not retain the mapping.
 export const teardownPushNotifications = async () => {
-    if (!isAvailable()) return;
-    try {
-        const token = await getFcmToken();
-        if (token) {
-            await unregisterDeviceToken(token).catch(() => {});
-            await messaging().deleteToken().catch(() => {});
+    // Invalidate callbacks immediately, then wait behind any in-flight registration.
+    pushSessionId += 1;
+    useNotificationBannerStore.getState().dismissNotification();
+
+    return enqueueTokenOperation(async () => {
+        if (!isAvailable()) return;
+
+        let fcmToken = null;
+        try {
+            fcmToken = await messaging().getToken();
+        } catch (error) {
+            console.warn('[push] could not read token during teardown:', error.message);
         }
-    } catch (error) {
-        // Non-fatal: the token just dies on its own.
-    }
+
+        // Session-expiry/startup cleanup has no JWT. Do not issue an
+        // unauthenticated request that would trigger another 401 logout callback.
+        const authToken = await getAuthToken().catch(() => null);
+        if (fcmToken && authToken) {
+            await unregisterDeviceToken(fcmToken).catch(() => {});
+        }
+
+        // This is the essential system-tray defense: FCM must no longer consider
+        // the logged-out device's registration token valid.
+        await messaging().deleteToken().catch(() => {});
+    });
 };

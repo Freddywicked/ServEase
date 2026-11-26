@@ -25,7 +25,12 @@ export const AuthProvider = ({ children }) => {
         (async () => {
             try {
                 const token = await getToken();
-                if (!token) return;
+                if (!token) {
+                    // A previous installation/session may have left a native FCM
+                    // token alive even though there is no ServEase session.
+                    await teardownPushNotifications();
+                    return;
+                }
                 const data = await me();
                 if (active) {
                     setUser(data.user);
@@ -34,6 +39,8 @@ export const AuthProvider = ({ children }) => {
             } catch (err) {
                 // 401: client.js already removed the token, so the user is logged out.
                 // Network error: stay logged out for now; the token is kept for next launch.
+                // In either case this device must not receive account pushes while logged out.
+                await teardownPushNotifications();
             } finally {
                 if (active) setRestoring(false);
             }
@@ -48,6 +55,9 @@ export const AuthProvider = ({ children }) => {
         setOnUnauthorized(() => {
             setUser(null);
             setProvider(null);
+            // The JWT has already been removed by client.js. Teardown therefore
+            // skips the authenticated backend call but still revokes FCM locally.
+            teardownPushNotifications();
         });
         return () => setOnUnauthorized(null);
     }, []);
@@ -85,10 +95,14 @@ export const AuthProvider = ({ children }) => {
         // Best-effort: never blocks signing out of ServEase itself.
         await signOutGoogle();
         // Unregister first — the call needs the auth token that logout() clears.
-        await teardownPushNotifications();
-        await logout();
-        setUser(null);
-        setProvider(null);
+        // Always clear the local session, even if native/network cleanup fails.
+        try {
+            await teardownPushNotifications();
+        } finally {
+            await logout();
+            setUser(null);
+            setProvider(null);
+        }
     }, []);
 
     const value = useMemo(
