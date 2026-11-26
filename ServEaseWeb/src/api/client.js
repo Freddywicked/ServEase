@@ -218,7 +218,7 @@ export const setProviderAvailability = ({ date, slot, status }) =>
   request('/providers/availability', { method: 'PUT', body: { date, slot, status } });
 
 // --- Admin: user management ---
-export const getAdminUsers = ({ tab = 'all', page = 1, pageSize = 5 } = {}) =>
+export const getAdminUsers = ({ tab = 'all', page = 1, pageSize = 50 } = {}) =>
   request(`/admin/users?tab=${encodeURIComponent(tab)}&page=${page}&pageSize=${pageSize}`);
 export const approveProvider = (id) => request(`/admin/users/${id}/approve`, { method: 'PATCH' });
 export const rejectProvider = (id, reason) =>

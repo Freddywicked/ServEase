@@ -95,12 +95,12 @@ const statusOf = (user, provider) => {
   return 'Active';
 };
 
-// GET /api/admin/users?tab=all|customers|providers|pending&page=1&pageSize=5
+// GET /api/admin/users?tab=all|customers|providers|pending&page=1&pageSize=50
 const getUsers = async (req, res, next) => {
   try {
     const tab = TABS.includes(req.query.tab) ? req.query.tab : 'all';
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const pageSize = Math.min(50, Math.max(1, parseInt(req.query.pageSize, 10) || 5));
+    const pageSize = Math.min(50, Math.max(1, parseInt(req.query.pageSize, 10) || 50));
 
     const { data: users, error: usersError } = await supabase
       .from('users')

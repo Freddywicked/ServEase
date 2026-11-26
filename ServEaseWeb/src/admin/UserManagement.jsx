@@ -279,7 +279,7 @@ const styles = {
   },
 };
 
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 50;
 
 // Formats an ISO date string (or Date) from the backend as MM/DD/YY. Falls back to
 // an em dash when a user has no registration date yet (e.g. still loading).
