@@ -1,6 +1,19 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { View, Image, Text, TouchableOpacity, TextInput, FlatList, StyleSheet, ActivityIndicator, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+    View,
+    Image,
+    Text,
+    TouchableOpacity,
+    TextInput,
+    FlatList,
+    StyleSheet,
+    ActivityIndicator,
+    Alert,
+    Keyboard,
+    KeyboardAvoidingView,
+    Platform,
+} from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 // Same thread endpoints the customer's chat uses — the backend is role-aware and
@@ -28,6 +41,8 @@ const ConversationServiceProvider = ({ navigation, route }) => {
     // The thread's service request from the backend ({ requestNumber, status }); shown as the indicator.
     const [meta, setMeta] = useState(null);
     const listRef = useRef(null);
+    const insets = useSafeAreaInsets();
+    const [keyboardVisible, setKeyboardVisible] = useState(false);
     const requestNumber = meta?.requestNumber ?? conversationId;
     const requestStatus = meta?.status ?? route?.params?.requestStatus;
 
@@ -67,6 +82,23 @@ const ConversationServiceProvider = ({ navigation, route }) => {
         listRef.current?.scrollToEnd({ animated: true });
     }, [messages.length]);
 
+    // Track the keyboard so the input bar only adds the bottom safe-area padding
+    // (home indicator) while the keyboard is closed, and keep the latest message in view
+    // when the keyboard opens.
+    useEffect(() => {
+        const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+        const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+        const showSub = Keyboard.addListener(showEvent, () => {
+            setKeyboardVisible(true);
+            setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+        });
+        const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
+    }, []);
+
     const handleSend = async () => {
         const text = draft.trim();
         if (!text || sending || !conversationId) return;
@@ -105,6 +137,7 @@ const ConversationServiceProvider = ({ navigation, route }) => {
     };
 
     return (
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <View style={styles.topBar}>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
@@ -115,6 +148,8 @@ const ConversationServiceProvider = ({ navigation, route }) => {
 
             <FlatList
                 ref={listRef}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
                 data={messages}
                 keyExtractor={(item) => String(item.id)}
                 renderItem={renderMessageItem}
@@ -155,13 +190,14 @@ const ConversationServiceProvider = ({ navigation, route }) => {
                 }
             />
 
-            <View style={styles.inputBar}>
+            <View style={[styles.inputBar, { paddingBottom: keyboardVisible ? 12 : 12 + insets.bottom }]}>
                 <TextInput
                     style={styles.textInput}
                     placeholder={TEXT.messagePlaceholder}
                     placeholderTextColor={COLORS.placeholder}
                     value={draft}
                     onChangeText={setDraft}
+                    multiline
                 />
                 <TouchableOpacity onPress={handleSend} activeOpacity={0.8} disabled={sending}>
                     <LinearGradient
@@ -175,10 +211,15 @@ const ConversationServiceProvider = ({ navigation, route }) => {
                 </TouchableOpacity>
             </View>
         </SafeAreaView>
+        </KeyboardAvoidingView>
     );
 };
 
 const styles = StyleSheet.create({
+    flex: {
+        flex: 1,
+        backgroundColor: COLORS.white,
+    },
     loadErrorText: {
         fontSize: 12,
         color: COLORS.error,
@@ -311,7 +352,7 @@ const styles = StyleSheet.create({
     },
     inputBar: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-end',
         paddingHorizontal: 24,
         paddingVertical: 12,
         borderTopWidth: 1,
@@ -328,6 +369,7 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: COLORS.ink600,
         marginRight: 10,
+        maxHeight: 110,
     },
     sendButton: {
         paddingHorizontal: 22,

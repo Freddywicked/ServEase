@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Image, Text, TouchableOpacity, Keyboard, StyleSheet } from 'react-native';
+import { View, Image, Text, TouchableOpacity, Keyboard, Platform, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useChatUnreadCount, useChatUnreadPolling } from '../utils/chatUnread';
 import {
@@ -36,7 +36,6 @@ const ACTIVE_TAB_BY_ROUTE = {
     Earnings: 'ServiceProviderDashboard', // Earnings lives under Home
     JobUpdateStatus: 'Jobs', // opened from Jobs
     JobAdditionalParts: 'Jobs', // opened from Jobs
-    ConversationServiceProvider: 'MessageServiceProvider', // opened from Chat
 };
 
 // Tabs whose badge is a "new since you last looked" counter kept by the backend
@@ -91,8 +90,10 @@ const ServiceProviderNavBar = ({ navigationRef, routeName }) => {
     // doesn't ride up on top of the keyboard.
     const [keyboardVisible, setKeyboardVisible] = useState(false);
     useEffect(() => {
-        const showSub = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
-        const hideSub = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+        const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+        const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+        const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+        const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
         return () => {
             showSub.remove();
             hideSub.remove();

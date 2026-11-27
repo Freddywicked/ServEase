@@ -17,14 +17,13 @@ const TAB_ITEMS = [
 ];
 
 // Which screens show the navbar, and which tab each one highlights.
-// Any screen NOT listed here hides the bar.
+// Any screen NOT listed here hides the bar (e.g. ConversationCustomer, which has its own back button).
 const ACTIVE_TAB_BY_ROUTE = {
     CustomerDashboard: 'CustomerDashboard',
     FindServiceProvider: 'FindServiceProvider',
     ProviderDetails: 'FindServiceProvider', // opened from Find, so Find stays highlighted
     Track: 'Track',
     MessageCustomer: 'MessageCustomer',
-    ConversationCustomer: 'MessageCustomer', // a chat thread opened from Chat, so Chat stays highlighted
     CustomerProfile: 'CustomerProfile',
     History: 'CustomerDashboard', // History lives under Home
 
