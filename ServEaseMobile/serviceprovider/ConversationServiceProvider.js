@@ -10,7 +10,6 @@ import {
     ActivityIndicator,
     Alert,
     Keyboard,
-    KeyboardAvoidingView,
     Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -43,6 +42,9 @@ const ConversationServiceProvider = ({ navigation, route }) => {
     const listRef = useRef(null);
     const insets = useSafeAreaInsets();
     const [keyboardVisible, setKeyboardVisible] = useState(false);
+    // Space reserved at the bottom so the input bar sits right above the keyboard.
+    const rootRef = useRef(null);
+    const [keyboardOffset, setKeyboardOffset] = useState(0);
     const requestNumber = meta?.requestNumber ?? conversationId;
     const requestStatus = meta?.status ?? route?.params?.requestStatus;
 
@@ -82,18 +84,35 @@ const ConversationServiceProvider = ({ navigation, route }) => {
         listRef.current?.scrollToEnd({ animated: true });
     }, [messages.length]);
 
-    // Track the keyboard so the input bar only adds the bottom safe-area padding
-    // (home indicator) while the keyboard is closed, and keep the latest message in view
-    // when the keyboard opens.
+    // Lift the input bar above the keyboard. Instead of relying on the platform to resize the
+    // window (which fails on Android edge-to-edge and some devices), measure how much of this
+    // screen the keyboard actually covers and pad the bottom by exactly that amount. If the
+    // system already resized the window, the measured overlap is 0 and nothing is added.
     useEffect(() => {
+        let timers = [];
         const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
         const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-        const showSub = Keyboard.addListener(showEvent, () => {
+        const showSub = Keyboard.addListener(showEvent, (e) => {
             setKeyboardVisible(true);
-            setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+            const keyboardTop = e.endCoordinates.screenY;
+            const updateOffset = () => {
+                rootRef.current?.measureInWindow((x, y, width, height) => {
+                    setKeyboardOffset(Math.max(0, Math.round(y + height - keyboardTop)));
+                });
+            };
+            updateOffset();
+            // Android may finish resizing the window slightly later; re-measure to settle.
+            timers.push(setTimeout(updateOffset, 150));
+            timers.push(setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 200));
         });
-        const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+        const hideSub = Keyboard.addListener(hideEvent, () => {
+            timers.forEach(clearTimeout);
+            timers = [];
+            setKeyboardVisible(false);
+            setKeyboardOffset(0);
+        });
         return () => {
+            timers.forEach(clearTimeout);
             showSub.remove();
             hideSub.remove();
         };
@@ -137,7 +156,7 @@ const ConversationServiceProvider = ({ navigation, route }) => {
     };
 
     return (
-        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View ref={rootRef} collapsable={false} style={[styles.flex, { paddingBottom: keyboardOffset }]}>
         <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
             <View style={styles.topBar}>
                 <TouchableOpacity onPress={() => navigation.goBack()}>
@@ -211,7 +230,7 @@ const ConversationServiceProvider = ({ navigation, route }) => {
                 </TouchableOpacity>
             </View>
         </SafeAreaView>
-        </KeyboardAvoidingView>
+        </View>
     );
 };
 
