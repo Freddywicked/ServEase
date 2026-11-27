@@ -48,7 +48,7 @@ const MessageCustomer = ({ navigation }) => {
         setRefreshing(false);
     };
 
-    // Long-press a chat to delete it (asks first, then removes it in the backend and the list).
+    // Long-press a chat to delete it for this customer only. The provider keeps their history.
     const [deleteTarget, setDeleteTarget] = useState(null);
     const [deleting, setDeleting] = useState(false);
 
@@ -79,7 +79,7 @@ const MessageCustomer = ({ navigation }) => {
         >
             <View style={styles.deleteOverlay}>
                 <View style={styles.deleteCard}>
-                    <Text style={styles.deletePrompt}>Do you want to delete this message?</Text>
+                    <Text style={styles.deletePrompt}>Delete this chat for you? The service provider will still keep their copy.</Text>
                     <View style={styles.deleteButtonRow}>
                         <TouchableOpacity
                             style={[styles.deleteButton, styles.deleteNoButton]}

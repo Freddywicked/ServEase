@@ -13,7 +13,7 @@
 //             PATCH /provider/jobs/:id/status, POST /provider/jobs/:id/additional-parts,
 //             GET /provider/earnings
 //   both:     GET /notifications, GET /service-providers (browse),
-//             GET/POST /conversations(/:id/messages)
+//             GET/POST /conversations(/:id/messages), DELETE /conversations/:id
 //
 // Every state change also writes a NOTIFICATION row for the other party — that
 // is how the two users "communicate" until FCM/Realtime is added.
@@ -1774,18 +1774,31 @@ const chatStatusFor = (row, payments) => {
 // GET /api/conversations
 const listConversations = asyncHandler(async (req, res) => {
   const entries = await conversationsFor(req.user.user_id);
-  const messages = await Workflow.listMessagesForRequests(entries.map(({ row }) => row.request_id));
-  const payments = await Workflow.listPayments(entries.map(({ row }) => row.request_id));
+  const requestIds = entries.map(({ row }) => row.request_id);
+  const [messages, payments, deletions] = await Promise.all([
+    Workflow.listMessagesForRequests(requestIds),
+    Workflow.listPayments(requestIds),
+    Workflow.listConversationDeletions(req.user.user_id, requestIds),
+  ]);
+  const deletedAtByRequest = Object.fromEntries(deletions.map((row) => [row.request_id, row.deleted_at]));
   const latestByRequest = {};
   messages.forEach((m) => {
-    latestByRequest[m.request_id] = m; // ordered by created_at — last one wins
+    const deletedAt = deletedAtByRequest[m.request_id];
+    // A deletion applies only to history that existed at that moment. A later
+    // message starts a fresh visible history without restoring the old messages.
+    if (!deletedAt || new Date(m.created_at) > new Date(deletedAt)) {
+      latestByRequest[m.request_id] = m; // ordered by created_at - last one wins
+    }
   });
 
   const conversations = [];
   for (const { row, viewer } of entries) {
-    const other = await otherPartyOf(row, viewer);
-    if (!other) continue; // request not sent to any provider yet — no one to chat with
     const latest = latestByRequest[row.request_id];
+    // Also hide a deleted thread that had no messages. Undeleted empty threads
+    // retain their existing behavior and can still be opened to start a chat.
+    if (deletedAtByRequest[row.request_id] && !latest) continue;
+    const other = await otherPartyOf(row, viewer);
+    if (!other) continue; // request not sent to any provider yet - no one to chat with
     const unread = viewer === 'provider' ? latest && !latest.seen_by_provider : latest && !latest.seen_by_customer;
     conversations.push({
       id: refOf(row),
@@ -1818,7 +1831,13 @@ const getConversation = async (req) => {
 // GET /api/conversations/:id/messages  (also marks the thread read for the viewer)
 const listMessages = asyncHandler(async (req, res) => {
   const { row, viewer } = await getConversation(req);
-  const messages = await Workflow.listMessages(row.request_id);
+  const [messages, deletion] = await Promise.all([
+    Workflow.listMessages(row.request_id),
+    Workflow.findConversationDeletion(row.request_id, req.user.user_id),
+  ]);
+  const visibleMessages = deletion
+    ? messages.filter((m) => new Date(m.created_at) > new Date(deletion.deleted_at))
+    : messages;
   await Workflow.markMessagesSeen(row.request_id, viewer);
 
   const recipients = await Request.listRecipients(row.request_id);
@@ -1827,8 +1846,16 @@ const listMessages = asyncHandler(async (req, res) => {
   res.json({
     // The thread's service request, so the chat header can show the indicator wherever it was opened from.
     conversation: { id: refOf(row), requestNumber: refOf(row), status: chatStatusFor(row, payments), jobTitle: row.category },
-    messages: messages.map((m) => toMessageDto(m, providerIdSet)),
+    messages: visibleMessages.map((m) => toMessageDto(m, providerIdSet)),
   });
+});
+
+// DELETE /api/conversations/:id - delete this history for the signed-in user only.
+// Never delete shared message rows: the other participant must retain their chat.
+const deleteConversation = asyncHandler(async (req, res) => {
+  const { row } = await getConversation(req);
+  await Workflow.deleteConversationForUser(row.request_id, req.user.user_id);
+  res.json({ ok: true });
 });
 
 // POST /api/conversations/:id/messages  { text }
@@ -2180,6 +2207,7 @@ module.exports = {
   listConversations,
   listMessages,
   sendMessage,
+  deleteConversation,
   getAvailability,
   setAvailability,
   browseProviders,

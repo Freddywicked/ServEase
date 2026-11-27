@@ -51,6 +51,7 @@ router.post('/notifications/:id/read', authenticate, workflow.markNotificationRe
 router.get('/conversations', authenticate, workflow.listConversations);
 router.get('/conversations/:id/messages', authenticate, workflow.listMessages);
 router.post('/conversations/:id/messages', authenticate, workflow.sendMessage);
+router.delete('/conversations/:id', authenticate, workflow.deleteConversation);
 
 // PayMongo: webhook (called by PayMongo, signature-verified, no JWT) and the
 // browser landing page after checkout. See utils/paymongo.js.

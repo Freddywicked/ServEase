@@ -196,6 +196,41 @@ const markMessagesSeen = async (requestId, viewer) => {
   if (error) console.error('[messages] mark seen failed:', error.message);
 };
 
+// Deletion is per participant, not a delete on the shared messages table. The
+// timestamp lets later messages reopen the thread without exposing old history.
+const listConversationDeletions = async (userId, requestIds) => {
+  if (!requestIds.length) return [];
+  return unwrap(
+    await supabase
+      .from('conversation_deletions')
+      .select('request_id, deleted_at')
+      .eq('user_id', userId)
+      .in('request_id', requestIds)
+  );
+};
+
+const findConversationDeletion = async (requestId, userId) =>
+  unwrap(
+    await supabase
+      .from('conversation_deletions')
+      .select('request_id, deleted_at')
+      .eq('request_id', requestId)
+      .eq('user_id', userId)
+      .maybeSingle()
+  );
+
+const deleteConversationForUser = async (requestId, userId) =>
+  unwrap(
+    await supabase
+      .from('conversation_deletions')
+      .upsert(
+        { request_id: requestId, user_id: userId, deleted_at: new Date().toISOString() },
+        { onConflict: 'request_id,user_id' }
+      )
+      .select('request_id, user_id, deleted_at')
+      .single()
+  );
+
 // ---------- provider_unavailable_slots ----------
 const listUnavailableSlots = async (providerId) =>
   unwrap(await supabase.from('provider_unavailable_slots').select('date, slot').eq('provider_id', providerId));
@@ -294,6 +329,9 @@ module.exports = {
   listMessages,
   listMessagesForRequests,
   markMessagesSeen,
+  listConversationDeletions,
+  findConversationDeletion,
+  deleteConversationForUser,
   listUnavailableSlots,
   listUnavailableSlotsFor,
   setUnavailableSlot,

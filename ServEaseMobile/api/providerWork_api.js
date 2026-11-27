@@ -93,10 +93,10 @@ export const getConversationMessages = (conversationId) =>
 export const sendConversationMessage = (conversationId, text) =>
     request(`/conversations/${conversationId}/messages`, { method: 'POST', body: { text } });
 
-// DELETE /conversations/:id  -> 200/204 on success
-// Deletes the whole chat (the thread and its messages) from the backend/database. Used by the
-// long-press "Do you want to delete this message?" modal on both Messages lists.
-// The backend must check that the signed-in user is the customer or provider on this thread.
+// DELETE /conversations/:id  -> 200 on success
+// Hides the current history for the signed-in user only. The other participant keeps
+// their complete chat. A later message reopens the thread without restoring deleted history.
+// The backend checks that the signed-in user is a participant before recording deletion.
 export const deleteConversation = (conversationId) =>
     request(`/conversations/${encodeURIComponent(conversationId)}`, { method: 'DELETE' });
 
