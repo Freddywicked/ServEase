@@ -79,7 +79,7 @@ const MessageCustomer = ({ navigation }) => {
         >
             <View style={styles.deleteOverlay}>
                 <View style={styles.deleteCard}>
-                    <Text style={styles.deletePrompt}>Delete this chat for you? The service provider will still keep their copy.</Text>
+                    <Text style={styles.deletePrompt}>Are you sure you want to delete this message?.</Text>
                     <View style={styles.deleteButtonRow}>
                         <TouchableOpacity
                             style={[styles.deleteButton, styles.deleteNoButton]}
