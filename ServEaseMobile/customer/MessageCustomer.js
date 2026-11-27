@@ -79,7 +79,7 @@ const MessageCustomer = ({ navigation }) => {
         >
             <View style={styles.deleteOverlay}>
                 <View style={styles.deleteCard}>
-                    <Text style={styles.deletePrompt}>Are you sure you want to delete this message?.</Text>
+                    <Text style={styles.deletePrompt}>Are you sure you want to delete this message?</Text>
                     <View style={styles.deleteButtonRow}>
                         <TouchableOpacity
                             style={[styles.deleteButton, styles.deleteNoButton]}
@@ -202,7 +202,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     deletePrompt: {
-        width: 203,
+        width: 205,
         fontSize: 20,
         lineHeight: 23,
         color: '#414141',

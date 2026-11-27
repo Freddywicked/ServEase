@@ -192,7 +192,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     deletePrompt: {
-        width: 203,
+        width: 205,
         fontSize: 20,
         lineHeight: 23,
         color: '#414141',
