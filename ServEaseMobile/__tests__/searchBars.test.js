@@ -1,10 +1,15 @@
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
-import { Text, TextInput, TouchableOpacity } from 'react-native';
+import { Text, TextInput, TouchableOpacity, Modal } from 'react-native';
 import Track from '../customer/Track';
 import IncomingServiceRequest from '../serviceprovider/IncomingServiceRequest';
 import Jobs from '../serviceprovider/Jobs';
-import { getIncomingRequests, getTrackedRequests } from '../api/servicerequest_api';
+import {
+  approveAdditionalPayment,
+  deferAdditionalPayment,
+  getIncomingRequests,
+  getTrackedRequests,
+} from '../api/servicerequest_api';
 import { getProviderJobs, getProviderJobQuotations } from '../api/providerWork_api';
 
 jest.mock('@react-navigation/native', () => ({
@@ -28,6 +33,7 @@ jest.mock('../api/servicerequest_api', () => ({
   getTrackedRequests: jest.fn(),
   getIncomingRequests: jest.fn(),
   approveAdditionalPayment: jest.fn(),
+  deferAdditionalPayment: jest.fn(),
   rejectAdditionalPayment: jest.fn(),
   negotiateAdditionalPayment: jest.fn(),
 }));
@@ -79,6 +85,39 @@ const screenText = () => {
     return collectText(node.children);
   };
   return collectText(renderer.toJSON());
+};
+
+const buttonWithText = (label) =>
+  renderer.root
+    .findAllByType(TouchableOpacity)
+    .find((node) => node.findAllByType(Text).some((text) => text.props.children === label));
+
+const pendingAdditionalPaymentGroups = () => ({
+  sent: [],
+  approved: [
+    {
+      id: 'payment-card-1',
+      requestId: 'SR-5001',
+      requestNumber: 'SR-5001',
+      providerName: 'Additional Parts Provider',
+      cardType: 'payment',
+      paymentStatus: 'pending',
+      paymentRequestId: 'payment-request-1',
+      paymentAmount: 250,
+      paymentReason: 'Replacement compressor',
+      canNegotiate: true,
+      serviceLocationType: 'shop',
+      statusLabel: 'In progress',
+    },
+  ],
+  ongoing: [],
+  declined: [],
+  done: [],
+});
+
+const renderAdditionalPaymentTrack = async () => {
+  getTrackedRequests.mockImplementation(async () => pendingAdditionalPaymentGroups());
+  await renderScreen(<Track navigation={navigation} route={{ params: { tab: 'active', section: 'quotations' } }} />);
 };
 
 const typeSearch = (placeholder, value) => {
@@ -293,4 +332,55 @@ test('Jobs also filters quotation cards by the customer message', async () => {
   typeSearch('Search job details', '');
   expect(screenText()).toContain('SR-4001');
   expect(screenText()).toContain('SR-4002');
+});
+
+test('additional-payment Accept waits for confirmation, X changes nothing, and Pay Now approves once', async () => {
+  approveAdditionalPayment.mockResolvedValue({ ok: true, status: 'approved' });
+  await renderAdditionalPaymentTrack();
+
+  act(() => buttonWithText('Approve').props.onPress());
+  expect(screenText()).toContain('Confirm Additional Payment');
+  expect(approveAdditionalPayment).not.toHaveBeenCalled();
+  expect(deferAdditionalPayment).not.toHaveBeenCalled();
+  expect(navigation.navigate).not.toHaveBeenCalled();
+
+  const confirmationModal = renderer.root.findAllByType(Modal).find((modal) => modal.props.visible);
+  expect(confirmationModal).toBeDefined();
+  act(() => confirmationModal.props.onRequestClose());
+  expect(confirmationModal.props.visible).toBe(false);
+  expect(approveAdditionalPayment).not.toHaveBeenCalled();
+  expect(deferAdditionalPayment).not.toHaveBeenCalled();
+
+  // The unchanged pending card can open the same confirmation again.
+  act(() => buttonWithText('Approve').props.onPress());
+  expect(screenText()).toContain('Confirm Additional Payment');
+  await act(async () => {
+    await buttonWithText('Proceed to Payment').props.onPress();
+  });
+
+  expect(approveAdditionalPayment).toHaveBeenCalledTimes(1);
+  expect(approveAdditionalPayment).toHaveBeenCalledWith('SR-5001', 'payment-request-1');
+  expect(deferAdditionalPayment).not.toHaveBeenCalled();
+  expect(navigation.navigate).toHaveBeenCalledWith('Payment', expect.objectContaining({
+    requestId: 'SR-5001',
+    paymentRequestId: 'payment-request-1',
+    paymentStage: 'additional',
+    amount: 250,
+  }));
+});
+
+test('additional-payment Pay Later confirms and defers without a separate premature approval', async () => {
+  deferAdditionalPayment.mockResolvedValue({ ok: true, status: 'deferred' });
+  await renderAdditionalPaymentTrack();
+
+  act(() => buttonWithText('Approve').props.onPress());
+  expect(approveAdditionalPayment).not.toHaveBeenCalled();
+  await act(async () => {
+    await buttonWithText('Pay Later').props.onPress();
+  });
+
+  expect(deferAdditionalPayment).toHaveBeenCalledTimes(1);
+  expect(deferAdditionalPayment).toHaveBeenCalledWith('SR-5001', 'payment-request-1');
+  expect(approveAdditionalPayment).not.toHaveBeenCalled();
+  expect(navigation.navigate).not.toHaveBeenCalledWith('Payment', expect.anything());
 });

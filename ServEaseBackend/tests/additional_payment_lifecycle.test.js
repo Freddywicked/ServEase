@@ -185,4 +185,31 @@ test('job completion does not hide an unsettled additional request on mobile Tra
   assert.deepEqual(cardIds(res.body), ['pr-1', 'pr-2', 'pr-4']);
 });
 
+test('Pay Later confirms a pending request and defers it without a separate approval step', async () => {
+  const target = paymentRequests.find((p) => p.payment_request_id === 'pr-4');
+  target.negotiation_status = 'requested';
+  assert.equal(target.status, 'pending');
+
+  const res = await invoke(deferPaymentRequest, {
+    user: { user_id: 'customer-1' },
+    params: { requestId: 'SR-0001', paymentRequestId: 'pr-4' },
+  });
+  assert.equal(res.body.status, 'deferred');
+  assert.equal(target.status, 'approved');
+  assert.equal(target.negotiation_status, null);
+  assert.ok(target.responded_at);
+  assert.ok(target.deferred_at);
+
+  const provider = await invoke(listJobQuotations, {
+    user: { user_id: 'provider-1' },
+    query: { includePaymentRequests: 'true' },
+  });
+  assert.equal(provider.body.quotations.some((q) => q.paymentRequestId === 'pr-4'), false);
+
+  const due = await invoke(getPaymentDue, {
+    user: { user_id: 'customer-1' },
+    params: { requestId: 'SR-0001' },
+  });
+  assert.equal(due.body.total, 2050); // the newly confirmed 400 is now part of the final balance
+});
 

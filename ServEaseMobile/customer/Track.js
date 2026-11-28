@@ -42,11 +42,11 @@ import { useTrackBadges, TAB_SOURCES, ACTION_CARD_TYPES } from '../utils/trackBa
  *            this screen reloads so what you see is always the server's current state.
  *
  *   Additional payment (provider asks for more money mid-job):
- *     Approve -> POST .../approve; the card stays in Active > Quotations while the customer chooses:
- *                  "Proceed to Payment" -> Payment screen; it disappears only after payment is paid.
- *                  "Pay Later"         -> POST .../pay-later, then it disappears and the approved
- *                                          amount remains in the final payment. Closing the modal
- *                                          only closes it; it does not choose Pay Later.
+ *     Approve -> open a local confirmation modal; nothing is sent to the backend yet.
+ *                  "Proceed to Payment" -> POST .../approve, then open Payment; the card disappears
+ *                                          only after the linked payment is paid.
+ *                  "Pay Later"         -> POST .../pay-later, which confirms and defers in one update.
+ *                  X / Android back    -> close only; the request stays pending and Approve can reopen it.
  *     Decline -> two-step modal (one Modal, two steps, so there is no flicker between them):
  *                  1. "Warning!" step: "By declining the request, the additional parts and payment will not be
  *                     added to your repair." Confirm continues; the X (or Android back) cancels everything.
@@ -286,9 +286,10 @@ const Track = ({ navigation, route }) => {
     const [errorMessage, setErrorMessage] = useState('');
     const trackingRequestRef = useRef(false);
     const [busyCardId, setBusyCardId] = useState(null);
-    // Additional-payment modals. `approvedPayment` is a snapshot taken when the customer approves
-    // (so the modal survives the reload that follows); `rejectTarget` is the card being rejected.
+    // `approvedPayment` is only a local snapshot for the confirmation modal. Accept does not
+    // approve anything on the backend; that happens after the customer chooses a payment option.
     const [approvedPayment, setApprovedPayment] = useState(null);
+    const [paymentChoiceInFlight, setPaymentChoiceInFlight] = useState(null);
     const [rejectTarget, setRejectTarget] = useState(null);
     const [rejectReason, setRejectReason] = useState('');
     // Which step of the decline flow is showing: 'warning' first, then 'reason' after Confirm.
@@ -435,16 +436,13 @@ const Track = ({ navigation, route }) => {
         requestNumber: request.requestNumber,
         providerName: request.providerName,
         paymentRequestId: request.paymentRequestId,
+        paymentStatus: request.paymentStatus,
         amount: request.paymentAmount,
     });
 
-    const handleApprovePayment = (request) =>
-        runAction(
-            request.id,
-            () => approveAdditionalPayment(request.requestId, request.paymentRequestId),
-            'Could not approve the payment',
-            () => setApprovedPayment(asApprovedPayment(request)),
-        );
+    // Accept only asks for confirmation. Closing this modal leaves the request pending and allows
+    // the customer to open it again without creating any backend or provider-side state change.
+    const handleApprovePayment = (request) => setApprovedPayment(asApprovedPayment(request));
 
     // Decline starts the two-step flow: the warning modal first, then (after Confirm) the
     // "Reason for Rejection" modal. Nothing is sent until the customer taps Send on the second one.
@@ -486,35 +484,51 @@ const Track = ({ navigation, route }) => {
         );
     };
 
-    // Closing the approval modal is not a payment choice. The approved card remains available so
-    // the customer can explicitly choose now or later, even after leaving and reopening Track.
+    // Closing the confirmation is not a payment choice. A pending request stays pending; an
+    // already-approved card remains available if the customer returned from checkout without paying.
     const handleCloseApprovedPayment = () => {
         if (!busyCardId) setApprovedPayment(null);
     };
 
     const handlePayAdditionalLater = (payment) => {
         const target = payment || approvedPayment;
-        if (!target) return;
-        runAction(
+        if (!target || busyCardId) return;
+        setPaymentChoiceInFlight('later');
+        // This endpoint confirms a pending request and defers it in one update. It also supports
+        // an already-approved card when the customer previously chose Pay Now but did not pay.
+        return runAction(
             target.id,
             () => deferAdditionalPayment(target.requestId, target.paymentRequestId),
-            'Could not defer the payment',
+            'Could not confirm Pay Later',
             () => setApprovedPayment(null),
-        );
+        ).finally(() => setPaymentChoiceInFlight(null));
     };
 
     const handlePayAdditionalNow = (payment) => {
         const target = payment || approvedPayment;
         if (!target || busyCardId) return;
-        setApprovedPayment(null);
-        navigation.navigate(ROUTES.PAYMENT, {
-            requestId: target.requestId,
-            requestNumber: target.requestNumber,
-            providerName: target.providerName,
-            paymentStage: 'additional',
-            paymentRequestId: target.paymentRequestId,
-            amount: target.amount,
-        });
+        setPaymentChoiceInFlight('now');
+        return runAction(
+            target.id,
+            async () => {
+                // An approved card must not be approved a second time when returning from checkout.
+                if (target.paymentStatus !== 'approved') {
+                    await approveAdditionalPayment(target.requestId, target.paymentRequestId);
+                }
+            },
+            'Could not confirm the payment',
+            () => {
+                setApprovedPayment(null);
+                navigation.navigate(ROUTES.PAYMENT, {
+                    requestId: target.requestId,
+                    requestNumber: target.requestNumber,
+                    providerName: target.providerName,
+                    paymentStage: 'additional',
+                    paymentRequestId: target.paymentRequestId,
+                    amount: target.amount,
+                });
+            },
+        ).finally(() => setPaymentChoiceInFlight(null));
     };
 
     // Negotiate opens the "Request a Price Negotiation" modal.
@@ -1054,25 +1068,26 @@ const Track = ({ navigation, route }) => {
                 {renderBody()}
             </ScrollView>
 
-            {/* Additional payment approved: pay now (payment gateway) or pay later (added to the final payment). */}
+            {/* Accept opens this confirmation first; no approval is sent until an option is chosen. */}
             <Modal visible={!!approvedPayment} transparent animationType="fade" onRequestClose={handleCloseApprovedPayment}>
                 <View style={styles.modalOverlay}>
                     <View style={[styles.modalCard, styles.modalCardApproved]}>
                         <TouchableOpacity style={styles.modalCloseButton} onPress={handleCloseApprovedPayment}>
                             <Image source={require('../assets/icon_close.png')} style={styles.modalCloseIcon} />
                         </TouchableOpacity>
-                        <Text style={styles.modalTitleApproved}>Additional Payment Approved</Text>
+                        <Text style={styles.modalTitleApproved}>Confirm Additional Payment</Text>
                         <GradientButton
                             label="Proceed to Payment"
                             onPress={() => handlePayAdditionalNow(approvedPayment)}
                             disabled={busyCardId !== null}
+                            loading={paymentChoiceInFlight === 'now'}
                             style={styles.gradientButtonSpaced}
                         />
                         <GradientButton
                             label="Pay Later"
                             onPress={() => handlePayAdditionalLater(approvedPayment)}
                             disabled={busyCardId !== null}
-                            loading={busyCardId !== null}
+                            loading={paymentChoiceInFlight === 'later'}
                         />
                     </View>
                 </View>

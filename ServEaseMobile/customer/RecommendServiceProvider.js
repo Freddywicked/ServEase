@@ -28,6 +28,13 @@ import { getRecommendedProviders, createServiceRequest } from '../api/servicereq
  *            returns only matched providers; once every match has been seen it starts
  *            again from the best match instead of falling back to other categories.
  *
+ *   Radius   The "Search radius" slider sits below "Find another Service Provider" and is always
+ *            visible (not only when nothing matched). It starts at the radius the customer set on
+ *            the map in CreateServiceRequest (draft.searchRadiusKm). Changing it is debounced,
+ *            saved to draft.searchRadiusKm, and then MERGES: providers already displayed stay
+ *            (unless they are now beyond a smaller radius) and providers newly inside the radius
+ *            are added to the list. It never replaces the list.
+ *
  *   Empty    When no provider can take the preferred schedule, the "Please choose another
  *   state    date and time." link opens the same Preferred Appointment calendar modal used in
  *            CreateServiceRequest.js. Confirming it updates draft.preferredDate /
@@ -134,7 +141,7 @@ const RecommendServiceProvider = ({ navigation }) => {
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Search radius for this request: what the customer set on the map in CreateServiceRequest
-    // (draft.searchRadiusKm), else the default. The slider below can widen it.
+    // (draft.searchRadiusKm), else the default. The slider below the list can widen or narrow it.
     const [searchRadiusKm, setSearchRadiusKm] = useState(
         useServiceRequestDraftStore.getState().searchRadiusKm ?? DEFAULT_CUSTOMER_RADIUS_KM,
     );
@@ -152,13 +159,30 @@ const RecommendServiceProvider = ({ navigation }) => {
     const spinValue = useRef(new Animated.Value(0)).current;
     const seenProviderIdsRef = useRef(new Set());
     const isMountedRef = useRef(true);
+    const radiusDebounceRef = useRef(null);
+    const providersRef = useRef([]);
+    const isLoadingRef = useRef(true);
+    const widenIdRef = useRef(0);
+    const [isWidening, setIsWidening] = useState(false);
+    const [radiusMessage, setRadiusMessage] = useState('');
+    // Bumped on every search so a slow, older response can't overwrite a newer one.
+    const latestLoadIdRef = useRef(0);
 
     useEffect(() => {
         isMountedRef.current = true;
         return () => {
             isMountedRef.current = false;
+            if (radiusDebounceRef.current) clearTimeout(radiusDebounceRef.current);
         };
     }, []);
+
+    useEffect(() => {
+        providersRef.current = providers;
+    }, [providers]);
+
+    useEffect(() => {
+        isLoadingRef.current = isLoading;
+    }, [isLoading]);
 
     useEffect(() => {
         if (!isLoading) {
@@ -211,6 +235,9 @@ const RecommendServiceProvider = ({ navigation }) => {
         setIsLoading(true);
         setLoadError('');
         setNotice('');
+        setRadiusMessage('');
+        setIsWidening(false);
+        const loadId = ++latestLoadIdRef.current;
         try {
             if (!findAnother) seenProviderIdsRef.current.clear();
             let matches = await fetchMatchedProviders(findAnother ? Array.from(seenProviderIdsRef.current) : []);
@@ -223,17 +250,24 @@ const RecommendServiceProvider = ({ navigation }) => {
                 matches = await fetchMatchedProviders([]);
                 restarted = matches.length > 0;
             }
-            if (!isMountedRef.current) return;
+            if (!isMountedRef.current || loadId !== latestLoadIdRef.current) return;
 
             setProviders(matches);
-            setSelectedProviderId(matches.length > 0 ? matches[0].id : null);
+            // Keep the customer's pick if it survived the new search (e.g. after widening the radius).
+            setSelectedProviderId((current) =>
+                matches.some((provider) => provider.id === current)
+                    ? current
+                    : matches.length > 0
+                        ? matches[0].id
+                        : null,
+            );
             if (restarted) {
                 setNotice("You've seen every matching service provider — showing the best matches again.");
             }
         } catch (error) {
-            if (isMountedRef.current) setLoadError(error.message);
+            if (isMountedRef.current && loadId === latestLoadIdRef.current) setLoadError(error.message);
         } finally {
-            if (isMountedRef.current) setIsLoading(false);
+            if (isMountedRef.current && loadId === latestLoadIdRef.current) setIsLoading(false);
         }
     }, [fetchMatchedProviders]);
 
@@ -261,11 +295,64 @@ const RecommendServiceProvider = ({ navigation }) => {
         loadProviders({ findAnother: true });
     };
 
-    // "Widen search area": remember the new radius on this request and search again.
+    // Applies the slider's radius WITHOUT replacing the list:
+    //   1. providers already displayed stay, except any now farther than a smaller radius;
+    //   2. the backend is asked for providers inside the new radius, excluding the ones kept;
+    //   3. whatever comes back is appended, so widening 3 km -> 50 km turns 2 providers into
+    //      2 + every provider found between 3 and 50 km.
+    const applyRadius = useCallback(async (km) => {
+        // A full search is still running (it may have started with the old radius): just redo it.
+        if (isLoadingRef.current) {
+            loadProviders();
+            return;
+        }
+        const loadId = latestLoadIdRef.current; // a newer full search invalidates this merge
+        const widenId = ++widenIdRef.current; // a newer slider change invalidates this merge
+        const previousProviders = providersRef.current;
+        const isCurrent = () =>
+            isMountedRef.current && loadId === latestLoadIdRef.current && widenId === widenIdRef.current;
+        const kept = previousProviders.filter((provider) => {
+            const distance = Number(provider.distanceKm);
+            return provider.distanceKm === null || provider.distanceKm === undefined || Number.isNaN(distance) || distance <= km;
+        });
+        setIsWidening(true);
+        setRadiusMessage('');
+        try {
+            // fetchMatchedProviders reads the radius from the draft, which handleRadiusChange already saved.
+            const incoming = await fetchMatchedProviders(kept.map((provider) => provider.id));
+            if (!isCurrent()) return;
+
+            const keptIds = new Set(kept.map((provider) => provider.id));
+            const added = incoming.filter((provider) => !keptIds.has(provider.id));
+            const merged = [...kept, ...added];
+
+            setProviders(merged);
+            setSelectedProviderId((current) =>
+                merged.some((provider) => provider.id === current) ? current : merged.length > 0 ? merged[0].id : null,
+            );
+            if (merged.length === 0) {
+                setRadiusMessage(`No service providers within ${km} km. Increase the radius to see more.`);
+            } else if (added.length > 0) {
+                setRadiusMessage(`Added ${added.length} service provider${added.length === 1 ? '' : 's'} within ${km} km.`);
+            } else if (merged.length < previousProviders.length) {
+                setRadiusMessage(`Showing service providers within ${km} km.`);
+            } else {
+                setRadiusMessage(`No additional service providers within ${km} km.`);
+            }
+        } catch (error) {
+            if (isCurrent()) setRadiusMessage('Could not search the wider area. Please try again.');
+        } finally {
+            if (isCurrent()) setIsWidening(false);
+        }
+    }, [fetchMatchedProviders, loadProviders]);
+
+    // Radius slider: remember the new radius on this request, then merge after the customer
+    // pauses (debounced so dragging doesn't fire a backend request for every step).
     const handleRadiusChange = (km) => {
         setSearchRadiusKm(km);
         setDraft({ searchRadiusKm: km });
-        loadProviders();
+        if (radiusDebounceRef.current) clearTimeout(radiusDebounceRef.current);
+        radiusDebounceRef.current = setTimeout(() => applyRadius(km), 500);
     };
 
     // --- Preferred appointment picker -------------------------------------------------------
@@ -492,10 +579,6 @@ const RecommendServiceProvider = ({ navigation }) => {
                         <TouchableOpacity onPress={handleOpenAppointmentPicker} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                             <Text style={styles.emptyLinkText}>Please choose another date and time.</Text>
                         </TouchableOpacity>
-                        <View style={styles.widenWrap}>
-                            <Text style={styles.widenHint}>Or look farther out:</Text>
-                            <RadiusSlider label="Widen search area" value={searchRadiusKm} onChange={handleRadiusChange} />
-                        </View>
                     </View>
 
                     {/* Nothing to request yet, so the button is shown disabled (matches the design). */}
@@ -563,6 +646,21 @@ const RecommendServiceProvider = ({ navigation }) => {
                 </Text>
 
                 {renderBody()}
+
+                {/* Below "Find another Service Provider". Always visible (providers listed, loading
+                    or empty) so the customer can widen the search for more choices. Locked while
+                    submitting. Starts at the radius set in CreateServiceRequest. */}
+                <View style={styles.radiusSection} pointerEvents={isSubmitting ? 'none' : 'auto'}>
+                    <RadiusSlider label="Search radius" value={searchRadiusKm} onChange={handleRadiusChange} />
+                    <Text style={styles.radiusHint}>
+                        Want more choices? Increase the radius to include service providers farther away.
+                    </Text>
+                    {isWidening ? (
+                        <Text style={styles.radiusStatus}>Searching within {searchRadiusKm} km…</Text>
+                    ) : !!radiusMessage ? (
+                        <Text style={styles.radiusStatus}>{radiusMessage}</Text>
+                    ) : null}
+                </View>
             </ScrollView>
 
             <Modal
@@ -745,7 +843,7 @@ const styles = StyleSheet.create({
     },
     emptySection: {
         alignItems: 'center',
-        paddingVertical: 60,
+        paddingVertical: 40,
         paddingHorizontal: 8,
     },
     emptyText: {
@@ -754,15 +852,19 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         marginBottom: 2,
     },
-    widenWrap: {
-        width: '100%',
+    radiusSection: {
         marginTop: 28,
+        marginBottom: 8,
     },
-    widenHint: {
+    radiusHint: {
         fontSize: 12,
         color: '#666666',
-        textAlign: 'center',
-        marginBottom: 6,
+        marginTop: 6,
+    },
+    radiusStatus: {
+        fontSize: 12,
+        color: '#204C96',
+        marginTop: 6,
     },
     emptyLinkText: {
         fontSize: 13,

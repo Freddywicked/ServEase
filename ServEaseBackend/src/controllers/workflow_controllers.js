@@ -724,13 +724,15 @@ const answerPaymentRequest = (answer) =>
   });
 
 // POST /api/service-requests/:requestId/payment-requests/:paymentRequestId/pay-later
-// Approval alone leaves the card visible. This explicit choice settles the quotation card and
-// leaves status='approved', so computePaymentDue still includes the amount in the final balance.
+// Accept only opens the mobile confirmation modal. This endpoint is the Pay Later confirmation:
+// it approves a pending request (or reuses an approved one) and defers it in a single row update.
 const deferPaymentRequest = asyncHandler(async (req, res) => {
   const row = await getOwnedRequest(req);
   const pr = await Workflow.findPaymentRequest(req.params.paymentRequestId);
   if (!pr || pr.request_id !== row.request_id) throw new ApiError(404, 'Payment request not found');
-  if (pr.status !== 'approved') throw new ApiError(409, 'Approve this payment request before choosing Pay Later');
+  if (!['pending', 'approved'].includes(pr.status)) {
+    throw new ApiError(409, 'This payment request can no longer be deferred');
+  }
   if (pr.deferred_at) return res.json({ ok: true, status: 'deferred' });
 
   const [requests, payments] = await Promise.all([
@@ -741,8 +743,13 @@ const deferPaymentRequest = asyncHandler(async (req, res) => {
     throw new ApiError(409, 'This additional payment has already been paid');
   }
 
-  const deferredAt = new Date().toISOString();
-  await Workflow.updatePaymentRequest(pr.payment_request_id, { deferred_at: deferredAt });
+  const now = new Date().toISOString();
+  await Workflow.updatePaymentRequest(pr.payment_request_id, {
+    status: 'approved',
+    responded_at: pr.responded_at || now,
+    deferred_at: now,
+    ...(pr.negotiation_status === 'requested' ? { negotiation_status: null } : {}),
+  });
   const customerName = await customerNameOf(row);
   await Workflow.notify({
     userId: pr.provider_id,
@@ -750,7 +757,7 @@ const deferPaymentRequest = asyncHandler(async (req, res) => {
     message: `${customerName} chose to pay the additional ${peso(pr.amount)} for ${refOf(row)} with the final payment.`,
     requestId: row.request_id,
   });
-  res.json({ ok: true, status: 'deferred', deferredAt });
+  res.json({ ok: true, status: 'deferred', deferredAt: now });
 });
 
 // POST /api/service-requests/:requestId/payment-requests/:paymentRequestId/negotiate
