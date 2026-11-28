@@ -566,12 +566,13 @@ const Track = ({ navigation, route }) => {
     };
 
     const handleProceedToPayment = (request) => {
+        const awaitingInitialPayment = request.initialPaymentPaid === false;
         navigation.navigate(ROUTES.PAYMENT, {
             requestId: request.requestId,
             requestNumber: request.requestNumber,
             providerName: request.providerName,
-            paymentStage: 'final',
-            amount: request.finalAmount,
+            paymentStage: awaitingInitialPayment ? 'initial' : 'final',
+            amount: awaitingInitialPayment ? undefined : request.finalAmount,
         });
     };
 
@@ -911,7 +912,7 @@ const Track = ({ navigation, route }) => {
             {renderTimeline(getTimeline(request), isRequestPaid(request))}
 
             <View style={styles.timelineDivider} />
-            {renderViewMessageButtons(request)}
+            {request.initialPaymentPaid === false ? renderViewPaymentMessageButtons(request) : renderViewMessageButtons(request)}
         </View>
     );
 
@@ -1144,7 +1145,7 @@ const Track = ({ navigation, route }) => {
                             placeholderTextColor="#A8A3A3"
                         />
 
-                        <Text style={styles.formModalLabel}>State a proper reason for rejection.</Text>
+                        <Text style={styles.formModalLabel}>State a proper reason for price negotiation.</Text>
                         <TextInput
                             style={styles.formModalTextArea}
                             value={negotiateMessage}

@@ -342,7 +342,8 @@ export const markNotificationsSeen = ({ audience } = {}) =>
  *   cardType 'diagnosis' (sent):      probableCause|null, confidencePercent|null
  *   cardType 'quotation' (sent):      laborCost, partsCost (0 if none), serviceFee, total   <- INITIAL quotation, stays in Pending
  *   cardType 'payment'   (approved):  paymentRequestId, paymentAmount, paymentReason        <- additional payment = Active > Quotations
- *   cardType 'timeline'  (ongoing):   timeline: [{ label, timestamp (ISO)|null, description?, subtext?, done }]  <- Active > On-going
+ *   cardType 'timeline'  (sent|ongoing): initialPaymentPaid, timeline: [{ label, timestamp (ISO)|null, description?, subtext?, done }]
+ *                                      <- sent = accepted, awaiting initial payment; ongoing = paid, Active > On-going
  *   cardType 'completed' (done|ongoing): finalAmount, isPaid, timeline
  *   cardType 'declined'  (declined):  closedBy 'customer'|'provider', closedAction 'declined'|'cancelled', reason|null
  *   Every card also carries serviceLocationType 'home'|'shop' (the timeline already matches it).

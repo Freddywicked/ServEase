@@ -1,7 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-// Exercise the real provider Jobs endpoint with isolated model/payment fakes.
+// Exercise the real customer Track, provider Incoming and provider Jobs endpoints with
+// isolated model/payment fakes.
 const mockModule = (request, exports) => {
   const filename = require.resolve(request);
   require.cache[filename] = { id: filename, filename, loaded: true, exports };
@@ -12,24 +13,26 @@ let updates;
 let payments;
 let paymentRequests;
 
+const recipient = { request_id: 'request-1', provider_id: 'provider-1', status: 'accepted' };
+const quote = {
+  request_id: 'request-1',
+  provider_id: 'provider-1',
+  labor_cost: 1000,
+  parts_cost: 0,
+  service_fee: 50,
+};
 const Request = {
   formatRequestId: (requestNumber) => `SR-${String(requestNumber).padStart(4, '0')}`,
-  listRecipientsForProvider: async () => [
-    { request_id: 'request-1', provider_id: 'provider-1', status: 'accepted' },
-  ],
+  listForCustomer: async () => [row],
+  listRecipients: async () => [recipient],
+  listQuotations: async () => [quote],
+  listRecipientsForProvider: async () => [recipient],
   findByIds: async () => [row],
   findUsersByIds: async () => ({ 'customer-1': { name: 'Customer One' } }),
-  listQuotationsForProvider: async () => [
-    {
-      request_id: 'request-1',
-      provider_id: 'provider-1',
-      labor_cost: 1000,
-      parts_cost: 0,
-      service_fee: 50,
-    },
-  ],
+  listQuotationsForProvider: async () => [quote],
 };
 const Workflow = {
+  listScheduleProposals: async () => [],
   listProgressUpdates: async () => updates,
   listPayments: async () => payments,
   listPaymentRequests: async () => paymentRequests,
@@ -37,7 +40,7 @@ const Workflow = {
 
 mockModule('../src/models/servicerequest_model', Request);
 mockModule('../src/models/workflow_model', Workflow);
-mockModule('../src/models/provider_model', {});
+mockModule('../src/models/provider_model', { findProfile: async () => null });
 mockModule('../src/config/supabase', { supabase: {} });
 mockModule('../src/config', { paymongo: { secretKey: '', baseUrl: 'https://example.invalid' } });
 mockModule('../src/utils/paymongo', {});
@@ -47,9 +50,10 @@ mockModule('../src/utils/storage', {
 });
 mockModule('../src/utils/ai_sentiment', { analyzeSentiment: async () => 'neutral' });
 
-const { listJobs } = require('../src/controllers/workflow_controllers');
+const { getTracking, listJobs } = require('../src/controllers/workflow_controllers');
+const { listIncoming } = require('../src/controllers/servicerequest_controllers');
 
-const invokeListJobs = async () => {
+const invoke = async (handler, req) => {
   const res = {
     json(payload) {
       this.body = payload;
@@ -57,12 +61,21 @@ const invokeListJobs = async () => {
     },
   };
   let forwardedError;
-  await listJobs({ user: { user_id: 'provider-1' } }, res, (error) => {
+  await handler({ query: {}, ...req }, res, (error) => {
     forwardedError = error;
   });
   if (forwardedError) throw forwardedError;
-  return res.body.jobs[0];
+  return res;
 };
+
+const invokeListJobs = async () =>
+  (await invoke(listJobs, { user: { user_id: 'provider-1' } })).body.jobs[0];
+const invokeJobList = async () =>
+  (await invoke(listJobs, { user: { user_id: 'provider-1' } })).body.jobs;
+const invokeTracking = async () =>
+  (await invoke(getTracking, { user: { user_id: 'customer-1' } })).body;
+const invokeIncoming = async () =>
+  (await invoke(listIncoming, { user: { user_id: 'provider-1' }, query: { filter: 'pending' } })).body.requests;
 
 const payment = (stage, status, amount) => ({
   request_id: 'request-1',
@@ -85,8 +98,81 @@ test.beforeEach(() => {
     ai_diagnosis: null,
   };
   updates = [];
+  recipient.status = 'accepted';
   payments = [payment('initial', 'paid', 210)];
   paymentRequests = [];
+});
+
+test('customer Track keeps an accepted quotation Pending until the initial payment is paid', async () => {
+  row.request_status = 'Approved';
+  payments = [];
+
+  let groups = await invokeTracking();
+  assert.equal(groups.sent.length, 1);
+  assert.equal(groups.sent[0].cardType, 'timeline');
+  assert.equal(groups.sent[0].statusLabel, 'Awaiting initial payment');
+  assert.equal(groups.sent[0].initialPaymentPaid, false);
+  assert.equal(groups.ongoing.length, 0);
+
+  payments = [payment('initial', 'pending', 210)];
+  groups = await invokeTracking();
+  assert.equal(groups.sent.length, 1);
+  assert.equal(groups.ongoing.length, 0);
+
+  payments = [payment('initial', 'paid', 210)];
+  groups = await invokeTracking();
+  assert.equal(groups.sent.length, 0);
+  assert.equal(groups.ongoing.length, 1);
+  assert.equal(groups.ongoing[0].initialPaymentPaid, true);
+  assert.equal(groups.ongoing[0].statusLabel, 'In progress');
+});
+
+test('provider Incoming keeps an accepted quotation Pending until the initial payment is paid', async () => {
+  row.request_status = 'Approved';
+  payments = [];
+
+  let requests = await invokeIncoming();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].status, 'quoted');
+  assert.equal(requests[0].statusLabel, 'Awaiting Payment');
+  assert.equal(requests[0].quotation.total, 1000);
+
+  payments = [payment('initial', 'pending', 210)];
+  requests = await invokeIncoming();
+  assert.equal(requests.length, 1);
+
+  payments = [payment('additional', 'paid', 100)];
+  requests = await invokeIncoming();
+  assert.equal(requests.length, 1);
+
+  payments = [payment('initial', 'paid', 210)];
+  requests = await invokeIncoming();
+  assert.equal(requests.length, 0);
+});
+
+test('provider Jobs excludes accepted requests until the initial payment is paid', async () => {
+  row.request_status = 'Approved';
+  payments = [];
+  assert.equal((await invokeJobList()).length, 0);
+
+  payments = [payment('initial', 'pending', 210)];
+  assert.equal((await invokeJobList()).length, 0);
+
+  payments = [payment('additional', 'paid', 100)];
+  assert.equal((await invokeJobList()).length, 0);
+
+  payments = [payment('initial', 'paid', 210)];
+  const jobs = await invokeJobList();
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].status, 'Active');
+});
+
+test('an initial payment does not add unselected quoted providers to Jobs', async () => {
+  row.request_status = 'Approved';
+  recipient.status = 'quoted';
+  payments = [payment('initial', 'paid', 210)];
+
+  assert.equal((await invokeJobList()).length, 0);
 });
 
 test('provider Jobs supplies the progress state required by the mobile segment colors', async () => {

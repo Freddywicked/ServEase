@@ -19,6 +19,7 @@ const { diagnose } = require('../utils/ai_diagnosis');
 const {
   toQuoteDto,
   serviceFeeFor,
+  hasPaidInitialPayment,
   isCustomerQuotationDecline,
   decodeCustomerQuotationDecline,
 } = require('../utils/pricing');
@@ -180,7 +181,7 @@ const toCustomerDto = (row, recipients = [], users = {}, attachments = [], quote
 
 // Shape expected by IncomingServiceRequest.jsx (one entry per request sent to this provider)
 //   status: 'new'    = waiting on this provider (no quotation yet)
-//           'quoted' = Pending: quotation sent, the customer has not answered
+//           'quoted' = Pending: quotation sent, or accepted but awaiting the initial payment
 //           'closed' = declined by this provider OR the customer declined the quotation
 const closedInfoOf = (recipient) => {
   if (recipient.status !== 'declined') return { closedBy: null, declinedReason: null };
@@ -196,7 +197,8 @@ const closedInfoOf = (recipient) => {
 const toIncomingDto = (row, recipient, customer, quote, distanceKm = null) => {
   const ai = aiOf(row);
   const reference = Request.formatRequestId(row.request_number);
-  const isQuoted = recipient.status === 'quoted';
+  const isAwaitingInitialPayment = recipient.status === 'accepted';
+  const isQuoted = recipient.status === 'quoted' || isAwaitingInitialPayment;
   const isClosed = recipient.status === 'declined';
   const hasQuote = (isQuoted || isClosed) && quote;
   const labor = hasQuote ? Number(quote.labor_cost) || 0 : 0;
@@ -212,7 +214,7 @@ const toIncomingDto = (row, recipient, customer, quote, distanceKm = null) => {
     distanceKm, // provider's geocoded company_address -> the request's pin (null if either is unknown)
     serviceLocationType: row.service_location_type ?? null, // 'home' | 'shop'
     status: isClosed ? 'closed' : isQuoted ? 'quoted' : 'new',
-    statusLabel: isClosed ? 'Declined' : isQuoted ? 'Quoted' : 'New', // mobile status pill
+    statusLabel: isClosed ? 'Declined' : isAwaitingInitialPayment ? 'Awaiting Payment' : isQuoted ? 'Quoted' : 'New',
     canApprove: recipient.status === 'sent', // mobile: Accept is offered while still waiting on this provider
     ...closedInfoOf(recipient),
     quote: hasQuote ? { labor, parts } : null,
@@ -881,16 +883,16 @@ const providerDistanceTo = async (providerUserId) => {
 };
 
 // Optional ?filter= used by the mobile Incoming Requests tabs: 'new' = waiting on this provider,
-// 'pending' = quotation sent (waiting on the customer), 'all' = both. The web sends no filter,
-// which is 'all' - exactly the old behaviour.
+// 'pending' = quotation sent or accepted but still awaiting the initial payment, 'all' = both.
+// The web sends no filter, which is 'all' - exactly the old behaviour plus accepted-unpaid quotes.
 // If workflow_controllers.js moves a request to another recipient status after "accept", add it here.
 // 'closed' = declined by this provider or the customer declined the quotation.
 // 'everything' is what the web list asks for (the mobile app keeps using new / pending / all).
 const INCOMING_FILTER_STATUSES = {
-  all: ['sent', 'quoted'],
+  all: ['sent', 'quoted', 'accepted'],
   everything: ['sent', 'quoted', 'declined'],
   new: ['sent'],
-  pending: ['quoted'],
+  pending: ['quoted', 'accepted'],
   closed: ['declined'],
 };
 
@@ -908,10 +910,17 @@ const listIncoming = asyncHandler(async (req, res) => {
   );
   const quoteByRequest = Object.fromEntries(quoteRows.map((q) => [q.request_id, q]));
   const distanceTo = await providerDistanceTo(req.user.user_id);
+  const acceptedRequestIds = recipients.filter((r) => r.status === 'accepted').map((r) => r.request_id);
+  const paymentRows = acceptedRequestIds.length ? await Workflow.listPayments(acceptedRequestIds) : [];
+  const initiallyPaidRequestIds = new Set(
+    acceptedRequestIds.filter((requestId) =>
+      hasPaidInitialPayment(paymentRows.filter((payment) => payment.request_id === requestId))
+    )
+  );
 
   res.json({
     requests: recipients
-      .filter((r) => byId[r.request_id])
+      .filter((r) => byId[r.request_id] && !initiallyPaidRequestIds.has(r.request_id))
       .map((r) => {
         const row = byId[r.request_id];
         return toIncomingDto(row, r, customers[row.customer_id], quoteByRequest[r.request_id], distanceTo(row));

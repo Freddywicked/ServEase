@@ -91,7 +91,9 @@ test.beforeEach(() => {
     extra('pr-4', 'pending', 400),
     extra('pr-5', 'rejected', 500),
   ];
-  payments = [];
+  payments = [
+    { request_id: 'request-1', stage: 'initial', status: 'paid', amount: 210 },
+  ];
   addedPayments = [];
   row.request_status = 'In Progress';
 });

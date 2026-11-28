@@ -35,6 +35,7 @@ const {
   quoteBreakdown,
   serviceFeeFor,
   initialAmountFor,
+  hasPaidInitialPayment,
   feeSplit,
   encodeCustomerQuotationDecline,
   isCustomerQuotationDecline,
@@ -526,7 +527,7 @@ const getTracking = asyncHandler(async (req, res) => {
       const quoted = recipients.filter((r) => r.status === 'quoted');
       if (quoted.length) {
         // Initial quotation(s): still waiting for the customer's answer, so they stay in Pending
-        // (the `sent` group feeds the app's Pending tab). Approving moves the request to Active.
+        // (the `sent` group feeds the app's Pending tab). Approval alone does not move them to Active.
         quoted.forEach((r) => {
           const q = quotes[r.provider_id];
           if (!q) return;
@@ -575,11 +576,16 @@ const getTracking = asyncHandler(async (req, res) => {
       //     })
       //   );
       pushAdditionalPaymentCards();
-      groups.ongoing.push({
+      const initialPaymentPaid = hasPaidInitialPayment(my(paymentRows));
+      // Accepting a quotation is not the start of the job. Keep the same payment-capable
+      // timeline card in Pending until the initial payment is confirmed, then move it to
+      // Active > On-going for both new and already in-progress requests.
+      (initialPaymentPaid ? groups.ongoing : groups.sent).push({
         ...base,
         id: cardId('timeline'),
         cardType: 'timeline',
-        statusLabel: 'In progress',
+        statusLabel: initialPaymentPaid ? 'In progress' : 'Awaiting initial payment',
+        initialPaymentPaid,
         total: quoteTotal + approvedExtras,
         deferredAdditionalAmount,
         timeline,
@@ -829,7 +835,7 @@ const respondToQuotation = asyncHandler(async (req, res) => {
     await Workflow.notify({
       userId: quoted.provider_id,
       type: 'quotation_accepted',
-      message: `${customerName} accepted your quotation for ${refOf(row)}. You can start the job.`,
+      message: `${customerName} accepted your quotation for ${refOf(row)}. The job will start after the initial payment.`,
       requestId: row.request_id,
     });
   } else {
@@ -1586,16 +1592,21 @@ const listJobs = asyncHandler(async (req, res) => {
     Request.listQuotationsForProvider(req.user.user_id, requestIds),
   ]);
   res.json({
-    jobs: involved.map(({ row }) =>
-      toJobDto(
-        row,
-        customerMap[row.customer_id],
-        progressRows.filter((u) => u.request_id === row.request_id),
-        paymentRows.filter((p) => p.request_id === row.request_id),
-        quotationRows.find((q) => q.request_id === row.request_id),
-        paymentRequests.filter((p) => p.request_id === row.request_id)
+    jobs: involved
+      .filter(({ row, recipient }) =>
+        recipient.status === 'accepted' &&
+        hasPaidInitialPayment(paymentRows.filter((p) => p.request_id === row.request_id))
       )
-    ),
+      .map(({ row }) =>
+        toJobDto(
+          row,
+          customerMap[row.customer_id],
+          progressRows.filter((u) => u.request_id === row.request_id),
+          paymentRows.filter((p) => p.request_id === row.request_id),
+          quotationRows.find((q) => q.request_id === row.request_id),
+          paymentRequests.filter((p) => p.request_id === row.request_id)
+        )
+      ),
   });
 });
 

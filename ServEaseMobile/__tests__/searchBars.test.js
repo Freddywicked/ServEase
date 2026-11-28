@@ -141,6 +141,41 @@ test('Track filters pending requests by provider name, handles no matches, and r
   expect(screenText()).toContain('SR-1002');
 });
 
+test('Track keeps an accepted unpaid request in Pending and opens initial payment', async () => {
+  getTrackedRequests.mockResolvedValue({
+    sent: [
+      {
+        id: 'track-initial',
+        requestId: 'SR-1003',
+        requestNumber: 'SR-1003',
+        providerName: 'Initial Payment Repair',
+        cardType: 'timeline',
+        statusLabel: 'Awaiting initial payment',
+        initialPaymentPaid: false,
+        timeline: [],
+      },
+    ],
+    approved: [],
+    ongoing: [],
+    declined: [],
+    done: [],
+  });
+  await renderScreen(<Track navigation={navigation} route={{ params: {} }} />);
+
+  expect(screenText()).toContain('SR-1003');
+  expect(screenText()).toContain('Awaiting initial payment');
+  const paymentButton = renderer.root
+    .findAllByType(TouchableOpacity)
+    .find((node) => node.findAllByType(Text).some((text) => text.props.children === 'Proceed to Payment'));
+  expect(paymentButton).toBeDefined();
+
+  act(() => paymentButton.props.onPress());
+  expect(navigation.navigate).toHaveBeenCalledWith('Payment', expect.objectContaining({
+    requestId: 'SR-1003',
+    paymentStage: 'initial',
+  }));
+});
+
 test('IncomingServiceRequest searches request details and restores all requests on clear', async () => {
   getIncomingRequests.mockResolvedValue([
     {

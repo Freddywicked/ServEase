@@ -38,6 +38,11 @@ const initialAmountFor = (labor, parts) => {
   return round2(initialBase + serviceFeeFor(initialBase));
 };
 
+// Quotation acceptance alone does not start a job. All customer/provider screens use this
+// same server-side milestone: a confirmed payment specifically for the initial stage.
+const hasPaidInitialPayment = (payments = []) =>
+  payments.some((payment) => payment.status === 'paid' && payment.stage === 'initial');
+
 // What the customer apps read from providers[].quote (RequestDetails.js).
 const toQuoteDto = (q) => {
   const b = quoteBreakdown(q);
@@ -105,6 +110,7 @@ module.exports = {
   serviceFeeFor,
   quoteBreakdown,
   initialAmountFor,
+  hasPaidInitialPayment,
   toQuoteDto,
   feeSplit,
   CUSTOMER_DECLINED_QUOTATION_REASON,
