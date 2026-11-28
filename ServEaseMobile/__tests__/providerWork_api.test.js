@@ -77,10 +77,10 @@ describe('provider price negotiations', () => {
     request.mockResolvedValue({ ok: true });
   });
 
-  test('loads customer negotiations from the shared web/mobile quotations endpoint', async () => {
+  test('loads unsettled additional payments and negotiations for mobile Jobs', async () => {
     await getProviderJobQuotations();
 
-    expect(request).toHaveBeenCalledWith('/provider/jobs/quotations');
+    expect(request).toHaveBeenCalledWith('/provider/jobs/quotations?includePaymentRequests=true');
   });
 
   test('accepts a negotiation using both its job and payment-request ids', async () => {

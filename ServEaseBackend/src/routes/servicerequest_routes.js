@@ -111,6 +111,7 @@ customer.post('/:requestId/schedule-proposals/:proposalId/accept', authenticate,
 customer.post('/:requestId/schedule-proposals/:proposalId/reject', authenticate, workflow.answerScheduleProposal('rejected'));
 customer.post('/:requestId/payment-requests/:paymentRequestId/approve', authenticate, workflow.answerPaymentRequest('approved'));
 customer.post('/:requestId/payment-requests/:paymentRequestId/reject', authenticate, workflow.answerPaymentRequest('rejected'));
+customer.post('/:requestId/payment-requests/:paymentRequestId/pay-later', authenticate, workflow.deferPaymentRequest);
 // Counter-offer on an additional payment (Negotiate modal on the Track screen); the request stays pending.
 customer.post('/:requestId/payment-requests/:paymentRequestId/negotiate', authenticate, workflow.negotiatePaymentRequest);
 customer.post('/:requestId/quotation/respond', authenticate, workflow.respondToQuotation);

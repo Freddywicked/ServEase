@@ -173,7 +173,7 @@ const Payment = ({ navigation, route }) => {
     useEffect(() => {
         if (!requestId) return undefined;
         let cancelled = false;
-        getPaymentDue(requestId)
+        getPaymentDue(requestId, { paymentRequestId })
             .then((data) => {
                 if (cancelled) return;
                 const serverAmount = data?.due?.[paymentStage];
@@ -185,7 +185,7 @@ const Payment = ({ navigation, route }) => {
         return () => {
             cancelled = true;
         };
-    }, [requestId, paymentStage]);
+    }, [requestId, paymentStage, paymentRequestId]);
 
     const formattedAmount = `₱${Number(dueAmount).toLocaleString('en-PH', {
         minimumFractionDigits: 2,

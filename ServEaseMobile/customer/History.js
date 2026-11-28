@@ -6,7 +6,15 @@ import { getMyServiceRequests } from '../api/servicerequest_api';
 import { formatShortDate } from '../utils/formatters';
 import { ROUTES } from '../navigation/routes';
 
-// Filter chips for the history list.
+// Figma specifies Roboto (header) and Quicksand (chips). Fill these in with the
+// font names you load in the app (e.g. 'Roboto-Bold', 'Quicksand-Medium').
+// Left undefined, the platform default font is used.
+const FONTS = {
+    header: undefined, // Roboto Bold
+    chip: undefined, // Quicksand Medium
+};
+
+// Filter tabs for the history list.
 const FILTERS = [
     { key: 'all', label: 'All' },
     { key: 'repair', label: 'Repair' },
@@ -53,7 +61,7 @@ const History = ({ navigation }) => {
 
     const renderHistoryItem = ({ item }) => (
         <View style={styles.card}>
-            <View style={{ flex: 1 }}>
+            <View style={styles.cardBody}>
                 <Text style={styles.cardTitle}>{item.category}</Text>
                 <Text style={styles.cardText}>
                     {item.id} · {formatShortDate(item.createdAt)}
@@ -74,7 +82,7 @@ const History = ({ navigation }) => {
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
                 ListEmptyComponent={
                     loading ? (
-                        <ActivityIndicator color="#0255AF" style={{ marginTop: 32 }} />
+                        <ActivityIndicator color="#021E79" style={{ marginTop: 32 }} />
                     ) : (
                         <Text style={styles.emptyText}>
                             {loadFailed ? "Couldn't load your history. Pull down to retry." : 'No service requests yet.'}
@@ -93,17 +101,32 @@ const History = ({ navigation }) => {
                         >
                             <Image source={require('../assets/icon_back_button.png')} style={styles.backIcon} />
                         </TouchableOpacity>
-                        <Text style={styles.header}>History</Text>
+                        <Text style={styles.header} accessibilityRole="header">
+                            History
+                        </Text>
                         <View style={styles.chipRow}>
-                            {FILTERS.map((f) => {
+                            {FILTERS.map((f, index) => {
                                 const isActive = f.key === filter;
                                 return (
                                     <TouchableOpacity
                                         key={f.key}
-                                        style={isActive ? styles.chipActive : styles.chip}
+                                        style={[
+                                            styles.chip,
+                                            isActive && styles.chipActive,
+                                            index > 0 && styles.chipSpacing,
+                                        ]}
                                         onPress={() => setFilter(f.key)}
+                                        activeOpacity={0.8}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={`${f.label} filter`}
+                                        accessibilityState={{ selected: isActive }}
                                     >
-                                        <Text style={isActive ? styles.chipLabelActive : styles.chipLabel}>{f.label}</Text>
+                                        <Text
+                                            style={[styles.chipLabel, isActive && styles.chipLabelActive]}
+                                            numberOfLines={1}
+                                        >
+                                            {f.label}
+                                        </Text>
                                     </TouchableOpacity>
                                 );
                             })}
@@ -135,74 +158,92 @@ const styles = StyleSheet.create({
         height: 24,
         resizeMode: 'contain',
     },
+    // Figma: Roboto 700 / 24 / line-height 28 / #021E79
     header: {
+        fontFamily: FONTS.header,
         fontSize: 24,
-        fontWeight: '800',
-        color: '#1B2A8C',
+        lineHeight: 28,
+        fontWeight: '700',
+        color: '#021E79',
         marginBottom: 20,
     },
+
+    // Filter tabs. Figma: pill (radius 20), 1px #B1A8A8 border, 32px tall,
+    // three equal-width tabs; active = filled #021E79 with near-white text.
     chipRow: {
         flexDirection: 'row',
-        marginBottom: 16,
+        marginBottom: 24,
     },
     chip: {
-        paddingVertical: 8,
-        paddingHorizontal: 20,
+        flex: 1,
+        minHeight: 36,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 8,
         borderRadius: 20,
         borderWidth: 1,
-        borderColor: '#D9DDE4',
-        backgroundColor: '#FFFFFF',
-        marginRight: 10,
+        borderColor: '#B1A8A8',
+        backgroundColor: '#FFFDFD',
+    },
+    chipSpacing: {
+        marginLeft: 8,
     },
     chipActive: {
-        paddingVertical: 8,
-        paddingHorizontal: 20,
-        borderRadius: 20,
-        backgroundColor: '#4A7FBF',
-        marginRight: 10,
+        backgroundColor: '#021E79',
     },
     chipLabel: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#6B7280',
+        fontFamily: FONTS.chip,
+        fontSize: 14,
+        lineHeight: 20,
+        fontWeight: '500',
+        color: '#414141',
+        textAlign: 'center',
     },
     chipLabelActive: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#FFFFFF',
+        color: '#FFFAFA',
     },
+
+    // History cards. Figma: white, 1px #C9C2C2 border, radius 14.
     card: {
         flexDirection: 'row',
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#E0E0E0',
-        borderRadius: 10,
+        borderColor: '#C9C2C2',
+        borderRadius: 14,
         backgroundColor: '#FFFFFF',
-        padding: 16,
-        minHeight: 90,
-        marginBottom: 14,
+        paddingVertical: 16,
+        paddingHorizontal: 16,
+        minHeight: 80,
+        marginBottom: 16,
+    },
+    cardBody: {
+        flex: 1,
     },
     cardTitle: {
-        fontSize: 14,
+        fontSize: 16,
+        lineHeight: 22,
         fontWeight: '700',
-        color: '#333333',
-    },
-    cardStatus: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#0255AF',
-        marginLeft: 10,
-    },
-    emptyText: {
-        fontSize: 13,
-        color: '#999999',
-        textAlign: 'center',
-        marginTop: 32,
+        color: '#1F1F1F',
     },
     cardText: {
-        fontSize: 13,
-        color: '#333333',
+        fontSize: 14,
+        lineHeight: 20,
+        color: '#414141',
         marginTop: 4,
+    },
+    cardStatus: {
+        fontSize: 14,
+        lineHeight: 20,
+        fontWeight: '600',
+        color: '#021E79',
+        marginLeft: 12,
+    },
+    emptyText: {
+        fontSize: 15,
+        lineHeight: 22,
+        color: '#595959',
+        textAlign: 'center',
+        marginTop: 32,
     },
 });
 

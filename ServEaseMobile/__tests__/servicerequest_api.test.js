@@ -1,4 +1,14 @@
-import { browseServiceProviders, normalizeRepairDetails, respondToQuotation } from '../api/servicerequest_api';
+import {
+  browseServiceProviders,
+  declineServiceRequest,
+  deferAdditionalPayment,
+  getPaymentDue,
+  getTrackedRequests,
+  normalizeRepairDetails,
+  payForServiceRequest,
+  rejectAdditionalPayment,
+  respondToQuotation,
+} from '../api/servicerequest_api';
 
 jest.mock('../api/client', () => ({
   API_BASE_URL: 'http://test.local/api',
@@ -92,5 +102,56 @@ describe('quotation responses', () => {
       approve: false,
       reason: 'The price is beyond my budget.',
     });
+  });
+});
+
+describe('additional-payment lifecycle API', () => {
+  beforeEach(() => {
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    }));
+  });
+
+  test('Track opts into approved requests awaiting a payment choice', async () => {
+    await getTrackedRequests();
+    expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get('includeAwaitingPayment')).toBe('true');
+  });
+
+  test('Pay Later uses the explicit deferral endpoint', async () => {
+    await deferAdditionalPayment('SR-0104', 'payment-request-1');
+    const [url, options] = global.fetch.mock.calls[0];
+    expect(new URL(url).pathname).toBe('/api/service-requests/SR-0104/payment-requests/payment-request-1/pay-later');
+    expect(options.method).toBe('POST');
+  });
+
+  test('Pay Now scopes both the due amount and payment record to the selected request', async () => {
+    await getPaymentDue('SR-0104', { paymentRequestId: 'payment-request-1' });
+    expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get('paymentRequestId')).toBe('payment-request-1');
+
+    await payForServiceRequest('SR-0104', {
+      amount: 250,
+      method: 'gcash',
+      stage: 'additional',
+      paymentRequestId: 'payment-request-1',
+    });
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({
+      amount: 250,
+      method: 'gcash',
+      stage: 'additional',
+      paymentRequestId: 'payment-request-1',
+    });
+  });
+
+  test('customer and provider rejection helpers reject blank reasons without a request', async () => {
+    await expect(rejectAdditionalPayment('SR-0104', 'payment-request-1', { reason: '  ' })).rejects.toThrow('reason');
+    await expect(declineServiceRequest('SR-0104', { reason: '  ' })).rejects.toThrow('reason');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('customer additional-payment rejection trims and sends its required reason', async () => {
+    await rejectAdditionalPayment('SR-0104', 'payment-request-1', { reason: '  Too expensive.  ' });
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({ reason: 'Too expensive.' });
   });
 });

@@ -31,7 +31,8 @@ import LinearGradient from 'react-native-linear-gradient';
  * ----------------------------------------------------------------------------
  * Everything comes from the shared provider Jobs endpoints (see api/providerWork_api.js):
  *   GET /provider/jobs             -> On-going cards (stages, current step, AI suggestion, ...)
- *   GET /provider/jobs/quotations  -> customer price negotiations waiting for the provider's answer
+ *   GET /provider/jobs/quotations?includePaymentRequests=true
+ *       -> unsettled additional-parts requests and their customer price negotiations
  * Accept / Decline use the same job/payment-request negotiation endpoints as the web app.
  * Nothing on this screen is hard-coded data; only labels of the UI itself are static.
  * ========================================================================== */
@@ -249,6 +250,11 @@ const Jobs = ({ navigation }) => {
 
     const renderQuotationCard = (quotation) => {
         const busy = busyId === quotation.paymentRequestId;
+        const canAnswerNegotiation = quotation.status === 'pending' && quotation.negotiationStatus === 'requested';
+        const awaitingPayment = quotation.status === 'approved';
+        const displayAmount = canAnswerNegotiation && quotation.proposedAmount !== null && quotation.proposedAmount !== undefined
+            ? quotation.proposedAmount
+            : quotation.amount ?? quotation.originalAmount;
         return (
             <View key={quotation.paymentRequestId} style={styles.card}>
                 <View style={styles.cardTopRow}>
@@ -269,22 +275,26 @@ const Jobs = ({ navigation }) => {
                 ) : null}
 
                 <Text style={styles.negotiationIntro}>
-                    The customer wants to negotiate with a suggested amount:
+                    {canAnswerNegotiation
+                        ? 'The customer wants to negotiate with a suggested amount:'
+                        : awaitingPayment
+                            ? 'The customer approved this request. Waiting for payment or Pay Later.'
+                            : 'Additional parts payment request — waiting for the customer.'}
                 </Text>
                 <View style={styles.messageBox}>
                     <View style={styles.messageTextWrap}>
-                        <Text style={styles.messageTitle}>Customer Message</Text>
+                        <Text style={styles.messageTitle}>{canAnswerNegotiation ? 'Customer Message' : 'Request Details'}</Text>
                         <Text style={styles.messageBody}>
-                            {quotation.customerMessage || `Original amount ${formatPeso(quotation.originalAmount)}`}
+                            {canAnswerNegotiation
+                                ? quotation.customerMessage || `Original amount ${formatPeso(quotation.originalAmount)}`
+                                : quotation.providerNotes || `Additional parts ${formatPeso(displayAmount)}`}
                         </Text>
                     </View>
                     <View style={styles.messageAmountWrap}>
-                        <Text style={styles.messageAmount}>
-                            {quotation.proposedAmount !== null && quotation.proposedAmount !== undefined
-                                ? `₱ ${Number(quotation.proposedAmount).toLocaleString('en-PH')}`
-                                : '—'}
+                        <Text style={styles.messageAmount}>₱ {Number(displayAmount || 0).toLocaleString('en-PH')}</Text>
+                        <Text style={styles.messageAmountCaption}>
+                            {canAnswerNegotiation ? 'suggested amount' : awaitingPayment ? 'awaiting payment' : 'due for approval'}
                         </Text>
-                        <Text style={styles.messageAmountCaption}>due for approval</Text>
                     </View>
                 </View>
 
@@ -297,20 +307,24 @@ const Jobs = ({ navigation }) => {
                     >
                         <Text style={styles.messageButtonText}>Message</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.smallButton, styles.declineButton, busy && styles.buttonDisabled]}
-                        onPress={() => handleOpenReject(quotation)}
-                        disabled={busy}
-                    >
-                        <Text style={styles.smallButtonText}>Decline</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.smallButton, styles.acceptButton, busy && styles.buttonDisabled]}
-                        onPress={() => handleAccept(quotation)}
-                        disabled={busy}
-                    >
-                        {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.smallButtonText}>Accept</Text>}
-                    </TouchableOpacity>
+                    {canAnswerNegotiation && (
+                        <>
+                            <TouchableOpacity
+                                style={[styles.smallButton, styles.declineButton, busy && styles.buttonDisabled]}
+                                onPress={() => handleOpenReject(quotation)}
+                                disabled={busy}
+                            >
+                                <Text style={styles.smallButtonText}>Decline</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.smallButton, styles.acceptButton, busy && styles.buttonDisabled]}
+                                onPress={() => handleAccept(quotation)}
+                                disabled={busy}
+                            >
+                                {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.smallButtonText}>Accept</Text>}
+                            </TouchableOpacity>
+                        </>
+                    )}
                 </View>
             </View>
         );

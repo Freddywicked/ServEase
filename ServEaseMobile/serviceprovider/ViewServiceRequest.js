@@ -557,12 +557,13 @@ const ViewServiceRequest = ({ navigation, route }) => {
                             numberOfLines={4}
                             value={rejectReason}
                             onChangeText={setRejectReason}
+                            maxLength={500}
                         />
 
                         <TouchableOpacity
-                            style={[styles.modalPrimaryButton, acting && styles.modalPrimaryButtonDisabled]}
+                            style={[styles.modalPrimaryButton, (acting || !rejectReason.trim()) && styles.modalPrimaryButtonDisabled]}
                             onPress={handleSendRejection}
-                            disabled={acting}
+                            disabled={acting || !rejectReason.trim()}
                             activeOpacity={0.85}
                             accessibilityRole="button"
                         >

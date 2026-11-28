@@ -53,9 +53,9 @@ export const updateJobStatus = (jobId, { stage, notes, media = [] }) => {
 };
 
 // GET /provider/jobs/quotations
-// Customer price negotiations are returned separately from the Jobs list, using the same
-// endpoint and DTO as the web Active Jobs screen.
-export const getProviderJobQuotations = () => request('/provider/jobs/quotations');
+// Mobile loads every unsettled additional-payment request plus any customer negotiation.
+// The web uses the same endpoint without this query and keeps its negotiation-only response.
+export const getProviderJobQuotations = () => request('/provider/jobs/quotations?includePaymentRequests=true');
 
 // Customer price negotiation on an additional payment.
 // POST /provider/jobs/:jobId/payment-requests/:paymentRequestId/negotiation/accept

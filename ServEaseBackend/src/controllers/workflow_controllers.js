@@ -117,11 +117,42 @@ const paymentReceipt = async (row, payment) => {
   };
 };
 
+// Paid additional payments are linked to their request going forward. Older, unlinked payments
+// are allocated oldest-request-first so existing settled requests do not reappear after migration.
+const additionalPaymentProgress = (paymentRequests, payments) => {
+  const progress = new Map();
+  let unallocated = 0;
+  payments
+    .filter((p) => p.status === 'paid' && p.stage === 'additional')
+    .forEach((p) => {
+      if (p.payment_request_id) {
+        progress.set(p.payment_request_id, (progress.get(p.payment_request_id) || 0) + Number(p.amount || 0));
+      } else {
+        unallocated += Number(p.amount || 0);
+      }
+    });
+
+  paymentRequests
+    .filter((p) => p.status === 'approved')
+    .slice()
+    .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
+    .forEach((p) => {
+      const paid = progress.get(p.payment_request_id) || 0;
+      const applied = Math.min(Math.max(0, Number(p.amount || 0) - paid), unallocated);
+      progress.set(p.payment_request_id, paid + applied);
+      unallocated -= applied;
+    });
+  return progress;
+};
+
+const additionalRequestIsSettled = (paymentRequest, progress) =>
+  (progress.get(paymentRequest.payment_request_id) || 0) + 0.001 >= Number(paymentRequest.amount || 0);
+
 // What is still due per payment stage (server-computed, so the apps never decide the amount):
 //   initial    = 20% of (labor + parts), plus 5% of that initial provider amount
 //   additional = approved additional payments not paid yet (no service fee)
 //   final      = total + approved additional - everything already paid; includes the remaining 5% fee
-const computePaymentDue = async (row) => {
+const computePaymentDue = async (row, additionalPaymentRequestId = null) => {
   const [recipients, quotations, paymentRequests, payments] = await Promise.all([
     Request.listRecipients(row.request_id),
     Request.listQuotations(row.request_id),
@@ -145,6 +176,14 @@ const computePaymentDue = async (row) => {
   const total = quoteTotal + approvedExtras;
   const paid = payments.filter((p) => p.status === 'paid').reduce((sum, p) => sum + Number(p.amount || 0), 0);
   const round2 = (n) => Math.round(n * 100) / 100;
+  let additionalDue = round2(Math.max(0, approvedExtras - paidFor('additional')));
+  if (additionalPaymentRequestId) {
+    const selected = paymentRequests.find((p) => p.payment_request_id === additionalPaymentRequestId);
+    const progress = additionalPaymentProgress(paymentRequests, payments);
+    additionalDue = selected && selected.status === 'approved' && !selected.deferred_at
+      ? round2(Math.max(0, Number(selected.amount || 0) - (progress.get(selected.payment_request_id) || 0)))
+      : 0;
+  }
 
   return {
     total: round2(total),
@@ -152,7 +191,7 @@ const computePaymentDue = async (row) => {
     serviceFee: breakdown ? breakdown.serviceFee : 0,
     due: {
       initial: round2(Math.max(0, initialCharge - paidFor('initial'))),
-      additional: round2(Math.max(0, approvedExtras - paidFor('additional'))),
+      additional: additionalDue,
       final: round2(Math.max(0, total - paid)),
     },
   };
@@ -399,6 +438,7 @@ const buildTimeline = (row, updates /* , approvedAt (kept for callers) */) => {
 const getTracking = asyncHandler(async (req, res) => {
   const rows = await Request.listForCustomer(req.user.user_id);
   const requestIds = rows.map((r) => r.request_id);
+  const includeAwaitingPayment = ['1', 'true'].includes(String(req.query?.includeAwaitingPayment || '').toLowerCase());
 
   // The completed card's finalAmount is the REMAINING balance (total minus everything the
   // customer already paid — the 20% initial fee and any additional payments paid up front),
@@ -449,6 +489,10 @@ const getTracking = asyncHandler(async (req, res) => {
     const approvedExtras = my(paymentRequests)
       .filter((p) => p.status === 'approved')
       .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const additionalProgress = additionalPaymentProgress(my(paymentRequests), my(paymentRows));
+    const deferredAdditionalAmount = my(paymentRequests)
+      .filter((p) => p.status === 'approved' && p.deferred_at)
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
     // Everything the customer has already paid (initial fee + additional payments +
     // any earlier final-payment attempt) counts towards the remaining balance.
     const paidTotal = my(paymentRows)
@@ -456,6 +500,27 @@ const getTracking = asyncHandler(async (req, res) => {
       .reduce((sum, p) => sum + Number(p.amount || 0), 0);
     const round2 = (n) => Math.round(n * 100) / 100;
     const ai = row.ai_diagnosis?.status === 'done' ? row.ai_diagnosis : null;
+    const pushAdditionalPaymentCards = () => {
+      my(paymentRequests)
+        .filter((p) => {
+          if (p.status === 'pending') return true;
+          return includeAwaitingPayment && p.status === 'approved' && !p.deferred_at &&
+            !additionalRequestIsSettled(p, additionalProgress);
+        })
+        .forEach((p) => groups.approved.push({
+          ...base,
+          id: cardId(`payment-${p.payment_request_id}`),
+          cardType: 'payment',
+          statusLabel: p.status === 'approved' ? 'Awaiting payment' : 'In progress',
+          paymentStatus: p.status,
+          paymentRequestId: p.payment_request_id,
+          paymentAmount: Number(p.amount || 0),
+          paymentReason: p.reason || '',
+          canNegotiate: p.status === 'pending',
+          negotiationStatus: p.negotiation_status || null,
+          proposedAmount: p.proposed_amount != null ? Number(p.proposed_amount) : null,
+        }));
+    };
 
     if (row.request_status === 'Pending') {
       const quoted = recipients.filter((r) => r.status === 'quoted');
@@ -509,33 +574,22 @@ const getTracking = asyncHandler(async (req, res) => {
       //       reason: p.reason || '',
       //     })
       //   );
-      my(paymentRequests)
-        .filter((p) => p.status === 'pending')
-        .forEach((p) =>
-          // The `approved` group is Active > Quotations on both apps (the answer-needed cards);
-          // the repair's own tracking card goes to `ongoing` below.
-          groups.approved.push({
-            ...base,
-            id: cardId(`payment-${p.payment_request_id}`),
-            cardType: 'payment',
-            statusLabel: 'In progress',
-            paymentRequestId: p.payment_request_id,
-            paymentAmount: Number(p.amount || 0),
-            paymentReason: p.reason || '',
-          })
-        );
+      pushAdditionalPaymentCards();
       groups.ongoing.push({
         ...base,
         id: cardId('timeline'),
         cardType: 'timeline',
         statusLabel: 'In progress',
         total: quoteTotal + approvedExtras,
+        deferredAdditionalAmount,
         timeline,
       });
       return;
     }
 
     if (row.request_status === 'Completed') {
+      // Completing the repair must not hide an additional request that still needs a payment choice.
+      if (includeAwaitingPayment) pushAdditionalPaymentCards();
       // Remaining balance, not the grand total: the 20% initial fee is already paid,
       // and so is any additional payment the customer chose to pay right away instead
       // of "Pay Later" (pay-later extras stay in approvedExtras, so they are added here).
@@ -552,6 +606,7 @@ const getTracking = asyncHandler(async (req, res) => {
         statusLabel: isPaid ? 'Completed' : 'In progress',
         finalAmount,
         isPaid,
+        deferredAdditionalAmount,
         timeline,
       });
       return;
@@ -620,12 +675,18 @@ const answerScheduleProposal = (answer) =>
   });
 
 // POST /api/service-requests/:requestId/payment-requests/:paymentRequestId/approve | /reject
+// reject body: { reason } — REQUIRED. The mobile Track screen collects it in the "Reason for Rejection"
+// modal (shown after the "Warning!" confirmation); it is sent to the provider in the notification and
+// the request's chat thread.
 const answerPaymentRequest = (answer) =>
   asyncHandler(async (req, res) => {
     const row = await getOwnedRequest(req);
     const pr = await Workflow.findPaymentRequest(req.params.paymentRequestId);
     if (!pr || pr.request_id !== row.request_id) throw new ApiError(404, 'Payment request not found');
     if (pr.status !== 'pending') throw new ApiError(409, 'This payment request was already answered');
+    const reason = answer === 'rejected' ? String(req.body?.reason || '').trim() : '';
+    if (answer === 'rejected' && !reason) throw new ApiError(400, 'State a reason for rejection');
+    if (reason.length > 500) throw new ApiError(400, 'Reasons are limited to 500 characters');
 
     await Workflow.updatePaymentRequest(pr.payment_request_id, {
       status: answer,
@@ -633,6 +694,16 @@ const answerPaymentRequest = (answer) =>
       // Answering the original request settles any price negotiation that was still open.
       ...(pr.negotiation_status === 'requested' ? { negotiation_status: null } : {}),
     });
+    if (reason) {
+      // Same pattern as the negotiation: the provider sees the reason with the rest of the conversation.
+      await Workflow.addMessage({
+        request_id: row.request_id,
+        sender_id: req.user.user_id,
+        body: `I declined the additional ${peso(pr.amount)} for ${refOf(row)}: ${reason}`,
+        seen_by_customer: true,
+        seen_by_provider: false,
+      });
+    }
     const customerName = await customerNameOf(row);
     await Workflow.notify({
       userId: pr.provider_id,
@@ -640,11 +711,41 @@ const answerPaymentRequest = (answer) =>
       message:
         answer === 'approved'
           ? `${customerName} approved the additional ${peso(pr.amount)} for ${refOf(row)}.`
-          : `${customerName} declined the additional ${peso(pr.amount)} for ${refOf(row)}.`,
+          : `${customerName} declined the additional ${peso(pr.amount)} for ${refOf(row)}${reason ? `: ${reason}` : '.'}`,
       requestId: row.request_id,
     });
     res.json({ ok: true, status: answer });
   });
+
+// POST /api/service-requests/:requestId/payment-requests/:paymentRequestId/pay-later
+// Approval alone leaves the card visible. This explicit choice settles the quotation card and
+// leaves status='approved', so computePaymentDue still includes the amount in the final balance.
+const deferPaymentRequest = asyncHandler(async (req, res) => {
+  const row = await getOwnedRequest(req);
+  const pr = await Workflow.findPaymentRequest(req.params.paymentRequestId);
+  if (!pr || pr.request_id !== row.request_id) throw new ApiError(404, 'Payment request not found');
+  if (pr.status !== 'approved') throw new ApiError(409, 'Approve this payment request before choosing Pay Later');
+  if (pr.deferred_at) return res.json({ ok: true, status: 'deferred' });
+
+  const [requests, payments] = await Promise.all([
+    Workflow.listPaymentRequests([row.request_id]),
+    Workflow.listPayments([row.request_id]).then(reconcilePendingPayments),
+  ]);
+  if (additionalRequestIsSettled(pr, additionalPaymentProgress(requests, payments))) {
+    throw new ApiError(409, 'This additional payment has already been paid');
+  }
+
+  const deferredAt = new Date().toISOString();
+  await Workflow.updatePaymentRequest(pr.payment_request_id, { deferred_at: deferredAt });
+  const customerName = await customerNameOf(row);
+  await Workflow.notify({
+    userId: pr.provider_id,
+    type: 'payment_approved',
+    message: `${customerName} chose to pay the additional ${peso(pr.amount)} for ${refOf(row)} with the final payment.`,
+    requestId: row.request_id,
+  });
+  res.json({ ok: true, status: 'deferred', deferredAt });
+});
 
 // POST /api/service-requests/:requestId/payment-requests/:paymentRequestId/negotiate
 // body: { proposedAmount?, message? } — the customer's counter-offer on an additional payment.
@@ -817,8 +918,19 @@ const payForRequest = asyncHandler(async (req, res) => {
   const stage = ['initial', 'final', 'additional'].includes(req.body.stage) ? req.body.stage : 'final';
   if (!Number.isFinite(amount) || amount <= 0) throw new ApiError(400, 'Enter a valid amount');
   if (!PAYMENT_METHODS.includes(method)) throw new ApiError(400, 'Choose a payment method');
+
+  const additionalPaymentRequestId = stage === 'additional' && req.body.paymentRequestId
+    ? String(req.body.paymentRequestId)
+    : null;
+  if (additionalPaymentRequestId) {
+    const pr = await Workflow.findPaymentRequest(additionalPaymentRequestId);
+    if (!pr || pr.request_id !== row.request_id) throw new ApiError(404, 'Payment request not found');
+    if (pr.status !== 'approved') throw new ApiError(409, 'Approve this payment request before paying');
+    if (pr.deferred_at) throw new ApiError(409, 'This additional payment was deferred to the final payment');
+  }
+
   // The amount is decided by the server (quotation + service fee, 20% initial, payments so far), never by the app.
-  const { due } = await computePaymentDue(row);
+  const { due } = await computePaymentDue(row, additionalPaymentRequestId);
   if (!(due[stage] > 0)) throw new ApiError(409, 'Nothing is due for this payment');
   if (Math.abs(amount - due[stage]) > 0.01) throw new ApiError(400, `The amount due is ${peso(due[stage])}`);
 
@@ -827,7 +939,14 @@ const payForRequest = asyncHandler(async (req, res) => {
   // A final cash payment settles the remaining balance immediately — that is what
   // moves the request from the customer's On-going tab to Done (see getTracking).
   if (method === 'cash' || !config.paymongo.secretKey) {
-    const payment = await Workflow.addPayment({ request_id: row.request_id, amount, method, stage, status: 'paid' });
+    const payment = await Workflow.addPayment({
+      request_id: row.request_id,
+      payment_request_id: additionalPaymentRequestId,
+      amount,
+      method,
+      stage,
+      status: 'paid',
+    });
     const recipients = await Request.listRecipients(row.request_id);
     const providerId = pickProviderId(row, recipients);
     if (providerId) {
@@ -844,7 +963,14 @@ const payForRequest = asyncHandler(async (req, res) => {
   }
 
   // ---- PayMongo Checkout Session ----
-  const payment = await Workflow.addPayment({ request_id: row.request_id, amount, method, stage, status: 'pending' });
+  const payment = await Workflow.addPayment({
+    request_id: row.request_id,
+    payment_request_id: additionalPaymentRequestId,
+    amount,
+    method,
+    stage,
+    status: 'pending',
+  });
   // Tag the return URLs with the calling app so /api/payments/return knows where to send
   // the customer afterwards: browsers always send an Origin header (web app), React Native
   // does not (mobile app -> deep link back into it).
@@ -978,7 +1104,7 @@ const getRepairDetails = asyncHandler(async (req, res) => {
 // after approving a quotation (matches the note on MyRequestDetails.jsx).
 const getPaymentDue = asyncHandler(async (req, res) => {
   const row = await getOwnedRequest(req);
-  const result = await computePaymentDue(row);
+  const result = await computePaymentDue(row, req.query?.paymentRequestId || null);
   res.json({ ...result, initialFeePercent: Math.round(INITIAL_FEE_RATE * 10000) / 100 });
 });
 
@@ -1552,15 +1678,29 @@ const notifyAdditionalParts = asyncHandler(async (req, res) => {
 });
 
 // GET /api/provider/jobs/quotations
-// Price negotiations: the customer answered an additional-parts request with a counter-offer.
+// The web keeps the original negotiation-only response. The mobile Jobs screen opts into all
+// unsettled additional-parts requests so a sent/approved request stays visible through payment.
 const listJobQuotations = asyncHandler(async (req, res) => {
   const providerId = req.user.user_id;
-  const negotiating = await Workflow.listNegotiatingPaymentRequests(providerId);
-  const requestIds = [...new Set(negotiating.map((p) => p.request_id))];
+  const includePaymentRequests = ['1', 'true'].includes(String(req.query?.includePaymentRequests || '').toLowerCase());
+  const paymentRequests = includePaymentRequests
+    ? await Workflow.listActivePaymentRequests(providerId)
+    : await Workflow.listNegotiatingPaymentRequests(providerId);
+  const requestIds = [...new Set(paymentRequests.map((p) => p.request_id))];
   if (requestIds.length === 0) return res.json({ quotations: [] });
 
-  const rows = await Request.findByIds(requestIds);
+  const [rows, payments] = await Promise.all([
+    Request.findByIds(requestIds),
+    includePaymentRequests
+      ? Workflow.listPayments(requestIds).then(reconcilePendingPayments)
+      : Promise.resolve([]),
+  ]);
   const byId = Object.fromEntries(rows.map((r) => [r.request_id, r]));
+  const progress = additionalPaymentProgress(paymentRequests, payments);
+  const visibleRequests = includePaymentRequests
+    ? paymentRequests.filter((p) => p.status === 'pending' ||
+      (p.status === 'approved' && !p.deferred_at && !additionalRequestIsSettled(p, progress)))
+    : paymentRequests;
   const { providerDistanceTo } = require('./servicerequest_controllers'); // lazy: avoids a load-time cycle
   const [customerMap, distanceTo] = await Promise.all([
     Request.findUsersByIds(rows.map((r) => r.customer_id)),
@@ -1568,18 +1708,23 @@ const listJobQuotations = asyncHandler(async (req, res) => {
   ]);
 
   return res.json({
-    quotations: negotiating
+    quotations: visibleRequests
       .filter((p) => byId[p.request_id])
       .map((p) => {
         const row = byId[p.request_id];
+        const negotiating = p.status === 'pending' && p.negotiation_status === 'requested';
         return {
           paymentRequestId: p.payment_request_id,
           jobId: refOf(row),
           requestNumber: refOf(row),
           customerName: customerMap[row.customer_id]?.name || 'Customer',
-          createdAt: p.negotiated_at || p.created_at,
+          createdAt: negotiating ? p.negotiated_at || p.created_at : p.created_at,
           category: row.category ?? null,
           distanceKm: distanceTo(row),
+          status: p.status,
+          negotiationStatus: p.negotiation_status || null,
+          statusLabel: negotiating ? 'Price Negotiation' : p.status === 'approved' ? 'Awaiting Payment' : 'Waiting for Customer',
+          amount: Number(p.amount || 0),
           originalAmount: Number(p.original_amount ?? p.amount),
           proposedAmount: p.proposed_amount != null ? Number(p.proposed_amount) : null,
           customerMessage: p.negotiation_message || '',
@@ -2182,6 +2327,7 @@ module.exports = {
   getRepairDetails,
   answerScheduleProposal,
   answerPaymentRequest,
+  deferPaymentRequest,
   negotiatePaymentRequest,
   respondToQuotation,
   payForRequest,

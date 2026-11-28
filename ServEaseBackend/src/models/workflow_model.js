@@ -106,6 +106,18 @@ const listPaymentRequests = async (requestIds) => {
   return unwrap(await supabase.from('payment_requests').select('*').in('request_id', requestIds));
 };
 
+// Additional-payment cards for the mobile provider Jobs screen. Settlement (paid or
+// deferred) is resolved by the controller because it also needs the payments table.
+const listActivePaymentRequests = async (providerId) =>
+  unwrap(
+    await supabase
+      .from('payment_requests')
+      .select('*')
+      .eq('provider_id', providerId)
+      .in('status', ['pending', 'approved'])
+      .order('created_at', { ascending: false })
+  );
+
 // Price negotiations still waiting on this provider: the customer answered an additional
 // payment with a counter-offer (columns from migrations/007_payment_request_negotiation.sql).
 const listNegotiatingPaymentRequests = async (providerId) =>
@@ -314,6 +326,7 @@ module.exports = {
   findPaymentRequest,
   updatePaymentRequest,
   listPaymentRequests,
+  listActivePaymentRequests,
   listNegotiatingPaymentRequests,
   addProgressUpdate,
   listProgressUpdates,

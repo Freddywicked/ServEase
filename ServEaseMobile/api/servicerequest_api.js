@@ -51,7 +51,7 @@ import { API_BASE_URL as BASE_URL, getToken } from './client';
  *   GET  /provider/service-requests                ?filter=all|new|pending -> [incomingRequest]
  *   GET  /provider/service-requests/:id            -> incomingRequest (+ description, photoUrl, location)
  *   POST /provider/service-requests/:id/accept     -> { requestId, requestStatus }
- *   POST /provider/service-requests/:id/decline    { reason? }
+ *   POST /provider/service-requests/:id/decline    { reason }   (reason required)
  *   POST /provider/service-requests/:id/quotation  { laborCost, partsCost, remarks }
  *   POST /provider/service-requests/:id/schedule-proposals   { scheduledAt, reason }
  *   POST /provider/service-requests/:id/payment-requests     { amount, reason }
@@ -348,7 +348,8 @@ export const markNotificationsSeen = ({ audience } = {}) =>
  *   Every card also carries serviceLocationType 'home'|'shop' (the timeline already matches it).
  *   [SCHEDULE PROPOSAL - DISABLED] the 'schedule' card is no longer sent.
  */
-export const getTrackedRequests = () => request('/service-requests/tracking');
+export const getTrackedRequests = () =>
+    request('/service-requests/tracking', { query: { includeAwaitingPayment: true } });
 
 // Customer answers a provider's proposed new schedule. Backend updates the appointment (accept)
 // or keeps the old one (reject), notifies the provider and returns 409 if it's no longer open.
@@ -357,11 +358,30 @@ export const acceptScheduleProposal = (requestId, proposalId) =>
 export const rejectScheduleProposal = (requestId, proposalId) =>
     request(`/service-requests/${requestId}/schedule-proposals/${proposalId}/reject`, { method: 'POST' });
 
+// Rejections need a written reason from both sides (customer declines and provider declines).
+// The backend enforces it too (400 'State a reason for rejection'); this fails fast without a round trip.
+const requireReason = (reason) => {
+    const trimmed = String(reason ?? '').trim();
+    return trimmed ? trimmed : null;
+};
+const missingReason = () => Promise.reject(new Error('State a reason for rejection.'));
+
 // Customer answers a provider's request for additional payment. Backend notifies the provider.
 export const approveAdditionalPayment = (requestId, paymentRequestId) =>
     request(`/service-requests/${requestId}/payment-requests/${paymentRequestId}/approve`, { method: 'POST' });
-export const rejectAdditionalPayment = (requestId, paymentRequestId) =>
-    request(`/service-requests/${requestId}/payment-requests/${paymentRequestId}/reject`, { method: 'POST' });
+// Explicitly defer an approved extra to the final payment. Approval alone must not remove its card.
+export const deferAdditionalPayment = (requestId, paymentRequestId) =>
+    request(`/service-requests/${requestId}/payment-requests/${paymentRequestId}/pay-later`, { method: 'POST' });
+// Decline sends the trimmed reason collected by the Track "Reason for Rejection" modal (shown after
+// the "Warning!" confirmation), so the provider can see why the additional payment was declined.
+export const rejectAdditionalPayment = (requestId, paymentRequestId, { reason } = {}) => {
+    const trimmed = requireReason(reason);
+    if (!trimmed) return missingReason();
+    return request(`/service-requests/${requestId}/payment-requests/${paymentRequestId}/reject`, {
+        method: 'POST',
+        body: { reason: trimmed },
+    });
+};
 
 // Customer approves / declines the provider's quotation (used by RequestDetails.js, which is
 // where the quotation card on Track.js leads). Backend notifies the provider; 409 if no longer open.
@@ -422,15 +442,19 @@ export const getServiceRequest = (requestId) => request(`/service-requests/${req
 // 'cash' never returns a checkoutUrl: it is paid in person, so the backend records it
 // as paid immediately. Payment.js only sends cash for the 'final' stage — that settles
 // the remaining balance and moves the request to Track's Done tab.
-export const payForServiceRequest = (requestId, { amount, method, stage }) =>
-    request(`/service-requests/${requestId}/payment`, { method: 'POST', body: { amount, method, stage } });
+export const payForServiceRequest = (requestId, { amount, method, stage, paymentRequestId }) =>
+    request(`/service-requests/${requestId}/payment`, {
+        method: 'POST',
+        body: { amount, method, stage, ...(stage === 'additional' && paymentRequestId ? { paymentRequestId } : {}) },
+    });
 
 // Server-computed amounts per payment stage -> { total, paid, due: { initial, additional, final } }.
 // Payment.js reads the amount to charge from here instead of trusting the route param,
 // so the 20% initial fee and any already-paid additional payments are always deducted
-// ('final' is the remaining balance: total - everything already paid).
-export const getPaymentDue = (requestId) =>
-    request(`/service-requests/${requestId}/payment-due`);
+// ('final' is the remaining balance: total - everything already paid). For additional payments,
+// paymentRequestId scopes the due amount to the selected card instead of combining all extras.
+export const getPaymentDue = (requestId, { paymentRequestId } = {}) =>
+    request(`/service-requests/${requestId}/payment-due`, { query: { paymentRequestId } });
 
 // The latest payment attempt's status ('pending' | 'paid' | 'failed'). The backend
 // re-checks PayMongo before answering, so polling this is the payment confirmation.
@@ -508,8 +532,11 @@ export const acceptServiceRequest = (requestId) =>
 
 // For the ViewServiceRequest screen: provider can't take the job. Customer is notified so
 // they can pick another provider.
-export const declineServiceRequest = (requestId, { reason } = {}) =>
-    request(`/provider/service-requests/${requestId}/decline`, { method: 'POST', body: { reason } });
+export const declineServiceRequest = (requestId, { reason } = {}) => {
+    const trimmed = requireReason(reason);
+    if (!trimmed) return missingReason();
+    return request(`/provider/service-requests/${requestId}/decline`, { method: 'POST', body: { reason: trimmed } });
+};
 
 // For the ViewServiceRequest screen: laborCost / partsCost -> QUOTATION.labor_cost / parts_cost,
 // remarks -> QUOTATION.remarks. Backend sets 'quotation_sent' and notifies the customer.

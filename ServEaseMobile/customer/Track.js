@@ -10,6 +10,7 @@ import {
     // [SCHEDULE PROPOSAL - DISABLED] acceptScheduleProposal,
     // [SCHEDULE PROPOSAL - DISABLED] rejectScheduleProposal,
     approveAdditionalPayment,
+    deferAdditionalPayment,
     rejectAdditionalPayment,
     negotiateAdditionalPayment,
 } from '../api/servicerequest_api';
@@ -41,13 +42,16 @@ import { useTrackBadges, TAB_SOURCES, ACTION_CARD_TYPES } from '../utils/trackBa
  *            this screen reloads so what you see is always the server's current state.
  *
  *   Additional payment (provider asks for more money mid-job):
- *     Approve -> POST .../approve, then the "Additional Payment Approved" modal:
- *                  "Proceed to Payment" -> Payment screen (stage 'additional', the extra amount)
- *                  "Pay Later" / X      -> nothing more to send: an approved-but-unpaid additional
- *                                          amount is added by the backend to the final payment
- *                                          (request.finalAmount) that "Proceed to Payment" uses.
- *     Reject  -> "Reason for rejection" modal; Confirm -> POST .../reject with { reason }.
- *                  Nothing is sent until the customer confirms.
+ *     Approve -> POST .../approve; the card stays in Active > Quotations while the customer chooses:
+ *                  "Proceed to Payment" -> Payment screen; it disappears only after payment is paid.
+ *                  "Pay Later"         -> POST .../pay-later, then it disappears and the approved
+ *                                          amount remains in the final payment. Closing the modal
+ *                                          only closes it; it does not choose Pay Later.
+ *     Decline -> two-step modal (one Modal, two steps, so there is no flicker between them):
+ *                  1. "Warning!" step: "By declining the request, the additional parts and payment will not be
+ *                     added to your repair." Confirm continues; the X (or Android back) cancels everything.
+ *                  2. "Reason for Rejection" step: Send -> POST .../reject with { reason }.
+ *                  Nothing is sent until the customer taps Send on step 2.
  *   Quotation approve/decline happens in RequestDetails (respondToQuotation in the API file).
  *
  * Tabs (customer-facing) and which tracking groups feed them:
@@ -97,6 +101,9 @@ const TIMELINE_STEP_GAP = 11; // space between two circles (37px pitch)
 const TIMELINE_LINE_COLOR = '#D9D9D9'; // the thin line joining the circles
 const FOOTER_BUTTON_GAP = 15; // space between View and Proceed to Payment
 const POLL_INTERVAL_MS = 15000; // same live-refresh interval as the web Track screen
+
+// Steps of the additional-payment decline flow: Decline -> warning -> reason -> Send.
+const REJECT_STEP = { WARNING: 'warning', REASON: 'reason' };
 
 // Customer-facing tabs. `sources` are the properties of the tracking response whose cards belong
 // to the tab, so the backend contract (sent / approved / ongoing / declined / done) is unchanged.
@@ -284,6 +291,8 @@ const Track = ({ navigation, route }) => {
     const [approvedPayment, setApprovedPayment] = useState(null);
     const [rejectTarget, setRejectTarget] = useState(null);
     const [rejectReason, setRejectReason] = useState('');
+    // Which step of the decline flow is showing: 'warning' first, then 'reason' after Confirm.
+    const [rejectStep, setRejectStep] = useState(REJECT_STEP.WARNING);
     // Active tab sub-tab. null = not chosen yet, so the screen picks one from what is loaded.
     const [sectionChoice, setSectionChoice] = useState(null);
     // Price negotiation modal (additional payment). `negotiateTarget` is the card being negotiated.
@@ -420,31 +429,42 @@ const Track = ({ navigation, route }) => {
     // const handleRejectSchedule = (request) =>
     //     runAction(request.id, () => rejectScheduleProposal(request.requestId, request.proposalId), 'Could not reject the schedule');
 
+    const asApprovedPayment = (request) => ({
+        id: request.id,
+        requestId: request.requestId,
+        requestNumber: request.requestNumber,
+        providerName: request.providerName,
+        paymentRequestId: request.paymentRequestId,
+        amount: request.paymentAmount,
+    });
+
     const handleApprovePayment = (request) =>
         runAction(
             request.id,
             () => approveAdditionalPayment(request.requestId, request.paymentRequestId),
             'Could not approve the payment',
-            () =>
-                setApprovedPayment({
-                    requestId: request.requestId,
-                    requestNumber: request.requestNumber,
-                    providerName: request.providerName,
-                    paymentRequestId: request.paymentRequestId,
-                    amount: request.paymentAmount,
-                }),
+            () => setApprovedPayment(asApprovedPayment(request)),
         );
 
-    // Reject opens the "Reason for rejection" modal; nothing is sent until Confirm.
+    // Decline starts the two-step flow: the warning modal first, then (after Confirm) the
+    // "Reason for Rejection" modal. Nothing is sent until the customer taps Send on the second one.
     const handleRejectPayment = (request) => {
         setRejectReason('');
+        setRejectStep(REJECT_STEP.WARNING);
         setRejectTarget(request);
     };
 
+    // The X / Android back button on either step cancels the whole flow.
     const handleCloseRejectModal = () => {
         if (busyCardId) return;
         setRejectTarget(null);
         setRejectReason('');
+        setRejectStep(REJECT_STEP.WARNING);
+    };
+
+    // Warning modal "Confirm": the customer has seen the warning, so ask for the reason.
+    const handleConfirmDeclineWarning = () => {
+        setRejectStep(REJECT_STEP.REASON);
     };
 
     const handleConfirmRejectPayment = () => {
@@ -461,26 +481,39 @@ const Track = ({ navigation, route }) => {
             () => {
                 setRejectTarget(null);
                 setRejectReason('');
+                setRejectStep(REJECT_STEP.WARNING);
             },
         );
     };
 
-    // "Pay Later" (and the X): the approval already stands; the unpaid amount is added to the
-    // final payment by the backend, so there is nothing to send.
-    const handlePayAdditionalLater = () => {
-        setApprovedPayment(null);
+    // Closing the approval modal is not a payment choice. The approved card remains available so
+    // the customer can explicitly choose now or later, even after leaving and reopening Track.
+    const handleCloseApprovedPayment = () => {
+        if (!busyCardId) setApprovedPayment(null);
     };
 
-    const handlePayAdditionalNow = () => {
-        const payment = approvedPayment;
+    const handlePayAdditionalLater = (payment) => {
+        const target = payment || approvedPayment;
+        if (!target) return;
+        runAction(
+            target.id,
+            () => deferAdditionalPayment(target.requestId, target.paymentRequestId),
+            'Could not defer the payment',
+            () => setApprovedPayment(null),
+        );
+    };
+
+    const handlePayAdditionalNow = (payment) => {
+        const target = payment || approvedPayment;
+        if (!target || busyCardId) return;
         setApprovedPayment(null);
         navigation.navigate(ROUTES.PAYMENT, {
-            requestId: payment.requestId,
-            requestNumber: payment.requestNumber,
-            providerName: payment.providerName,
+            requestId: target.requestId,
+            requestNumber: target.requestNumber,
+            providerName: target.providerName,
             paymentStage: 'additional',
-            paymentRequestId: payment.paymentRequestId,
-            amount: payment.amount,
+            paymentRequestId: target.paymentRequestId,
+            amount: target.amount,
         });
     };
 
@@ -738,46 +771,70 @@ const Track = ({ navigation, route }) => {
     // is shown in On-going, so it is not repeated here.
     const renderPaymentCard = (request) => {
         const isBusy = busyCardId !== null;
+        const awaitingPayment = request.paymentStatus === 'approved';
         return (
             <View key={request.id} style={styles.requestCard}>
                 {renderCardHeader(request, true)}
 
                 <View style={styles.paymentNotice}>
                     <View style={styles.paymentNoticeTextWrap}>
-                        <Text style={styles.paymentNoticeTitle}>Additional payment needed</Text>
+                        <Text style={styles.paymentNoticeTitle}>
+                            {awaitingPayment ? 'Additional payment approved' : 'Additional payment needed'}
+                        </Text>
                         <Text style={styles.paymentNoticeReason}>{request.paymentReason}</Text>
                     </View>
                     <View style={styles.paymentNoticeAmountWrap}>
                         <Text style={styles.paymentNoticeAmount}>{formatPesoSpaced(request.paymentAmount)}</Text>
-                        <Text style={styles.paymentNoticeCaption}>due for approval</Text>
+                        <Text style={styles.paymentNoticeCaption}>{awaitingPayment ? 'awaiting payment' : 'due for approval'}</Text>
                     </View>
                 </View>
                 {renderNegotiationNote(request)}
 
                 <View style={styles.paymentActionRow}>
-                    <TouchableOpacity
-                        style={[styles.paymentActionButton, styles.paymentActionApprove, isBusy && styles.actionButtonDisabled]}
-                        disabled={isBusy}
-                        onPress={() => handleApprovePayment(request)}
-                    >
-                        <Text style={styles.paymentActionText}>Approve</Text>
-                    </TouchableOpacity>
-                    {request.canNegotiate !== false && !isNegotiationAnswered(request) && (
-                        <TouchableOpacity
-                            style={[styles.paymentActionButton, styles.paymentActionNegotiate, isBusy && styles.actionButtonDisabled]}
-                            disabled={isBusy}
-                            onPress={() => handleNegotiatePayment(request)}
-                        >
-                            <Text style={styles.paymentActionText}>Negotiate</Text>
-                        </TouchableOpacity>
+                    {awaitingPayment ? (
+                        <>
+                            <TouchableOpacity
+                                style={[styles.paymentActionButton, styles.paymentActionApprove, isBusy && styles.actionButtonDisabled]}
+                                disabled={isBusy}
+                                onPress={() => handlePayAdditionalNow(asApprovedPayment(request))}
+                            >
+                                <Text style={styles.paymentActionText}>Pay Now</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.paymentActionButton, styles.paymentActionNegotiate, isBusy && styles.actionButtonDisabled]}
+                                disabled={isBusy}
+                                onPress={() => handlePayAdditionalLater(asApprovedPayment(request))}
+                            >
+                                <Text style={styles.paymentActionText}>Pay Later</Text>
+                            </TouchableOpacity>
+                        </>
+                    ) : (
+                        <>
+                            <TouchableOpacity
+                                style={[styles.paymentActionButton, styles.paymentActionApprove, isBusy && styles.actionButtonDisabled]}
+                                disabled={isBusy}
+                                onPress={() => handleApprovePayment(request)}
+                            >
+                                <Text style={styles.paymentActionText}>Approve</Text>
+                            </TouchableOpacity>
+                            {request.canNegotiate !== false && !isNegotiationAnswered(request) && (
+                                <TouchableOpacity
+                                    style={[styles.paymentActionButton, styles.paymentActionNegotiate, isBusy && styles.actionButtonDisabled]}
+                                    disabled={isBusy}
+                                    onPress={() => handleNegotiatePayment(request)}
+                                >
+                                    <Text style={styles.paymentActionText}>Negotiate</Text>
+                                </TouchableOpacity>
+                            )}
+                            <TouchableOpacity
+                                style={[styles.paymentActionButton, styles.paymentActionDecline, isBusy && styles.actionButtonDisabled]}
+                                disabled={isBusy}
+                                onPress={() => handleRejectPayment(request)}
+                            >
+                                <Text style={styles.paymentActionText}>Decline</Text>
+                            </TouchableOpacity>
+                        </>
                     )}
-                    <TouchableOpacity
-                        style={[styles.paymentActionButton, styles.paymentActionDecline, isBusy && styles.actionButtonDisabled]}
-                        disabled={isBusy}
-                        onPress={() => handleRejectPayment(request)}
-                    >
-                        <Text style={styles.paymentActionText}>Decline</Text>
-                    </TouchableOpacity>
                 </View>
 
                 <View style={styles.cardDivider} />
@@ -997,44 +1054,73 @@ const Track = ({ navigation, route }) => {
             </ScrollView>
 
             {/* Additional payment approved: pay now (payment gateway) or pay later (added to the final payment). */}
-            <Modal visible={!!approvedPayment} transparent animationType="fade" onRequestClose={handlePayAdditionalLater}>
+            <Modal visible={!!approvedPayment} transparent animationType="fade" onRequestClose={handleCloseApprovedPayment}>
                 <View style={styles.modalOverlay}>
                     <View style={[styles.modalCard, styles.modalCardApproved]}>
-                        <TouchableOpacity style={styles.modalCloseButton} onPress={handlePayAdditionalLater}>
+                        <TouchableOpacity style={styles.modalCloseButton} onPress={handleCloseApprovedPayment}>
                             <Image source={require('../assets/icon_close.png')} style={styles.modalCloseIcon} />
                         </TouchableOpacity>
                         <Text style={styles.modalTitleApproved}>Additional Payment Approved</Text>
-                        <GradientButton label="Proceed to Payment" onPress={handlePayAdditionalNow} style={styles.gradientButtonSpaced} />
-                        <GradientButton label="Pay Later" onPress={handlePayAdditionalLater} />
+                        <GradientButton
+                            label="Proceed to Payment"
+                            onPress={() => handlePayAdditionalNow(approvedPayment)}
+                            disabled={busyCardId !== null}
+                            style={styles.gradientButtonSpaced}
+                        />
+                        <GradientButton
+                            label="Pay Later"
+                            onPress={() => handlePayAdditionalLater(approvedPayment)}
+                            disabled={busyCardId !== null}
+                            loading={busyCardId !== null}
+                        />
                     </View>
                 </View>
             </Modal>
 
-            {/* Additional payment rejection (Figma "Negotiation Rejection Modal"): a reason is collected before anything is sent. */}
+            {/* Additional payment decline (Figma "Negotiation Rejection Modal"). One Modal with two steps:
+                1) Warning!  2) Reason for Rejection. Using a single Modal (instead of closing one and opening
+                another) avoids the iOS issue where a Modal opened in the same tick as another closes never appears. */}
             <Modal visible={!!rejectTarget} transparent animationType="fade" onRequestClose={handleCloseRejectModal}>
                 <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
                     <View style={styles.modalCard}>
                         <TouchableOpacity style={styles.modalCloseButton} onPress={handleCloseRejectModal}>
                             <Image source={require('../assets/icon_close.png')} style={styles.modalCloseIcon} />
                         </TouchableOpacity>
-                        <Text style={styles.formModalTitle}>Reason for Rejection</Text>
-                        <Text style={styles.formModalLabel}>State a proper reason for rejection.</Text>
-                        <TextInput
-                            style={styles.formModalTextArea}
-                            value={rejectReason}
-                            onChangeText={setRejectReason}
-                            placeholder="Enter your reason here."
-                            placeholderTextColor="#A8A3A3"
-                            multiline
-                            textAlignVertical="top"
-                        />
-                        <GradientButton
-                            label="Send"
-                            onPress={handleConfirmRejectPayment}
-                            disabled={!rejectReason.trim() || busyCardId !== null}
-                            loading={busyCardId !== null}
-                            style={styles.gradientButtonWide}
-                        />
+                        {rejectStep === REJECT_STEP.WARNING ? (
+                            <View style={styles.warningBody}>
+                                <Text style={styles.warningTitle}>Warning!</Text>
+                                <Text style={styles.warningMessage}>
+                                    By declining the request, the additional parts and payment will not be added to your repair.
+                                </Text>
+                                <GradientButton
+                                    label="Confirm"
+                                    onPress={handleConfirmDeclineWarning}
+                                    style={styles.gradientButtonWarning}
+                                />
+                            </View>
+                        ) : (
+                            <>
+                                <Text style={styles.formModalTitle}>Reason for Rejection</Text>
+                                <Text style={styles.formModalLabel}>State a proper reason for rejection.</Text>
+                                <TextInput
+                                    style={styles.formModalTextArea}
+                                    value={rejectReason}
+                                    onChangeText={setRejectReason}
+                                    maxLength={500}
+                                    placeholder="Enter your reason here."
+                                    placeholderTextColor="#A8A3A3"
+                                    multiline
+                                    textAlignVertical="top"
+                                />
+                                <GradientButton
+                                    label="Send"
+                                    onPress={handleConfirmRejectPayment}
+                                    disabled={!rejectReason.trim() || busyCardId !== null}
+                                    loading={busyCardId !== null}
+                                    style={styles.gradientButtonWide}
+                                />
+                            </>
+                        )}
                     </View>
                 </KeyboardAvoidingView>
             </Modal>
@@ -1797,6 +1883,32 @@ const styles = StyleSheet.create({
     },
     gradientButtonSpaced: {
         marginBottom: 23,
+    },
+    // Decline "Warning!" step (Figma: 15px bold title, 11px centred message, 231x37 gradient Confirm button).
+    warningBody: {
+        alignItems: 'center',
+        paddingHorizontal: 10,
+        paddingBottom: 12,
+    },
+    warningTitle: {
+        fontSize: 15,
+        fontWeight: '700',
+        lineHeight: 26,
+        color: '#414141',
+        textAlign: 'center',
+        marginBottom: 6,
+    },
+    warningMessage: {
+        fontSize: 11,
+        lineHeight: 19,
+        color: '#5B5959',
+        textAlign: 'center',
+        marginBottom: 28,
+    },
+    gradientButtonWarning: {
+        width: '100%',
+        maxWidth: 231,
+        height: 37,
     },
     gradientButtonText: {
         fontSize: 12,
